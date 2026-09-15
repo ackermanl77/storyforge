@@ -1,0 +1,152 @@
+"""
+Modelo de datos del proyecto de historia: plot, personajes, setting y capitulos.
+Incluye conteo de palabras y validacion de limites.
+"""
+from __future__ import annotations
+
+import json
+import re
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
+from typing import List, Optional
+
+# ---- Limites del proyecto (definidos por especificacion de la app) ----
+MAX_PLOT_WORDS = 50_000
+MAX_CHARACTERS_WORDS = 10_000
+MAX_SETTING_WORDS = 10_000
+MAX_CHAPTERS = 10
+MAX_WORDS_PER_CHAPTER = 10_000
+
+_WORD_RE = re.compile(r"\b[\w'\-]+\b", re.UNICODE)
+
+
+def count_words(text: str) -> int:
+    """Cuenta palabras de forma consistente en toda la app."""
+    if not text:
+        return 0
+    return len(_WORD_RE.findall(text))
+
+
+@dataclass
+class Chapter:
+    title: str = ""
+    target_words: int = 2000
+    content: str = ""
+    # breve resumen (generado o manual) usado como contexto para el siguiente capitulo
+    summary: str = ""
+    # esquema/beat sheet de este capitulo (generado o manual), usado para guiar
+    # la generacion de prosa antes de escribirla (workflow "outline-first")
+    outline: str = ""
+
+    def word_count(self) -> int:
+        return count_words(self.content)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @staticmethod
+    def from_dict(d: dict) -> "Chapter":
+        return Chapter(
+            title=d.get("title", ""),
+            target_words=int(d.get("target_words", 2000)),
+            content=d.get("content", ""),
+            summary=d.get("summary", ""),
+            outline=d.get("outline", ""),
+        )
+
+
+@dataclass
+class Project:
+    name: str = "Historia sin titulo"
+    plot: str = ""
+    characters: str = ""
+    setting: str = ""
+    chapters: List[Chapter] = field(default_factory=list)
+    model_path: Optional[str] = None
+
+    # ---------------- validaciones ----------------
+    def plot_words(self) -> int:
+        return count_words(self.plot)
+
+    def characters_words(self) -> int:
+        return count_words(self.characters)
+
+    def setting_words(self) -> int:
+        return count_words(self.setting)
+
+    def validate_inputs(self) -> List[str]:
+        """Devuelve una lista de mensajes de error; vacia si todo es valido."""
+        errors = []
+        if self.plot_words() > MAX_PLOT_WORDS:
+            errors.append(
+                f"El plot tiene {self.plot_words():,} palabras (maximo {MAX_PLOT_WORDS:,})."
+            )
+        if self.characters_words() > MAX_CHARACTERS_WORDS:
+            errors.append(
+                f"Los personajes tienen {self.characters_words():,} palabras "
+                f"(maximo {MAX_CHARACTERS_WORDS:,})."
+            )
+        if self.setting_words() > MAX_SETTING_WORDS:
+            errors.append(
+                f"El setting tiene {self.setting_words():,} palabras (maximo {MAX_SETTING_WORDS:,})."
+            )
+        if len(self.chapters) > MAX_CHAPTERS:
+            errors.append(
+                f"Hay {len(self.chapters)} capitulos (maximo {MAX_CHAPTERS})."
+            )
+        for i, ch in enumerate(self.chapters, start=1):
+            if ch.target_words > MAX_WORDS_PER_CHAPTER:
+                errors.append(
+                    f"Capitulo {i}: objetivo de {ch.target_words:,} palabras "
+                    f"excede el maximo ({MAX_WORDS_PER_CHAPTER:,})."
+                )
+            if ch.word_count() > MAX_WORDS_PER_CHAPTER:
+                errors.append(
+                    f"Capitulo {i}: el contenido generado tiene {ch.word_count():,} "
+                    f"palabras y excede el maximo ({MAX_WORDS_PER_CHAPTER:,})."
+                )
+        return errors
+
+    def can_add_chapter(self) -> bool:
+        return len(self.chapters) < MAX_CHAPTERS
+
+    def add_chapter(self, title: str = "", target_words: int = 2000, outline: str = "") -> Chapter:
+        if not self.can_add_chapter():
+            raise ValueError(f"No se pueden tener mas de {MAX_CHAPTERS} capitulos.")
+        target_words = min(int(target_words), MAX_WORDS_PER_CHAPTER)
+        chapter = Chapter(
+            title=title or f"Capitulo {len(self.chapters) + 1}",
+            target_words=target_words,
+            outline=outline,
+        )
+        self.chapters.append(chapter)
+        return chapter
+
+    # ---------------- persistencia ----------------
+    def to_dict(self) -> dict:
+        return {
+            "name": self.name,
+            "plot": self.plot,
+            "characters": self.characters,
+            "setting": self.setting,
+            "chapters": [c.to_dict() for c in self.chapters],
+            "model_path": self.model_path,
+        }
+
+    def save(self, path: str | Path) -> None:
+        path = Path(path)
+        path.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+
+    @staticmethod
+    def load(path: str | Path) -> "Project":
+        path = Path(path)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        proj = Project(
+            name=data.get("name", "Historia sin titulo"),
+            plot=data.get("plot", ""),
+            characters=data.get("characters", ""),
+            setting=data.get("setting", ""),
+            model_path=data.get("model_path"),
+        )
+        proj.chapters = [Chapter.from_dict(c) for c in data.get("chapters", [])]
+        return proj

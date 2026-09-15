@@ -1,0 +1,27 @@
+# Modelo(s) .gguf: binarios grandes (varios GB) que el usuario descarga por
+# separado; ver models/README.txt para donde conseguirlos.
+models/*.gguf
+
+# Datos de NLTK descargados en tiempo de ejecucion (stopwords/wordnet).
+nltk_data/
+
+# Copia de autoguardado (recuperacion ante cierres/crashes durante una
+# generacion larga); no es el proyecto guardado explicitamente por el usuario.
+autosave/
+
+# Empaquetado con PyInstaller.
+build/
+dist/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Entornos virtuales
+.venv/
+venv/
+env/
