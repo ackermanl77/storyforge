@@ -156,6 +156,7 @@ storyforge/
   requirements.txt    Dependencias de la app
   models/             Coloca aqui tu modelo .gguf
   tests/              Pruebas automatizadas (unittest, sin dependencias extra)
+  docs/               Documentacion tecnica (arquitectura, workflows, historial de fixes)
 ```
 
 ## Pruebas
@@ -167,3 +168,10 @@ python -m unittest discover -s tests -v
 Las pruebas de `project.py`, `repetition.py` (rutas sin datos de NLTK) y la
 logica del motor de generacion (con un modelo simulado) no requieren
 `llama-cpp-python` ni un modelo real instalados.
+
+## Documentacion tecnica
+
+Este README cubre el uso dia a dia. Para arquitectura, entry points,
+comportamiento de cada feature y el historial de bugs corregidos, ver
+[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) y
+[docs/workflows/README.md](docs/workflows/README.md).
