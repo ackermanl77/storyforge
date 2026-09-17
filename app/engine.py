@@ -27,13 +27,19 @@ SAFETY_MARGIN_TOKENS = 64  # colchon para no rozar el limite exacto del modelo
 OUTLINE_WORDS_PER_CHAPTER = 100  # presupuesto de salida por capitulo al generar el esquema
 
 # Niveles de presupuesto de contexto (en palabras) para plot/personajes/
-# setting/resumen previo/cola del capitulo en curso. Si el prompt no cabe en
-# la ventana de contexto del modelo con el primer nivel, se reintenta con el
-# siguiente (mas chico) antes de rendirse con un error claro.
+# setting/resumen previo/esquema del capitulo/cola del capitulo en curso. Si
+# el prompt no cabe en la ventana de contexto del modelo con el primer nivel,
+# se reintenta con el siguiente (mas chico) antes de rendirse con un error
+# claro. max_outline_words cubre chapter.outline: a diferencia de plot/
+# personajes/setting, ese campo no tiene un limite propio en project.py (es
+# texto libre editable en la pestana Esquema), asi que sin este recorte un
+# esquema de capitulo inusualmente largo podia hacer que ni el nivel mas
+# chico de presupuesto cupiera, con un error que sugeria enganosamente que
+# "ya se redujo al minimo" cuando el esquema nunca se toco.
 CONTEXT_BUDGET_LEVELS = [
-    dict(max_plot_words=1200, max_characters_words=600, max_setting_words=600, max_previous_words=500, tail_words=400),
-    dict(max_plot_words=700, max_characters_words=400, max_setting_words=400, max_previous_words=300, tail_words=250),
-    dict(max_plot_words=350, max_characters_words=200, max_setting_words=200, max_previous_words=150, tail_words=150),
+    dict(max_plot_words=1200, max_characters_words=600, max_setting_words=600, max_previous_words=500, max_outline_words=400, tail_words=400),
+    dict(max_plot_words=700, max_characters_words=400, max_setting_words=400, max_previous_words=300, max_outline_words=250, tail_words=250),
+    dict(max_plot_words=350, max_characters_words=200, max_setting_words=200, max_previous_words=150, max_outline_words=120, tail_words=150),
 ]
 
 
@@ -83,6 +89,12 @@ class LocalStoryEngine:
 
         if not os.path.isfile(model_path):
             raise FileNotFoundError(f"No se encontro el modelo en: {model_path}")
+
+        # Soltamos el modelo anterior (si habia uno) antes de reservar memoria
+        # para el nuevo: construir el Llama nuevo antes de liberar el viejo
+        # tendria ambos modelos completos en RAM/VRAM a la vez, lo cual para
+        # modelos de varios GB puede agotar la memoria disponible.
+        self.unload()
 
         self._llm = Llama(
             model_path=model_path,
@@ -247,6 +259,7 @@ class LocalStoryEngine:
                     max_characters_words=budget["max_characters_words"],
                     max_setting_words=budget["max_setting_words"],
                     max_previous_words=budget["max_previous_words"],
+                    max_outline_words=budget["max_outline_words"],
                 )
                 if _section == 0:
                     return f"{system_prompt}\n\nBegin the chapter now:\n"

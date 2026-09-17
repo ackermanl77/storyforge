@@ -16,6 +16,7 @@ MAX_CHARACTERS_WORDS = 10_000
 MAX_SETTING_WORDS = 10_000
 MAX_CHAPTERS = 10
 MAX_WORDS_PER_CHAPTER = 10_000
+MAX_OUTLINE_WORDS_PER_CHAPTER = 800
 
 _WORD_RE = re.compile(r"\b[\w'\-]+\b", re.UNICODE)
 
@@ -40,6 +41,9 @@ class Chapter:
 
     def word_count(self) -> int:
         return count_words(self.content)
+
+    def outline_words(self) -> int:
+        return count_words(self.outline)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -104,6 +108,11 @@ class Project:
                 errors.append(
                     f"Capitulo {i}: el contenido generado tiene {ch.word_count():,} "
                     f"palabras y excede el maximo ({MAX_WORDS_PER_CHAPTER:,})."
+                )
+            if ch.outline_words() > MAX_OUTLINE_WORDS_PER_CHAPTER:
+                errors.append(
+                    f"Capitulo {i}: el esquema tiene {ch.outline_words():,} palabras "
+                    f"(maximo {MAX_OUTLINE_WORDS_PER_CHAPTER:,})."
                 )
         return errors
 

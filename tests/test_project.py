@@ -7,6 +7,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.project import (
     MAX_CHAPTERS,
+    MAX_OUTLINE_WORDS_PER_CHAPTER,
     MAX_WORDS_PER_CHAPTER,
     Chapter,
     Project,
@@ -69,6 +70,19 @@ class TestProjectValidation(unittest.TestCase):
         chapter.content = "word " * (MAX_WORDS_PER_CHAPTER + 1)
         errors = p.validate_inputs()
         self.assertTrue(any("Capitulo 1" in e and "excede" in e for e in errors))
+
+    def test_chapter_outline_over_limit_flagged(self):
+        p = Project()
+        chapter = p.add_chapter("Cap", target_words=100)
+        chapter.outline = "word " * (MAX_OUTLINE_WORDS_PER_CHAPTER + 1)
+        errors = p.validate_inputs()
+        self.assertTrue(any("Capitulo 1" in e and "esquema" in e for e in errors))
+
+    def test_chapter_outline_within_limit_not_flagged(self):
+        p = Project(plot="a story " * 10, characters="a hero", setting="a castle")
+        chapter = p.add_chapter("Cap", target_words=100)
+        chapter.outline = "word " * MAX_OUTLINE_WORDS_PER_CHAPTER
+        self.assertEqual(p.validate_inputs(), [])
 
 
 class TestPersistence(unittest.TestCase):
