@@ -96,6 +96,7 @@ def build_chapter_system_prompt(
     max_characters_words: int = 600,
     max_setting_words: int = 600,
     max_previous_words: int = 500,
+    max_outline_words: int = 400,
 ) -> str:
     """
     Construye el prompt de sistema para un capitulo. Los parametros max_*
@@ -109,10 +110,15 @@ def build_chapter_system_prompt(
     overview = build_story_outline_overview(project)
     outline_block = ""
     if chapter.outline.strip():
+        # chapter.outline no tiene un limite propio en project.py (es texto
+        # libre editable en la pestana Esquema): a diferencia de plot/
+        # personajes/setting, sin este recorte un esquema inusualmente largo
+        # quedaria fuera del mecanismo de reduccion de contexto por completo.
+        outline_text = _trim_words(chapter.outline.strip(), max_outline_words)
         outline_block = (
             "THIS CHAPTER'S OUTLINE (follow these beats in order; you may add "
             "sensory detail, dialogue and internal thoughts, but do not skip or "
-            f"reorder the events described):\n{chapter.outline.strip()}\n\n"
+            f"reorder the events described):\n{outline_text}\n\n"
         )
     return (
         "You are a skilled fiction writer producing one chapter of a longer "

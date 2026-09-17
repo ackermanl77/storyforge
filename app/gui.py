@@ -16,6 +16,7 @@ from .export import export_docx, export_txt
 from .project import (
     MAX_CHAPTERS,
     MAX_CHARACTERS_WORDS,
+    MAX_OUTLINE_WORDS_PER_CHAPTER,
     MAX_PLOT_WORDS,
     MAX_SETTING_WORDS,
     MAX_WORDS_PER_CHAPTER,
@@ -277,14 +278,29 @@ class OutlinePanel(ctk.CTkFrame):
         # El titulo se edita solo en la pestana 'Capitulos' (ChapterPanel);
         # aqui solo se muestra, para no tener dos campos editables separados
         # escribiendo al mismo chapter.title y desincronizandose entre si.
+        header = ctk.CTkFrame(self, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
+        header.grid_columnconfigure(0, weight=1)
         title_text = chapter.title or f"Capitulo {index + 1}"
-        ctk.CTkLabel(self, text=f"Capitulo {index + 1}: {title_text}", font=ctk.CTkFont(weight="bold")).grid(
-            row=0, column=0, padx=8, pady=(8, 4), sticky="w"
+        ctk.CTkLabel(header, text=f"Capitulo {index + 1}: {title_text}", font=ctk.CTkFont(weight="bold")).grid(
+            row=0, column=0, sticky="w"
         )
+        self.counter_label = ctk.CTkLabel(header, text="")
+        self.counter_label.grid(row=0, column=1, sticky="e")
 
         self.outline_box = ctk.CTkTextbox(self, height=90, wrap="word")
         self.outline_box.insert("1.0", chapter.outline)
         self.outline_box.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
+        self.outline_box.bind("<KeyRelease>", self._on_change)
+        self._on_change()
+
+    def _on_change(self, _event=None) -> None:
+        words = count_words(self.outline_box.get("1.0", "end-1c"))
+        over = words > MAX_OUTLINE_WORDS_PER_CHAPTER
+        color = "#e05555" if over else "gray"
+        self.counter_label.configure(
+            text=f"{words:,} / {MAX_OUTLINE_WORDS_PER_CHAPTER:,} palabras", text_color=color
+        )
 
     def sync_to_model(self) -> None:
         self.chapter.outline = self.outline_box.get("1.0", "end-1c")
