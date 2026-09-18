@@ -15,6 +15,11 @@ externa una vez que tienes el modelo descargado.
   cada capitulo en la pestana Capitulos siguiendo ese esquema. Esto mejora
   mucho la coherencia de una historia larga frente a improvisar capitulo por
   capitulo.
+- **Tipo de escritura**: en la pestana Esquema puedes elegir un enfasis para
+  toda la historia (Narrativa, Descriptiva, Creativa, Dialogo, Poetica,
+  Accion rapida, o ninguno) que se le pide al modelo respetar tanto al
+  generar el esquema como la prosa de cada capitulo, encima de las
+  convenciones de formato de siempre.
 - Limites de palabras validados: plot ≤ 50,000, personajes ≤ 10,000,
   setting ≤ 10,000, hasta 10 capitulos de hasta 10,000 palabras cada uno.
 - Generacion de capitulos por secciones (para poder llegar a objetivos
@@ -28,6 +33,15 @@ externa una vez que tienes el modelo descargado.
   texto plano (.txt).
 
 ## Historial de cambios
+
+**Nueva funcionalidad — tipo de escritura:**
+- En la pestaña **"Esquema"**, un selector de "Tipo de escritura" (Narrativa,
+  Descriptiva, Creativa, Diálogo, Poética, Acción rápida, o ninguno) aplica a
+  toda la historia. Se agrega como una línea de énfasis adicional al prompt
+  del esquema y al de cada capítulo, sin reemplazar las reglas de formato
+  existentes (cursivas para pensamientos, comillas para diálogo, etc.). Se
+  guarda con el proyecto; un proyecto guardado antes de esta funcionalidad
+  simplemente carga sin ningún énfasis seleccionado.
 
 **Nueva funcionalidad — flujo "outline-first" (esquema antes de la prosa):**
 - Pestaña **"Esquema"**: genera un beat sheet completo de todos los

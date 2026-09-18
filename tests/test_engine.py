@@ -11,7 +11,12 @@ from app.engine import (
     ModelNotLoadedError,
 )
 from app.project import Project
-from app.prompts import _trim_words_tail, build_chapter_system_prompt
+from app.prompts import (
+    _trim_words_tail,
+    build_chapter_system_prompt,
+    build_outline_prompt,
+    build_writing_style_instruction,
+)
 
 
 class FakeLlama:
@@ -164,6 +169,35 @@ class TestChapterOutlineBudget(unittest.TestCase):
         prompt = build_chapter_system_prompt(project, 0, max_outline_words=400)
         self.assertIn("Hero refuses the call.", prompt)
         self.assertNotIn("[...]", prompt)
+
+
+class TestWritingStyleEmphasis(unittest.TestCase):
+    def test_no_style_selected_adds_no_emphasis(self):
+        project = make_project()
+        project.writing_style = ""
+        self.assertEqual(build_writing_style_instruction(project), "")
+        self.assertNotIn("WRITING STYLE EMPHASIS", build_chapter_system_prompt(project, 0))
+
+    def test_unknown_style_value_is_ignored_not_an_error(self):
+        # p.ej. un proyecto viejo con un valor que ya no existe en
+        # project.WRITING_STYLES -- no debe romper la generacion.
+        project = make_project()
+        project.writing_style = "un valor que ya no existe"
+        self.assertEqual(build_writing_style_instruction(project), "")
+
+    def test_known_style_adds_its_emphasis_to_the_chapter_prompt(self):
+        project = make_project()
+        project.writing_style = "Dialogo"
+        prompt = build_chapter_system_prompt(project, 0)
+        self.assertIn("WRITING STYLE EMPHASIS", prompt)
+        self.assertIn("dialogue-driven", prompt)
+
+    def test_known_style_adds_its_emphasis_to_the_outline_prompt(self):
+        project = make_project()
+        project.writing_style = "Accion rapida"
+        prompt = build_outline_prompt(project, num_chapters=3)
+        self.assertIn("WRITING STYLE EMPHASIS", prompt)
+        self.assertIn("fast pacing", prompt)
 
 
 class TestModelReload(unittest.TestCase):

@@ -18,6 +18,18 @@ MAX_CHAPTERS = 10
 MAX_WORDS_PER_CHAPTER = 10_000
 MAX_OUTLINE_WORDS_PER_CHAPTER = 800
 
+# Tipos de escritura seleccionables (aplican a toda la historia, no por
+# capitulo). "" (sin seleccionar) significa usar solo el STYLE_GUIDE por
+# defecto de prompts.py, sin enfasis adicional.
+WRITING_STYLES = [
+    "Narrativa",
+    "Descriptiva",
+    "Creativa",
+    "Dialogo",
+    "Poetica",
+    "Accion rapida",
+]
+
 _WORD_RE = re.compile(r"\b[\w'\-]+\b", re.UNICODE)
 
 
@@ -67,6 +79,8 @@ class Project:
     setting: str = ""
     chapters: List[Chapter] = field(default_factory=list)
     model_path: Optional[str] = None
+    # Uno de WRITING_STYLES, o "" para no aplicar ningun enfasis adicional.
+    writing_style: str = ""
 
     # ---------------- validaciones ----------------
     def plot_words(self) -> int:
@@ -140,6 +154,7 @@ class Project:
             "setting": self.setting,
             "chapters": [c.to_dict() for c in self.chapters],
             "model_path": self.model_path,
+            "writing_style": self.writing_style,
         }
 
     def save(self, path: str | Path) -> None:
@@ -156,6 +171,7 @@ class Project:
             characters=data.get("characters", ""),
             setting=data.get("setting", ""),
             model_path=data.get("model_path"),
+            writing_style=data.get("writing_style", ""),
         )
         proj.chapters = [Chapter.from_dict(c) for c in data.get("chapters", [])]
         return proj
