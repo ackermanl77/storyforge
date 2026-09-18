@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from typing import List, Tuple
 
-from .project import Project, Chapter, count_words
+from .project import Project
 
 # Instruccion en ingles (la salida siempre se pide en ingles, ver STYLE_GUIDE
 # abajo) para cada valor posible de project.writing_style (project.WRITING_
