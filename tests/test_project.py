@@ -9,7 +9,6 @@ from app.project import (
     MAX_CHAPTERS,
     MAX_OUTLINE_WORDS_PER_CHAPTER,
     MAX_WORDS_PER_CHAPTER,
-    Chapter,
     Project,
     count_words,
 )

@@ -229,13 +229,20 @@ class ChapterPanel(ctk.CTkFrame):
                         # del texto en su lugar (ver prompts.build_previous_context).
                         pass
             except ModelNotLoadedError as exc:
-                self.app.after(0, lambda: messagebox.showerror(APP_TITLE, str(exc)))
+                # No usar `exc` directamente dentro del lambda: `except ... as
+                # exc` se borra automaticamente al salir de este bloque
+                # (limpieza estandar de Python), y self.app.after() difiere
+                # la llamada hasta despues de eso -- referenciar `exc` ahi
+                # lanza NameError en vez de mostrar el error real. Se captura
+                # el mensaje en una variable local normal en su lugar.
+                message = str(exc)
+                self.app.after(0, lambda: messagebox.showerror(APP_TITLE, message))
             except ContextOverflowError as exc:
-                self.app.after(0, lambda: messagebox.showerror(
-                    APP_TITLE, f"El contexto es demasiado grande para este modelo:\n\n{exc}"
-                ))
+                message = f"El contexto es demasiado grande para este modelo:\n\n{exc}"
+                self.app.after(0, lambda: messagebox.showerror(APP_TITLE, message))
             except Exception as exc:  # noqa: BLE001
-                self.app.after(0, lambda: messagebox.showerror(APP_TITLE, f"Error generando capitulo: {exc}"))
+                message = f"Error generando capitulo: {exc}"
+                self.app.after(0, lambda: messagebox.showerror(APP_TITLE, message))
             finally:
                 self._cancel_flag = None
                 self.app.after(0, lambda: self._set_busy(False, "Listo."))
@@ -431,7 +438,11 @@ class StoryForgeApp(ctk.CTk):
                     text=f"Modelo cargado: {os.path.basename(path)}", text_color="#9fd39f"
                 ))
             except Exception as exc:  # noqa: BLE001
-                self.after(0, lambda: self.model_status.configure(text=f"Error: {exc}", text_color="#e05555"))
+                # Ver el comentario equivalente en ChapterPanel._on_generate:
+                # `exc` se borra al salir del bloque except, y self.after()
+                # difiere la llamada hasta despues de eso.
+                message = f"Error: {exc}"
+                self.after(0, lambda: self.model_status.configure(text=message, text_color="#e05555"))
             finally:
                 self.after(0, lambda: self._set_engine_busy(False))
 
@@ -551,13 +562,17 @@ class StoryForgeApp(ctk.CTk):
                     )
                 self.after(0, apply)
             except ModelNotLoadedError as exc:
-                self.after(0, lambda: messagebox.showerror(APP_TITLE, str(exc)))
+                # Ver el comentario equivalente en ChapterPanel._on_generate:
+                # `exc` se borra al salir del bloque except, y self.after()
+                # difiere la llamada hasta despues de eso.
+                message = str(exc)
+                self.after(0, lambda: messagebox.showerror(APP_TITLE, message))
             except ContextOverflowError as exc:
-                self.after(0, lambda: messagebox.showerror(
-                    APP_TITLE, f"El contexto es demasiado grande para este modelo:\n\n{exc}"
-                ))
+                message = f"El contexto es demasiado grande para este modelo:\n\n{exc}"
+                self.after(0, lambda: messagebox.showerror(APP_TITLE, message))
             except Exception as exc:  # noqa: BLE001
-                self.after(0, lambda: messagebox.showerror(APP_TITLE, f"Error generando el esquema: {exc}"))
+                message = f"Error generando el esquema: {exc}"
+                self.after(0, lambda: messagebox.showerror(APP_TITLE, message))
             finally:
                 self.after(0, self._autosave)
                 self.after(0, lambda: self._set_engine_busy(False))

@@ -34,6 +34,19 @@ externa una vez que tienes el modelo descargado.
 
 ## Historial de cambios
 
+**Corrección importante — los errores dejaban de mostrarse silenciosamente:**
+- Si algo fallaba al generar un capítulo, generar el esquema, o cargar un
+  modelo (un `.gguf` corrupto, el contexto lleno, el modelo no cargado,
+  etc.), la app debía mostrar un cuadro de error explicando qué pasó — pero
+  por un detalle de cómo Python maneja las variables de `except ... as exc`,
+  ese mensaje nunca llegaba a aparecer: fallaba silenciosamente con un error
+  interno no relacionado, sin avisos, sin diálogo. En el `.exe` empaquetado
+  esto era invisible por completo (no hay consola). Encontrado corriendo
+  `pyflakes` sobre el código, no probando la app manualmente. Corregido en
+  los tres lugares donde pasaba; se agregaron pruebas automatizadas
+  (`tests/test_gui.py`) que reproducen la falla exacta y confirman que ya no
+  ocurre.
+
 **Nueva funcionalidad — tipo de escritura:**
 - En la pestaña **"Esquema"**, un selector de "Tipo de escritura" (Narrativa,
   Descriptiva, Creativa, Diálogo, Poética, Acción rápida, o ninguno) aplica a
