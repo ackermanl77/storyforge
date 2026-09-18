@@ -20,6 +20,7 @@ from .project import (
     MAX_PLOT_WORDS,
     MAX_SETTING_WORDS,
     MAX_WORDS_PER_CHAPTER,
+    WRITING_STYLES,
     Chapter,
     Project,
     count_words,
@@ -32,6 +33,8 @@ ctk.set_default_color_theme("blue")
 APP_TITLE = "StoryForge Local"
 APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODELS_DIR = os.path.join(APP_ROOT, "models")
+WRITING_STYLE_DEFAULT_LABEL = "(Por defecto)"
+WRITING_STYLE_OPTIONS = [WRITING_STYLE_DEFAULT_LABEL] + WRITING_STYLES
 # Copia de autoguardado, separada del guardado explicito del usuario: un
 # capitulo puede tardar 15-40 minutos en generarse, asi que sin esto un
 # cierre inesperado (crash, corte de luz) a mitad de una generacion larga
@@ -481,6 +484,16 @@ class StoryForgeApp(ctk.CTk):
         self.outline_count_entry = ctk.CTkEntry(controls, width=50)
         self.outline_count_entry.insert(0, str(len(self.project.chapters) or MAX_CHAPTERS))
         self.outline_count_entry.pack(side="left", padx=(0, 12))
+        # Tipo de escritura: aplica a toda la historia (esquema y prosa de
+        # cada capitulo), no por capitulo individual -- ver
+        # prompts.build_writing_style_instruction().
+        ctk.CTkLabel(controls, text="Tipo de escritura:").pack(side="left", padx=(0, 6))
+        self.writing_style_menu = ctk.CTkOptionMenu(controls, values=WRITING_STYLE_OPTIONS, width=160)
+        self.writing_style_menu.set(
+            self.project.writing_style if self.project.writing_style in WRITING_STYLES
+            else WRITING_STYLE_DEFAULT_LABEL
+        )
+        self.writing_style_menu.pack(side="left", padx=(0, 12))
         self.generate_outline_btn = ctk.CTkButton(
             controls, text="Generar esquema completo", command=self._on_generate_outline
         )
@@ -697,6 +710,8 @@ class StoryForgeApp(ctk.CTk):
         self.project.plot = self.plot_box.get()
         self.project.characters = self.characters_box.get()
         self.project.setting = self.setting_box.get()
+        selected_style = self.writing_style_menu.get()
+        self.project.writing_style = "" if selected_style == WRITING_STYLE_DEFAULT_LABEL else selected_style
         for panel in self.outline_panels:
             panel.sync_to_model()
         for panel in self.chapter_panels:
@@ -708,6 +723,10 @@ class StoryForgeApp(ctk.CTk):
         self.setting_box.set(self.project.setting)
         self.outline_count_entry.delete(0, "end")
         self.outline_count_entry.insert(0, str(len(self.project.chapters) or MAX_CHAPTERS))
+        self.writing_style_menu.set(
+            self.project.writing_style if self.project.writing_style in WRITING_STYLES
+            else WRITING_STYLE_DEFAULT_LABEL
+        )
         self._render_outline_panels()
         self._render_chapters()
 

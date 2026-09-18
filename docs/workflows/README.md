@@ -6,6 +6,7 @@ These guides document current application behavior: what each feature does, wher
 
 - [Outline-first beat sheet](outline/workflow.md)
 - [Chapter generation](chapter-generation/workflow.md)
+- [Writing style emphasis](writing-style/workflow.md)
 
 ## Post-Processing and Output
 

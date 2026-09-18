@@ -103,6 +103,25 @@ class TestPersistence(unittest.TestCase):
         self.assertEqual(loaded.chapters[0].content, "It was a dark night.")
         self.assertEqual(loaded.chapters[0].word_count(), 5)
 
+    def test_writing_style_round_trips(self):
+        p = Project(writing_style="Descriptiva")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "project.json")
+            p.save(path)
+            loaded = Project.load(path)
+        self.assertEqual(loaded.writing_style, "Descriptiva")
+
+    def test_loading_a_project_saved_without_writing_style_defaults_to_empty(self):
+        # Proyectos guardados antes de que existiera este campo no tienen la
+        # clave "writing_style" en su JSON -- debe cargar como "" (sin
+        # enfasis de estilo) en vez de fallar.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "old_project.json")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write('{"name": "Vieja", "plot": "x", "characters": "", "setting": "", "chapters": []}')
+            loaded = Project.load(path)
+        self.assertEqual(loaded.writing_style, "")
+
 
 if __name__ == "__main__":
     unittest.main()
