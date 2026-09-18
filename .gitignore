@@ -25,3 +25,12 @@ __pycache__/
 .venv/
 venv/
 env/
+
+# Notas sueltas de sesiones de Claude que terminaron en esta carpeta por
+# error: dos de estas son literalmente sobre otros proyectos (el editor de
+# fotos y el editor de video), no sobre StoryForge; la tercera es una copia
+# de una respuesta de chat, redundante con docs/. No se borran (podrian ser
+# de interes para el usuario), solo se excluyen de este repo.
+photoeditor_instructions.txt
+storyforge_instructions.txt
+videoeditor_instructor.txt

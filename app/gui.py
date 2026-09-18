@@ -398,8 +398,40 @@ class StoryForgeApp(ctk.CTk):
         self.load_model_btn = ctk.CTkButton(row, text="Cargar modelo", command=self._load_model)
         self.load_model_btn.grid(row=0, column=3, padx=4)
 
+        # Configuracion avanzada del motor (antes solo se podia cambiar
+        # editando LocalStoryEngine.load()/app/engine.py a mano). Los
+        # valores por defecto coinciden con los que ya tenia
+        # LocalStoryEngine.load() hardcodeados.
+        advanced = ctk.CTkFrame(tab, fg_color="transparent")
+        advanced.grid(row=2, column=0, sticky="w", padx=10, pady=(4, 0))
+
+        ctk.CTkLabel(advanced, text="Contexto (n_ctx):").pack(side="left", padx=(0, 4))
+        self.n_ctx_entry = ctk.CTkEntry(advanced, width=70)
+        self.n_ctx_entry.insert(0, "8192")
+        self.n_ctx_entry.pack(side="left", padx=(0, 12))
+
+        ctk.CTkLabel(advanced, text="Capas en GPU (n_gpu_layers, 0 = solo CPU):").pack(side="left", padx=(0, 4))
+        self.n_gpu_layers_entry = ctk.CTkEntry(advanced, width=50)
+        self.n_gpu_layers_entry.insert(0, "0")
+        self.n_gpu_layers_entry.pack(side="left", padx=(0, 12))
+
+        ctk.CTkLabel(advanced, text="Hilos CPU (vacio = automatico):").pack(side="left", padx=(0, 4))
+        self.n_threads_entry = ctk.CTkEntry(advanced, width=50)
+        self.n_threads_entry.pack(side="left")
+
+        ctk.CTkLabel(
+            tab,
+            text=(
+                "n_ctx mas grande permite mas contexto (plot/personajes/setting/capitulos "
+                "previos) por llamada, pero usa mas RAM y puede ser mas lento. n_gpu_layers "
+                "solo ayuda si llama-cpp-python fue instalado con soporte de GPU (ver README, "
+                "seccion 'Rendimiento / GPU'); en CPU-only, dejalo en 0."
+            ),
+            wraplength=800, justify="left", text_color="gray", font=ctk.CTkFont(size=11),
+        ).grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
+
         self.model_status = ctk.CTkLabel(tab, text="Ningun modelo cargado.", text_color="gray")
-        self.model_status.grid(row=2, column=0, sticky="w", padx=10, pady=10)
+        self.model_status.grid(row=4, column=0, sticky="w", padx=10, pady=10)
 
     def _list_models(self) -> list[str]:
         return find_local_models(MODELS_DIR)
@@ -425,6 +457,34 @@ class StoryForgeApp(ctk.CTk):
         if not selected or selected.startswith("("):
             messagebox.showwarning(APP_TITLE, "Selecciona un archivo .gguf valido.")
             return
+
+        try:
+            n_ctx = int(self.n_ctx_entry.get())
+            if n_ctx <= 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showwarning(APP_TITLE, "Contexto (n_ctx) invalido: debe ser un entero mayor a 0.")
+            return
+        try:
+            n_gpu_layers = int(self.n_gpu_layers_entry.get())
+            if n_gpu_layers < 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showwarning(APP_TITLE, "Capas en GPU (n_gpu_layers) invalido: debe ser un entero >= 0.")
+            return
+        n_threads_raw = self.n_threads_entry.get().strip()
+        n_threads: Optional[int] = None
+        if n_threads_raw:
+            try:
+                n_threads = int(n_threads_raw)
+                if n_threads <= 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showwarning(
+                    APP_TITLE, "Hilos CPU (n_threads) invalido: debe ser un entero mayor a 0, o vacio."
+                )
+                return
+
         path = selected if os.path.isabs(selected) else os.path.join(MODELS_DIR, selected)
         self.model_status.configure(text=f"Cargando {os.path.basename(path)}...", text_color="gray")
         self.update_idletasks()
@@ -432,11 +492,14 @@ class StoryForgeApp(ctk.CTk):
 
         def worker():
             try:
-                self.engine.load(path)
+                self.engine.load(path, n_ctx=n_ctx, n_threads=n_threads, n_gpu_layers=n_gpu_layers)
                 self.project.model_path = path
-                self.after(0, lambda: self.model_status.configure(
-                    text=f"Modelo cargado: {os.path.basename(path)}", text_color="#9fd39f"
-                ))
+                loaded_text = (
+                    f"Modelo cargado: {os.path.basename(path)} "
+                    f"(n_ctx={n_ctx}, n_gpu_layers={n_gpu_layers}"
+                    f"{f', n_threads={n_threads}' if n_threads else ''})"
+                )
+                self.after(0, lambda: self.model_status.configure(text=loaded_text, text_color="#9fd39f"))
             except Exception as exc:  # noqa: BLE001
                 # Ver el comentario equivalente en ChapterPanel._on_generate:
                 # `exc` se borra al salir del bloque except, y self.after()
