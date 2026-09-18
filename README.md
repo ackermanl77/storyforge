@@ -47,6 +47,13 @@ externa una vez que tienes el modelo descargado.
   (`tests/test_gui.py`) que reproducen la falla exacta y confirman que ya no
   ocurre.
 
+**Nueva funcionalidad — configuracion avanzada del modelo desde la interfaz:**
+- La pestaña **"Modelo"** ahora tiene campos para **n_ctx**, **n_gpu_layers**
+  y **n_threads** — antes había que editar `app/engine.py` a mano para
+  cambiar cualquiera de estos (ver sección "Rendimiento / GPU" arriba). Se
+  validan antes de cargar, y el mensaje de confirmación muestra con qué
+  valores quedó cargado el modelo.
+
 **Nueva funcionalidad — tipo de escritura:**
 - En la pestaña **"Esquema"**, un selector de "Tipo de escritura" (Narrativa,
   Descriptiva, Creativa, Diálogo, Poética, Acción rápida, o ninguno) aplica a
@@ -142,9 +149,23 @@ python storyforge.py
 Por defecto, `llama-cpp-python` corre en CPU. Si tu PC tiene una GPU NVIDIA,
 puedes instalar una version compilada con soporte CUDA para acelerar mucho
 la generacion; consulta la documentacion de `llama-cpp-python` para el
-comando de instalacion con CUDA correspondiente a tu version de CUDA, y
-ajusta `n_gpu_layers` en `app/engine.py` (`LocalStoryEngine.load`) a un
-numero mayor que 0.
+comando de instalacion con CUDA correspondiente a tu version de CUDA.
+
+Ya no hace falta editar codigo para esto: en la pestaña **"Modelo"**, junto
+al selector de archivo, hay tres campos de configuracion avanzada:
+
+- **Contexto (n_ctx)**: tamaño de la ventana de contexto del modelo (por
+  defecto 8192). Mas grande permite incluir mas plot/personajes/setting/
+  capitulos previos por llamada, pero usa mas RAM y puede ser mas lento.
+- **Capas en GPU (n_gpu_layers)**: 0 = solo CPU (por defecto). Si instalaste
+  la version con soporte CUDA, sube este numero para descargar capas del
+  modelo a la GPU.
+- **Hilos CPU (n_threads)**: vacio = automatico (por defecto). Solo hace
+  falta tocarlo si quieres limitar cuantos hilos de CPU usa la generacion.
+
+Se validan antes de cargar el modelo (numeros enteros, n_ctx y n_threads
+mayores a 0, n_gpu_layers mayor o igual a 0) y el mensaje de "Modelo
+cargado" confirma con que valores quedo cargado.
 
 ## Reductor de repeticion (WordNet)
 
