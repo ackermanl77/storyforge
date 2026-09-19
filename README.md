@@ -126,10 +126,13 @@ computadora.
 3. Descarga un modelo `.gguf` (ver `models/README.txt` para recomendaciones)
    y colocalo dentro de la carpeta `models/`.
 4. Genera el ejecutable corriendo `build.bat` (doble clic, o desde una
-   terminal `cmd`). Esto instala las dependencias con pip y usa PyInstaller
-   para producir `dist/StoryForge/StoryForge.exe`.
-5. Copia la carpeta `models/` (con tu modelo adentro) junto al .exe si no
-   quedo ahi automaticamente, y ejecuta `StoryForge.exe`.
+   terminal `cmd`). Esto instala las dependencias con pip, usa PyInstaller
+   para producir el build, y lo copia a `StoryForge-App\StoryForge.exe` —
+   una carpeta fija y facil de ubicar (a diferencia de `dist\`, que es la
+   carpeta de trabajo de PyInstaller y se borra/regenera en cada build).
+5. Copia la carpeta `models/` (con tu modelo adentro) junto al .exe, dentro
+   de `StoryForge-App\`, si no quedo ahi automaticamente, y ejecuta
+   `StoryForge-App\StoryForge.exe`.
 
 Por que no viene ya compilado: el .exe tiene que compilarse en Windows (no
 puedo generar un ejecutable nativo de Windows desde el entorno Linux donde

@@ -9,9 +9,13 @@ nltk_data/
 # generacion larga); no es el proyecto guardado explicitamente por el usuario.
 autosave/
 
-# Empaquetado con PyInstaller.
+# Empaquetado con PyInstaller. dist/ y build/ son carpetas de trabajo de
+# PyInstaller (se regeneran en cada build); StoryForge-App/ es una copia
+# limpia de dist/StoryForge/, en una ubicacion fija y facil de encontrar
+# (ver build.bat) -- tambien es salida de build, no se versiona.
 build/
 dist/
+StoryForge-App/
 
 # Python
 __pycache__/
