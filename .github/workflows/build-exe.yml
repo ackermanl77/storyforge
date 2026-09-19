@@ -1,13 +1,19 @@
 name: Build Windows .exe
 
-# Builds the packaged StoryForge.exe automatically on every push to main /
+# Builds the packaged StoryForge.exe automatically on every push to master /
 # test-story (and on demand via workflow_dispatch), so the .exe never has to
 # be built by hand to stay in sync with the latest commit. See
 # docs/workflows/desktop-build/workflow.md for what the build actually does.
+#
+# NOTE: this repo's default branch is `master`, not `main` -- there is no
+# `main` branch here. An earlier version of this file listed `main` instead
+# of `master` by mistake, so every merge into `master` (PRs #1 and #2)
+# silently never triggered a build. Verified with `git ls-remote --heads
+# origin` before fixing.
 on:
   push:
     branches:
-      - main
+      - master
       - test-story
   workflow_dispatch: {}
 
