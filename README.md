@@ -15,6 +15,11 @@ externa una vez que tienes el modelo descargado.
   cada capitulo en la pestana Capitulos siguiendo ese esquema. Esto mejora
   mucho la coherencia de una historia larga frente a improvisar capitulo por
   capitulo.
+- **Tipo de escritura**: en la pestana Esquema puedes elegir un enfasis para
+  toda la historia (Narrativa, Descriptiva, Creativa, Dialogo, Poetica,
+  Accion rapida, o ninguno) que se le pide al modelo respetar tanto al
+  generar el esquema como la prosa de cada capitulo, encima de las
+  convenciones de formato de siempre.
 - Limites de palabras validados: plot ≤ 50,000, personajes ≤ 10,000,
   setting ≤ 10,000, hasta 10 capitulos de hasta 10,000 palabras cada uno.
 - Generacion de capitulos por secciones (para poder llegar a objetivos
@@ -28,6 +33,35 @@ externa una vez que tienes el modelo descargado.
   texto plano (.txt).
 
 ## Historial de cambios
+
+**Corrección importante — los errores dejaban de mostrarse silenciosamente:**
+- Si algo fallaba al generar un capítulo, generar el esquema, o cargar un
+  modelo (un `.gguf` corrupto, el contexto lleno, el modelo no cargado,
+  etc.), la app debía mostrar un cuadro de error explicando qué pasó — pero
+  por un detalle de cómo Python maneja las variables de `except ... as exc`,
+  ese mensaje nunca llegaba a aparecer: fallaba silenciosamente con un error
+  interno no relacionado, sin avisos, sin diálogo. En el `.exe` empaquetado
+  esto era invisible por completo (no hay consola). Encontrado corriendo
+  `pyflakes` sobre el código, no probando la app manualmente. Corregido en
+  los tres lugares donde pasaba; se agregaron pruebas automatizadas
+  (`tests/test_gui.py`) que reproducen la falla exacta y confirman que ya no
+  ocurre.
+
+**Nueva funcionalidad — configuracion avanzada del modelo desde la interfaz:**
+- La pestaña **"Modelo"** ahora tiene campos para **n_ctx**, **n_gpu_layers**
+  y **n_threads** — antes había que editar `app/engine.py` a mano para
+  cambiar cualquiera de estos (ver sección "Rendimiento / GPU" arriba). Se
+  validan antes de cargar, y el mensaje de confirmación muestra con qué
+  valores quedó cargado el modelo.
+
+**Nueva funcionalidad — tipo de escritura:**
+- En la pestaña **"Esquema"**, un selector de "Tipo de escritura" (Narrativa,
+  Descriptiva, Creativa, Diálogo, Poética, Acción rápida, o ninguno) aplica a
+  toda la historia. Se agrega como una línea de énfasis adicional al prompt
+  del esquema y al de cada capítulo, sin reemplazar las reglas de formato
+  existentes (cursivas para pensamientos, comillas para diálogo, etc.). Se
+  guarda con el proyecto; un proyecto guardado antes de esta funcionalidad
+  simplemente carga sin ningún énfasis seleccionado.
 
 **Nueva funcionalidad — flujo "outline-first" (esquema antes de la prosa):**
 - Pestaña **"Esquema"**: genera un beat sheet completo de todos los
@@ -115,9 +149,23 @@ python storyforge.py
 Por defecto, `llama-cpp-python` corre en CPU. Si tu PC tiene una GPU NVIDIA,
 puedes instalar una version compilada con soporte CUDA para acelerar mucho
 la generacion; consulta la documentacion de `llama-cpp-python` para el
-comando de instalacion con CUDA correspondiente a tu version de CUDA, y
-ajusta `n_gpu_layers` en `app/engine.py` (`LocalStoryEngine.load`) a un
-numero mayor que 0.
+comando de instalacion con CUDA correspondiente a tu version de CUDA.
+
+Ya no hace falta editar codigo para esto: en la pestaña **"Modelo"**, junto
+al selector de archivo, hay tres campos de configuracion avanzada:
+
+- **Contexto (n_ctx)**: tamaño de la ventana de contexto del modelo (por
+  defecto 8192). Mas grande permite incluir mas plot/personajes/setting/
+  capitulos previos por llamada, pero usa mas RAM y puede ser mas lento.
+- **Capas en GPU (n_gpu_layers)**: 0 = solo CPU (por defecto). Si instalaste
+  la version con soporte CUDA, sube este numero para descargar capas del
+  modelo a la GPU.
+- **Hilos CPU (n_threads)**: vacio = automatico (por defecto). Solo hace
+  falta tocarlo si quieres limitar cuantos hilos de CPU usa la generacion.
+
+Se validan antes de cargar el modelo (numeros enteros, n_ctx y n_threads
+mayores a 0, n_gpu_layers mayor o igual a 0) y el mensaje de "Modelo
+cargado" confirma con que valores quedo cargado.
 
 ## Reductor de repeticion (WordNet)
 
@@ -156,6 +204,7 @@ storyforge/
   requirements.txt    Dependencias de la app
   models/             Coloca aqui tu modelo .gguf
   tests/              Pruebas automatizadas (unittest, sin dependencias extra)
+  docs/               Documentacion tecnica (arquitectura, workflows, historial de fixes)
 ```
 
 ## Pruebas
@@ -167,3 +216,10 @@ python -m unittest discover -s tests -v
 Las pruebas de `project.py`, `repetition.py` (rutas sin datos de NLTK) y la
 logica del motor de generacion (con un modelo simulado) no requieren
 `llama-cpp-python` ni un modelo real instalados.
+
+## Documentacion tecnica
+
+Este README cubre el uso dia a dia. Para arquitectura, entry points,
+comportamiento de cada feature y el historial de bugs corregidos, ver
+[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) y
+[docs/workflows/README.md](docs/workflows/README.md).

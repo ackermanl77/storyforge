@@ -8,7 +8,54 @@ from __future__ import annotations
 import re
 from typing import List, Tuple
 
-from .project import Project, Chapter, count_words
+from .project import Project
+
+# Instruccion en ingles (la salida siempre se pide en ingles, ver STYLE_GUIDE
+# abajo) para cada valor posible de project.writing_style (project.WRITING_
+# STYLES). Se agrega como enfasis adicional encima del STYLE_GUIDE por
+# defecto, no lo reemplaza -- las reglas de formato (cursivas, dialogo, etc.)
+# siguen aplicando sin importar el tipo de escritura elegido.
+WRITING_STYLE_INSTRUCTIONS = {
+    "Narrativa": (
+        "Favor a strong narrative drive: keep the plot moving with clear "
+        "cause-and-effect between events and a forward-moving pace."
+    ),
+    "Descriptiva": (
+        "Favor rich, sensory description: spend more time on setting, "
+        "atmosphere and physical detail, even where it slows the pace."
+    ),
+    "Creativa": (
+        "Favor inventive, literary prose: unusual imagery, fresh metaphor, "
+        "and stylistic risk-taking over conventional phrasing."
+    ),
+    "Dialogo": (
+        "Favor dialogue-driven scenes: let characters reveal plot and "
+        "personality mainly through spoken exchanges, with minimal narration "
+        "between lines."
+    ),
+    "Poetica": (
+        "Favor lyrical, rhythmic prose: pay attention to the music of the "
+        "language, figurative imagery, and evocative word choice."
+    ),
+    "Accion rapida": (
+        "Favor fast pacing: short, punchy sentences, minimal introspection, "
+        "and high momentum, especially during action."
+    ),
+}
+
+
+def build_writing_style_instruction(project: Project) -> str:
+    """
+    Linea de enfasis de estilo adicional segun project.writing_style. Vacio
+    si no se selecciono ninguno (o el valor guardado no coincide con ningun
+    tipo conocido, p.ej. un proyecto viejo) -- en ese caso solo aplica el
+    STYLE_GUIDE por defecto, sin enfasis extra.
+    """
+    instruction = WRITING_STYLE_INSTRUCTIONS.get(project.writing_style.strip())
+    if not instruction:
+        return ""
+    return f"WRITING STYLE EMPHASIS: {instruction}\n\n"
+
 
 STYLE_GUIDE = """\
 FORMATTING RULES (follow strictly):
@@ -96,6 +143,7 @@ def build_chapter_system_prompt(
     max_characters_words: int = 600,
     max_setting_words: int = 600,
     max_previous_words: int = 500,
+    max_outline_words: int = 400,
 ) -> str:
     """
     Construye el prompt de sistema para un capitulo. Los parametros max_*
@@ -109,11 +157,17 @@ def build_chapter_system_prompt(
     overview = build_story_outline_overview(project)
     outline_block = ""
     if chapter.outline.strip():
+        # chapter.outline no tiene un limite propio en project.py (es texto
+        # libre editable en la pestana Esquema): a diferencia de plot/
+        # personajes/setting, sin este recorte un esquema inusualmente largo
+        # quedaria fuera del mecanismo de reduccion de contexto por completo.
+        outline_text = _trim_words(chapter.outline.strip(), max_outline_words)
         outline_block = (
             "THIS CHAPTER'S OUTLINE (follow these beats in order; you may add "
             "sensory detail, dialogue and internal thoughts, but do not skip or "
-            f"reorder the events described):\n{chapter.outline.strip()}\n\n"
+            f"reorder the events described):\n{outline_text}\n\n"
         )
+    style_emphasis = build_writing_style_instruction(project)
     return (
         "You are a skilled fiction writer producing one chapter of a longer "
         "story for an adult creative-writing project. Stay fully consistent "
@@ -123,6 +177,7 @@ def build_chapter_system_prompt(
         f"{overview}\n"
         f"PROGRESS SO FAR:\n{previous}\n\n"
         f"{outline_block}"
+        f"{style_emphasis}"
         f"{STYLE_GUIDE}\n"
         f"Now write Chapter {chapter_index + 1}, titled \"{chapter.title}\". "
         f"Target length: approximately {chapter.target_words} words. "
@@ -145,11 +200,13 @@ def build_outline_prompt(
     historia de varios capitulos frente a improvisar capitulo por capitulo.
     """
     context = build_context_block(project, max_plot_words, max_characters_words, max_setting_words)
+    style_emphasis = build_writing_style_instruction(project)
     return (
         "You are a fiction editor planning a story before it is written. Based "
         "only on the material below, create a chapter-by-chapter outline for a "
         f"story with EXACTLY {num_chapters} chapters.\n\n"
         f"{context}\n"
+        f"{style_emphasis}"
         "For each chapter, output exactly this format (plain text, no markdown):\n\n"
         "Chapter 1: <short chapter title>\n"
         "<2 to 4 sentences describing the key events, turning points and "

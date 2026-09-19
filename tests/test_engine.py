@@ -11,7 +11,12 @@ from app.engine import (
     ModelNotLoadedError,
 )
 from app.project import Project
-from app.prompts import _trim_words_tail
+from app.prompts import (
+    _trim_words_tail,
+    build_chapter_system_prompt,
+    build_outline_prompt,
+    build_writing_style_instruction,
+)
 
 
 class FakeLlama:
@@ -139,6 +144,99 @@ class TestContextOverflow(unittest.TestCase):
         engine = LocalStoryEngine()
         with self.assertRaises(ModelNotLoadedError):
             engine.summarize("some chapter text")
+
+
+class TestChapterOutlineBudget(unittest.TestCase):
+    """
+    chapter.outline has no size limit enforced at the field level (unlike
+    plot/characters/setting) other than Project.validate_inputs()'s check, so
+    it must be trimmed the same way as everything else in the chapter prompt
+    or an unusually long outline could make the smallest context budget
+    level still not fit.
+    """
+
+    def test_long_outline_is_trimmed_to_the_given_budget(self):
+        project = make_project()
+        project.chapters[0].outline = "beat " * 1000
+        prompt = build_chapter_system_prompt(project, 0, max_outline_words=50)
+        # _trim_words appends " [...]" once the text is cut, which only
+        # happens when the outline actually exceeded the budget.
+        self.assertIn("[...]", prompt)
+
+    def test_short_outline_is_not_marked_as_trimmed(self):
+        project = make_project()
+        project.chapters[0].outline = "Hero meets mentor. Hero refuses the call."
+        prompt = build_chapter_system_prompt(project, 0, max_outline_words=400)
+        self.assertIn("Hero refuses the call.", prompt)
+        self.assertNotIn("[...]", prompt)
+
+
+class TestWritingStyleEmphasis(unittest.TestCase):
+    def test_no_style_selected_adds_no_emphasis(self):
+        project = make_project()
+        project.writing_style = ""
+        self.assertEqual(build_writing_style_instruction(project), "")
+        self.assertNotIn("WRITING STYLE EMPHASIS", build_chapter_system_prompt(project, 0))
+
+    def test_unknown_style_value_is_ignored_not_an_error(self):
+        # p.ej. un proyecto viejo con un valor que ya no existe en
+        # project.WRITING_STYLES -- no debe romper la generacion.
+        project = make_project()
+        project.writing_style = "un valor que ya no existe"
+        self.assertEqual(build_writing_style_instruction(project), "")
+
+    def test_known_style_adds_its_emphasis_to_the_chapter_prompt(self):
+        project = make_project()
+        project.writing_style = "Dialogo"
+        prompt = build_chapter_system_prompt(project, 0)
+        self.assertIn("WRITING STYLE EMPHASIS", prompt)
+        self.assertIn("dialogue-driven", prompt)
+
+    def test_known_style_adds_its_emphasis_to_the_outline_prompt(self):
+        project = make_project()
+        project.writing_style = "Accion rapida"
+        prompt = build_outline_prompt(project, num_chapters=3)
+        self.assertIn("WRITING STYLE EMPHASIS", prompt)
+        self.assertIn("fast pacing", prompt)
+
+
+class TestModelReload(unittest.TestCase):
+    """
+    Loading a new model must not hold the previous one in memory while the
+    new one is being constructed -- two multi-GB Llama instances resident at
+    once can exhaust RAM/VRAM.
+    """
+
+    def test_load_unloads_the_previous_model_first(self):
+        import sys
+        import tempfile
+        import types
+
+        engine = LocalStoryEngine()
+        engine._llm = FakeLlama()  # simulates an already-loaded model
+        saw_previous_model_released = []
+
+        def fake_llama_constructor(**kwargs):
+            # By the time the "new" model is being constructed, the old one
+            # must already have been released, not just about to be replaced.
+            saw_previous_model_released.append(engine._llm is None)
+            return FakeLlama()
+
+        fake_module = types.ModuleType("llama_cpp")
+        fake_module.Llama = fake_llama_constructor
+        sys.modules["llama_cpp"] = fake_module
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".gguf", delete=False) as tmp:
+                model_path = tmp.name
+            try:
+                engine.load(model_path)
+            finally:
+                os.remove(model_path)
+        finally:
+            del sys.modules["llama_cpp"]
+
+        self.assertEqual(saw_previous_model_released, [True])
+        self.assertIsNotNone(engine._llm)
 
 
 if __name__ == "__main__":

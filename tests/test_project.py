@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.project import (
     MAX_CHAPTERS,
+    MAX_OUTLINE_WORDS_PER_CHAPTER,
     MAX_WORDS_PER_CHAPTER,
-    Chapter,
     Project,
     count_words,
 )
@@ -70,6 +70,19 @@ class TestProjectValidation(unittest.TestCase):
         errors = p.validate_inputs()
         self.assertTrue(any("Capitulo 1" in e and "excede" in e for e in errors))
 
+    def test_chapter_outline_over_limit_flagged(self):
+        p = Project()
+        chapter = p.add_chapter("Cap", target_words=100)
+        chapter.outline = "word " * (MAX_OUTLINE_WORDS_PER_CHAPTER + 1)
+        errors = p.validate_inputs()
+        self.assertTrue(any("Capitulo 1" in e and "esquema" in e for e in errors))
+
+    def test_chapter_outline_within_limit_not_flagged(self):
+        p = Project(plot="a story " * 10, characters="a hero", setting="a castle")
+        chapter = p.add_chapter("Cap", target_words=100)
+        chapter.outline = "word " * MAX_OUTLINE_WORDS_PER_CHAPTER
+        self.assertEqual(p.validate_inputs(), [])
+
 
 class TestPersistence(unittest.TestCase):
     def test_save_and_load_roundtrip(self):
@@ -88,6 +101,25 @@ class TestPersistence(unittest.TestCase):
         self.assertEqual(loaded.chapters[0].title, "Chapter One")
         self.assertEqual(loaded.chapters[0].content, "It was a dark night.")
         self.assertEqual(loaded.chapters[0].word_count(), 5)
+
+    def test_writing_style_round_trips(self):
+        p = Project(writing_style="Descriptiva")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "project.json")
+            p.save(path)
+            loaded = Project.load(path)
+        self.assertEqual(loaded.writing_style, "Descriptiva")
+
+    def test_loading_a_project_saved_without_writing_style_defaults_to_empty(self):
+        # Proyectos guardados antes de que existiera este campo no tienen la
+        # clave "writing_style" en su JSON -- debe cargar como "" (sin
+        # enfasis de estilo) en vez de fallar.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "old_project.json")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write('{"name": "Vieja", "plot": "x", "characters": "", "setting": "", "chapters": []}')
+            loaded = Project.load(path)
+        self.assertEqual(loaded.writing_style, "")
 
 
 if __name__ == "__main__":

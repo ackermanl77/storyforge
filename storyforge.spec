@@ -18,6 +18,40 @@ for pkg in ("customtkinter", "llama_cpp", "docx"):
     binaries += pkg_binaries
     hiddenimports += pkg_hiddenimports
 
+# collect_all("llama_cpp") sweeps in the whole package regardless of what
+# this app actually imports (app/engine.py only ever does
+# `from llama_cpp import Llama`). In an environment where llama_cpp's
+# optional `server` extra (an HTTP server on FastAPI/uvicorn) happens to be
+# installed, that pulls in uvicorn/fastapi/starlette/websockets/anyio, and
+# separately matplotlib gets pulled in with a full PySide6/Qt backend --
+# none of which this app uses. Separately, nltk's own PyInstaller hook
+# proactively includes optional integrations this app never exercises
+# (app/repetition.py only ever uses nltk's stopwords/wordnet corpora): a
+# pandas/pyarrow-based huggingface `datasets` integration, and scipy (a
+# dependency of some of nltk's classifiers/metrics, not its corpus readers).
+# A build before these excludes took several extra minutes analyzing Qt
+# alone and produced a dist/ folder around 4x the expected size (425 MB vs
+# ~110 MB after adding matplotlib/Qt/server excludes, confirmed further
+# dominated by pyarrow/scipy/pandas at ~160 MB combined -- see
+# docs/workflows/desktop-build/workflow.md). Excluding all of this here is
+# safe: `grep`-confirmed that no file under app/ imports any of them, so
+# nothing excluded here can be reached at runtime.
+EXCLUDED_UNUSED_HEAVY_DEPS = [
+    "llama_cpp.server",
+    "matplotlib",
+    "PySide6",
+    "shiboken6",
+    "uvicorn",
+    "fastapi",
+    "starlette",
+    "websockets",
+    "anyio",
+    "sse_starlette",
+    "pandas",
+    "pyarrow",
+    "scipy",
+]
+
 a = Analysis(
     ["storyforge.py"],
     pathex=[],
@@ -27,7 +61,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=EXCLUDED_UNUSED_HEAVY_DEPS,
     noarchive=False,
     cipher=block_cipher,
 )

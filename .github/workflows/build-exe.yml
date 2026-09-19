@@ -1,0 +1,50 @@
+name: Build Windows .exe
+
+# Builds the packaged StoryForge.exe automatically on every push to main /
+# test-story (and on demand via workflow_dispatch), so the .exe never has to
+# be built by hand to stay in sync with the latest commit. See
+# docs/workflows/desktop-build/workflow.md for what the build actually does.
+on:
+  push:
+    branches:
+      - main
+      - test-story
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          # Pinned to 3.12 (not the newest available) so llama-cpp-python can
+          # install from a prebuilt wheel instead of compiling from source on
+          # every run -- much faster and more reliable on a CI runner.
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Run tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Build with PyInstaller
+        run: pyinstaller --noconfirm --clean storyforge.spec
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: StoryForge-${{ github.sha }}
+          path: dist/StoryForge/
+          if-no-files-found: error
