@@ -6,14 +6,16 @@ from __future__ import annotations
 import os
 import threading
 import tkinter as tk
+from pathlib import Path
 from tkinter import filedialog, messagebox
-from typing import Optional
+from typing import Callable, Optional
 
 import customtkinter as ctk
 
 from .engine import ContextOverflowError, LocalStoryEngine, ModelNotLoadedError, find_local_models
 from .export import export_docx, export_txt
 from .project import (
+    CHAPTER_PURPOSES,
     MAX_CHAPTERS,
     MAX_CHARACTERS_WORDS,
     MAX_OUTLINE_WORDS_PER_CHAPTER,
@@ -35,6 +37,8 @@ APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODELS_DIR = os.path.join(APP_ROOT, "models")
 WRITING_STYLE_DEFAULT_LABEL = "(Por defecto)"
 WRITING_STYLE_OPTIONS = [WRITING_STYLE_DEFAULT_LABEL] + WRITING_STYLES
+CHAPTER_PURPOSE_DEFAULT_LABEL = "(Capitulo regular)"
+CHAPTER_PURPOSE_OPTIONS = [CHAPTER_PURPOSE_DEFAULT_LABEL] + CHAPTER_PURPOSES
 # Copia de autoguardado, separada del guardado explicito del usuario: un
 # capitulo puede tardar 15-40 minutos en generarse, asi que sin esto un
 # cierre inesperado (crash, corte de luz) a mitad de una generacion larga
@@ -44,9 +48,21 @@ AUTOSAVE_INTERVAL_MS = 20_000  # cada cuanto se reintenta el autoguardado mientr
 
 
 class LimitedTextBox(ctk.CTkFrame):
-    """Textbox con contador de palabras en vivo y limite maximo visible."""
+    """
+    Textbox con contador de palabras en vivo y limite maximo visible.
+    Opcionalmente muestra botones "Importar desde archivo..." (siempre
+    sincrono, no toca el motor) y/o "Expandir con IA" (llama al motor: el
+    llamador es responsable de deshabilitar self.expand_btn durante
+    self.app.busy, igual que con cualquier otro control que dispara al
+    modelo -- ver StoryForgeApp._set_engine_busy()).
+    """
 
-    def __init__(self, master, label: str, max_words: int, height: int = 160, **kwargs):
+    def __init__(
+        self, master, label: str, max_words: int, height: int = 160,
+        on_expand: Optional[Callable[[], None]] = None,
+        on_import: Optional[Callable[[], None]] = None,
+        **kwargs,
+    ):
         super().__init__(master, **kwargs)
         self.max_words = max_words
         self.grid_columnconfigure(0, weight=1)
@@ -59,9 +75,23 @@ class LimitedTextBox(ctk.CTkFrame):
         self.counter_label = ctk.CTkLabel(header, text=f"0 / {max_words:,} palabras")
         self.counter_label.grid(row=0, column=1, sticky="e")
 
+        text_row = 1
+        if on_expand or on_import:
+            btn_bar = ctk.CTkFrame(self, fg_color="transparent")
+            btn_bar.grid(row=1, column=0, sticky="w", padx=4, pady=(2, 0))
+            if on_import:
+                self.import_btn = ctk.CTkButton(
+                    btn_bar, text="Importar desde archivo...", width=170, command=on_import
+                )
+                self.import_btn.pack(side="left", padx=(0, 6))
+            if on_expand:
+                self.expand_btn = ctk.CTkButton(btn_bar, text="Expandir con IA", width=140, command=on_expand)
+                self.expand_btn.pack(side="left")
+            text_row = 2
+
         self.textbox = ctk.CTkTextbox(self, height=height, wrap="word")
-        self.textbox.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
-        self.grid_rowconfigure(1, weight=1)
+        self.textbox.grid(row=text_row, column=0, sticky="nsew", padx=4, pady=4)
+        self.grid_rowconfigure(text_row, weight=1)
         self.textbox.bind("<KeyRelease>", self._on_change)
 
     def _on_change(self, _event=None) -> None:
@@ -103,8 +133,20 @@ class ChapterPanel(ctk.CTkFrame):
         self.target_entry.insert(0, str(chapter.target_words))
         self.target_entry.grid(row=0, column=3, padx=(0, 8), sticky="e")
 
+        # Proposito narrativo de este capitulo especifico (Apertura/Escena
+        # climatica/Final/Epilogo, o regular) -- a diferencia de
+        # writing_style, que es a nivel de todo el proyecto.
+        purpose_row = ctk.CTkFrame(self, fg_color="transparent")
+        purpose_row.grid(row=1, column=0, columnspan=4, sticky="w", padx=8, pady=(2, 0))
+        ctk.CTkLabel(purpose_row, text="Proposito:").pack(side="left", padx=(0, 6))
+        self.purpose_menu = ctk.CTkOptionMenu(purpose_row, values=CHAPTER_PURPOSE_OPTIONS, width=170)
+        self.purpose_menu.set(
+            chapter.purpose if chapter.purpose in CHAPTER_PURPOSES else CHAPTER_PURPOSE_DEFAULT_LABEL
+        )
+        self.purpose_menu.pack(side="left")
+
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=1, column=0, columnspan=4, sticky="ew", padx=8)
+        btn_frame.grid(row=2, column=0, columnspan=4, sticky="ew", padx=8)
         self.generate_btn = ctk.CTkButton(btn_frame, text="Generar", width=100, command=self._on_generate)
         self.generate_btn.pack(side="left", padx=(0, 6), pady=4)
         self.cancel_btn = ctk.CTkButton(
@@ -116,6 +158,8 @@ class ChapterPanel(ctk.CTkFrame):
         self.reduce_btn.pack(side="left", padx=6, pady=4)
         self.report_btn = ctk.CTkButton(btn_frame, text="Reporte de repeticion", width=150, command=self._on_report)
         self.report_btn.pack(side="left", padx=6, pady=4)
+        self.history_btn = ctk.CTkButton(btn_frame, text="Versiones anteriores (0)", width=170, command=self._on_show_history)
+        self.history_btn.pack(side="left", padx=6, pady=4)
         self.remove_btn = ctk.CTkButton(
             btn_frame, text="Eliminar capitulo", width=130, fg_color="#8a3b3b",
             hover_color="#6e2f2f", command=self._on_remove,
@@ -123,17 +167,33 @@ class ChapterPanel(ctk.CTkFrame):
         self.remove_btn.pack(side="right", padx=(6, 0), pady=4)
 
         self.status_label = ctk.CTkLabel(self, text="", text_color="gray")
-        self.status_label.grid(row=2, column=0, columnspan=4, sticky="w", padx=8)
+        self.status_label.grid(row=3, column=0, columnspan=4, sticky="w", padx=8)
 
         self.content_box = ctk.CTkTextbox(self, height=220, wrap="word")
-        self.content_box.grid(row=3, column=0, columnspan=4, sticky="nsew", padx=8, pady=(4, 8))
+        self.content_box.grid(row=4, column=0, columnspan=4, sticky="nsew", padx=8, pady=(4, 8))
         self.content_box.insert("1.0", chapter.content)
-        self.grid_rowconfigure(3, weight=1)
+        self.grid_rowconfigure(4, weight=1)
 
         self.word_count_label = ctk.CTkLabel(self, text="")
-        self.word_count_label.grid(row=4, column=0, columnspan=4, sticky="w", padx=8, pady=(0, 8))
+        self.word_count_label.grid(row=5, column=0, columnspan=4, sticky="w", padx=8, pady=(0, 4))
         self._refresh_word_count()
         self.content_box.bind("<KeyRelease>", lambda e: self._refresh_word_count())
+
+        # Refinamiento: reescribe el capitulo YA generado segun una
+        # instruccion puntual (p.ej. "hazlo mas oscuro"), en vez de
+        # regenerarlo desde cero -- ver LocalStoryEngine.refine_chapter().
+        refine_row = ctk.CTkFrame(self, fg_color="transparent")
+        refine_row.grid(row=6, column=0, columnspan=4, sticky="ew", padx=8, pady=(0, 8))
+        refine_row.grid_columnconfigure(0, weight=1)
+        self.refine_entry = ctk.CTkEntry(
+            refine_row,
+            placeholder_text="Instruccion de refinamiento (ej: hazlo mas oscuro, acorta el dialogo del final)",
+        )
+        self.refine_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+        self.refine_btn = ctk.CTkButton(refine_row, text="Aplicar refinamiento", width=160, command=self._on_refine)
+        self.refine_btn.grid(row=0, column=1)
+
+        self._refresh_history_btn()
 
     # ---- sincronizacion con el modelo de datos ----
     def sync_to_model(self) -> None:
@@ -144,6 +204,11 @@ class ChapterPanel(ctk.CTkFrame):
             target = self.chapter.target_words
         self.chapter.target_words = max(1, min(target, MAX_WORDS_PER_CHAPTER))
         self.chapter.content = self.content_box.get("1.0", "end-1c")
+        selected_purpose = self.purpose_menu.get()
+        self.chapter.purpose = "" if selected_purpose == CHAPTER_PURPOSE_DEFAULT_LABEL else selected_purpose
+
+    def _refresh_history_btn(self) -> None:
+        self.history_btn.configure(text=f"Versiones anteriores ({len(self.chapter.history)})")
 
     def _refresh_word_count(self) -> None:
         words = count_words(self.content_box.get("1.0", "end-1c"))
@@ -158,6 +223,8 @@ class ChapterPanel(ctk.CTkFrame):
         self.generate_btn.configure(state=state)
         self.reduce_btn.configure(state=state)
         self.remove_btn.configure(state=state)
+        self.refine_btn.configure(state=state)
+        self.history_btn.configure(state=state)
         self.cancel_btn.configure(state=("normal" if busy else "disabled"))
         self.status_label.configure(text=status)
 
@@ -190,10 +257,13 @@ class ChapterPanel(ctk.CTkFrame):
         if self.chapter.content.strip() and not messagebox.askyesno(
             APP_TITLE,
             f"El capitulo {self.index + 1} ya tiene texto generado. Generar de nuevo "
-            "reemplazara ese contenido por completo y no se puede deshacer. ¿Continuar?",
+            "reemplazara ese contenido (la version actual se guarda en "
+            "\"Versiones anteriores\", asi que es recuperable). ¿Continuar?",
         ):
             return
 
+        self.chapter.push_history()
+        self._refresh_history_btn()
         self.app._set_engine_busy(True)
         self._set_busy(True, "Generando... esto puede tardar varios minutos en CPU.")
         cancel_flag = {"cancel": False}
@@ -255,6 +325,8 @@ class ChapterPanel(ctk.CTkFrame):
         self.sync_to_model()
         if not self.chapter.content.strip():
             return
+        self.chapter.push_history()
+        self._refresh_history_btn()
         reduced = reduce_repetition(self.chapter.content)
         self.content_box.delete("1.0", "end")
         self.content_box.insert("1.0", reduced)
@@ -269,6 +341,152 @@ class ChapterPanel(ctk.CTkFrame):
     def _on_remove(self) -> None:
         if messagebox.askyesno(APP_TITLE, f"¿Eliminar el capitulo {self.index + 1}?"):
             self.app.remove_chapter(self.index)
+
+    # ---- refinamiento (revisar el capitulo ya generado segun una instruccion) ----
+    def _on_refine(self) -> None:
+        if not self.app.engine.is_loaded:
+            messagebox.showwarning(APP_TITLE, "Primero carga un modelo local (.gguf) en la pestana 'Modelo'.")
+            return
+        if self.app.busy:
+            messagebox.showwarning(
+                APP_TITLE,
+                "Ya hay una generacion en curso (otro capitulo, el esquema, o cargando un "
+                "modelo). Espera a que termine antes de iniciar otra.",
+            )
+            return
+        self.sync_to_model()
+        if not self.chapter.content.strip():
+            messagebox.showwarning(
+                APP_TITLE, "Este capitulo todavia no tiene contenido para refinar. Generalo primero."
+            )
+            return
+        instruction = self.refine_entry.get().strip()
+        if not instruction:
+            messagebox.showwarning(
+                APP_TITLE, "Escribe una instruccion de refinamiento (por ejemplo: \"hazlo mas oscuro\")."
+            )
+            return
+        if not messagebox.askyesno(
+            APP_TITLE,
+            f"Esto va a reescribir el capitulo {self.index + 1} completo segun esa instruccion, "
+            "reemplazando el contenido actual (la version actual se guarda en \"Versiones "
+            "anteriores\", asi que es recuperable). ¿Continuar?",
+        ):
+            return
+
+        self.chapter.push_history()
+        self._refresh_history_btn()
+        self.app._set_engine_busy(True)
+        self._set_busy(True, "Refinando capitulo... esto puede tardar varios minutos.")
+
+        def worker():
+            try:
+                result = self.app.engine.refine_chapter(self.app.project, self.index, instruction)
+
+                def apply():
+                    self.chapter.content = result
+                    self.content_box.delete("1.0", "end")
+                    self.content_box.insert("1.0", result)
+                    self._refresh_word_count()
+                self.app.after(0, apply)
+            except ModelNotLoadedError as exc:
+                # Ver el comentario equivalente en _on_generate: `exc` se
+                # borra al salir del bloque except, y self.app.after()
+                # difiere la llamada hasta despues de eso.
+                message = str(exc)
+                self.app.after(0, lambda: messagebox.showerror(APP_TITLE, message))
+            except ContextOverflowError as exc:
+                message = f"El contexto es demasiado grande para este modelo:\n\n{exc}"
+                self.app.after(0, lambda: messagebox.showerror(APP_TITLE, message))
+            except Exception as exc:  # noqa: BLE001
+                message = f"Error refinando el capitulo: {exc}"
+                self.app.after(0, lambda: messagebox.showerror(APP_TITLE, message))
+            finally:
+                self.app.after(0, lambda: self._set_busy(False, "Listo."))
+                self.app.after(0, self.app._autosave)
+                self.app.after(0, lambda: self.app._set_engine_busy(False))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    # ---- versiones anteriores ----
+    def _on_show_history(self) -> None:
+        if not self.chapter.history:
+            messagebox.showinfo(APP_TITLE, "Este capitulo no tiene versiones anteriores guardadas todavia.")
+            return
+        VersionHistoryDialog(self.app, self)
+
+
+class VersionHistoryDialog(ctk.CTkToplevel):
+    """
+    Ventana emergente para ver y restaurar versiones anteriores de un
+    capitulo (chapter.history, ver Chapter.push_history()). Se guarda una
+    version cada vez que se regenera, refina, o reduce repeticion sobre un
+    capitulo que ya tenia contenido -- esta ventana es la forma de
+    recuperarlas.
+    """
+
+    def __init__(self, master, panel: "ChapterPanel"):
+        super().__init__(master)
+        self.panel = panel
+        self.title(f"Versiones anteriores - Capitulo {panel.index + 1}")
+        self.geometry("700x500")
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+        # El dropdown muestra la version mas reciente primero (es la que mas
+        # probablemente se quiera recuperar), pero chapter.history guarda la
+        # mas vieja primero -- self._labels ya queda en orden "mas reciente
+        # primero" para no tener que invertir nada al mostrar, solo al
+        # mapear de vuelta a un indice real en _selected_history_index().
+        history = panel.chapter.history
+        total = len(history)
+        self._labels = [
+            f"Version {i + 1} de {total} ({count_words(text)} palabras)"
+            for i, text in enumerate(history)
+        ]
+        self._labels.reverse()
+
+        top = ctk.CTkFrame(self, fg_color="transparent")
+        top.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
+        ctk.CTkLabel(top, text="Version:").pack(side="left", padx=(0, 6))
+        self.version_menu = ctk.CTkOptionMenu(top, values=self._labels, command=self._on_select, width=220)
+        self.version_menu.pack(side="left", padx=(0, 12))
+        self.restore_btn = ctk.CTkButton(top, text="Restaurar esta version", command=self._on_restore)
+        self.restore_btn.pack(side="left")
+
+        self.preview_box = ctk.CTkTextbox(self, wrap="word")
+        self.preview_box.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.preview_box.configure(state="disabled")
+
+        self._on_select(self._labels[0])
+
+    def _selected_history_index(self) -> int:
+        display_index = self._labels.index(self.version_menu.get())
+        return len(self.panel.chapter.history) - 1 - display_index
+
+    def _on_select(self, _value: str = "") -> None:
+        text = self.panel.chapter.history[self._selected_history_index()]
+        self.preview_box.configure(state="normal")
+        self.preview_box.delete("1.0", "end")
+        self.preview_box.insert("1.0", text)
+        self.preview_box.configure(state="disabled")
+
+    def _on_restore(self) -> None:
+        text = self.panel.chapter.history[self._selected_history_index()]
+        if not messagebox.askyesno(
+            APP_TITLE,
+            "Esto reemplaza el contenido actual del capitulo por esta version anterior. El "
+            "contenido actual tambien se guarda como version antes de restaurar, asi que esto "
+            "es reversible. ¿Continuar?",
+        ):
+            return
+        self.panel.chapter.push_history()
+        self.panel.chapter.content = text
+        self.panel.content_box.delete("1.0", "end")
+        self.panel.content_box.insert("1.0", text)
+        self.panel._refresh_word_count()
+        self.panel._refresh_history_btn()
+        self.destroy()
 
 
 class OutlinePanel(ctk.CTkFrame):
@@ -514,7 +732,11 @@ class StoryForgeApp(ctk.CTk):
     def _build_plot_tab(self) -> None:
         self.tab_plot.grid_columnconfigure(0, weight=1)
         self.tab_plot.grid_rowconfigure(0, weight=1)
-        self.plot_box = LimitedTextBox(self.tab_plot, "Story Plot (idea de la historia)", MAX_PLOT_WORDS, height=500)
+        self.plot_box = LimitedTextBox(
+            self.tab_plot, "Story Plot (idea de la historia)", MAX_PLOT_WORDS, height=500,
+            on_expand=lambda: self._expand_field(self.plot_box, "plot", "Plot", MAX_PLOT_WORDS),
+            on_import=lambda: self._import_field(self.plot_box),
+        )
         self.plot_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
     def _build_characters_tab(self) -> None:
@@ -523,6 +745,10 @@ class StoryForgeApp(ctk.CTk):
         self.characters_box = LimitedTextBox(
             self.tab_characters, "Personajes (descripcion, personalidad, relaciones)",
             MAX_CHARACTERS_WORDS, height=500,
+            on_expand=lambda: self._expand_field(
+                self.characters_box, "characters", "Personajes", MAX_CHARACTERS_WORDS
+            ),
+            on_import=lambda: self._import_field(self.characters_box),
         )
         self.characters_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
 
@@ -532,8 +758,83 @@ class StoryForgeApp(ctk.CTk):
         self.setting_box = LimitedTextBox(
             self.tab_setting, "Setting (donde y cuando ocurre la historia)",
             MAX_SETTING_WORDS, height=500,
+            on_expand=lambda: self._expand_field(self.setting_box, "setting", "Setting", MAX_SETTING_WORDS),
+            on_import=lambda: self._import_field(self.setting_box),
         )
         self.setting_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+    def _import_field(self, box: LimitedTextBox) -> None:
+        """Reemplaza el contenido de `box` con el texto de un archivo elegido
+        por el usuario. Sincrono, no toca el motor -- no requiere el
+        candado de self.busy."""
+        path = filedialog.askopenfilename(
+            title="Importar texto desde archivo",
+            filetypes=[("Texto", "*.txt"), ("Todos los archivos", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            text = Path(path).read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            messagebox.showerror(APP_TITLE, f"No se pudo leer el archivo: {exc}")
+            return
+        if box.get().strip() and not messagebox.askyesno(
+            APP_TITLE, "Esto reemplazara el contenido actual de este campo. ¿Continuar?"
+        ):
+            return
+        box.set(text)
+
+    def _expand_field(self, box: LimitedTextBox, field_key: str, field_label: str, max_words: int) -> None:
+        """
+        Toma la nota corta que el usuario ya escribio en `box` y la
+        reemplaza por una version mas desarrollada, generada por el modelo
+        (LocalStoryEngine.expand_field()). Igual que cualquier otra accion
+        que llama al motor, respeta self.busy / _set_engine_busy().
+        """
+        if not self.engine.is_loaded:
+            messagebox.showwarning(APP_TITLE, "Primero carga un modelo local (.gguf) en la pestana 'Modelo'.")
+            return
+        if self.busy:
+            messagebox.showwarning(
+                APP_TITLE, "Ya hay una generacion en curso. Espera a que termine antes de iniciar otra."
+            )
+            return
+        text = box.get().strip()
+        if not text:
+            messagebox.showwarning(APP_TITLE, f"Escribe una idea corta en {field_label} primero.")
+            return
+        if count_words(text) > 60 and not messagebox.askyesno(
+            APP_TITLE,
+            f"{field_label} ya tiene bastante texto escrito. Expandir con IA lo reemplaza por "
+            "completo. ¿Continuar?",
+        ):
+            return
+
+        self._set_engine_busy(True)
+
+        def worker():
+            try:
+                expanded = self.engine.expand_field(field_key, text, max_words=min(max_words, 500))
+
+                def apply():
+                    box.set(expanded)
+                self.after(0, apply)
+            except ModelNotLoadedError as exc:
+                # Ver el comentario equivalente en ChapterPanel._on_generate:
+                # `exc` se borra al salir del bloque except, y self.after()
+                # difiere la llamada hasta despues de eso.
+                message = str(exc)
+                self.after(0, lambda: messagebox.showerror(APP_TITLE, message))
+            except ContextOverflowError as exc:
+                message = f"El contexto es demasiado grande para este modelo:\n\n{exc}"
+                self.after(0, lambda: messagebox.showerror(APP_TITLE, message))
+            except Exception as exc:  # noqa: BLE001
+                message = f"Error expandiendo el campo: {exc}"
+                self.after(0, lambda: messagebox.showerror(APP_TITLE, message))
+            finally:
+                self.after(0, lambda: self._set_engine_busy(False))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _build_outline_tab(self) -> None:
         tab = self.tab_outline
@@ -720,8 +1021,9 @@ class StoryForgeApp(ctk.CTk):
         """
         Deshabilita, a nivel de toda la app, todo lo que pueda disparar una
         llamada al modelo (generar un capitulo, generar el esquema, cargar un
-        modelo nuevo) mientras alguna de esas operaciones ya esta en curso en
-        otro hilo. self.engine envuelve una sola instancia de Llama, que no
+        modelo nuevo, refinar un capitulo, expandir Plot/Personajes/Setting
+        con IA) mientras alguna de esas operaciones ya esta en curso en otro
+        hilo. self.engine envuelve una sola instancia de Llama, que no
         soporta llamadas concurrentes.
         """
         self.busy = busy
@@ -736,6 +1038,11 @@ class StoryForgeApp(ctk.CTk):
         for panel in self.chapter_panels:
             panel.generate_btn.configure(state=state)
             panel.remove_btn.configure(state=state)
+            panel.refine_btn.configure(state=state)
+        for box in (self.plot_box, self.characters_box, self.setting_box):
+            expand_btn = getattr(box, "expand_btn", None)
+            if expand_btn is not None:
+                expand_btn.configure(state=state)
 
     # ---------------- autoguardado ----------------
     def _offer_autosave_recovery(self) -> None:

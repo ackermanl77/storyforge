@@ -17,6 +17,10 @@ MAX_SETTING_WORDS = 10_000
 MAX_CHAPTERS = 10
 MAX_WORDS_PER_CHAPTER = 10_000
 MAX_OUTLINE_WORDS_PER_CHAPTER = 800
+# Cuantas versiones anteriores de chapter.content se conservan (la mas vieja
+# se descarta al llegar al limite) cada vez que se regenera o refina un
+# capitulo que ya tenia contenido -- ver Chapter.push_history().
+MAX_CHAPTER_HISTORY = 5
 
 # Tipos de escritura seleccionables (aplican a toda la historia, no por
 # capitulo). "" (sin seleccionar) significa usar solo el STYLE_GUIDE por
@@ -28,6 +32,16 @@ WRITING_STYLES = [
     "Dialogo",
     "Poetica",
     "Accion rapida",
+]
+
+# Proposito narrativo de un capitulo especifico (a diferencia de
+# writing_style, que aplica a toda la historia). "" = capitulo regular, sin
+# instruccion adicional.
+CHAPTER_PURPOSES = [
+    "Apertura",
+    "Escena climatica",
+    "Final",
+    "Epilogo",
 ]
 
 _WORD_RE = re.compile(r"\b[\w'\-]+\b", re.UNICODE)
@@ -50,12 +64,33 @@ class Chapter:
     # esquema/beat sheet de este capitulo (generado o manual), usado para guiar
     # la generacion de prosa antes de escribirla (workflow "outline-first")
     outline: str = ""
+    # uno de CHAPTER_PURPOSES, o "" para un capitulo regular sin instruccion
+    # narrativa adicional (ver prompts.build_chapter_purpose_instruction)
+    purpose: str = ""
+    # versiones anteriores de `content`, mas vieja primero, acotado a
+    # MAX_CHAPTER_HISTORY (ver push_history()) -- permite recuperar el texto
+    # de antes de un regenerar/refinar sin depender solo de la confirmacion
+    # previa al sobrescribir
+    history: List[str] = field(default_factory=list)
 
     def word_count(self) -> int:
         return count_words(self.content)
 
     def outline_words(self) -> int:
         return count_words(self.outline)
+
+    def push_history(self) -> None:
+        """
+        Guarda el `content` actual en `history` antes de que algo lo
+        sobrescriba (regenerar, refinar, o restaurar otra version). No hace
+        nada si el contenido actual esta vacio -- no tiene sentido guardar
+        "nada" como una version.
+        """
+        if not self.content.strip():
+            return
+        self.history.append(self.content)
+        if len(self.history) > MAX_CHAPTER_HISTORY:
+            self.history = self.history[-MAX_CHAPTER_HISTORY:]
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -68,6 +103,8 @@ class Chapter:
             content=d.get("content", ""),
             summary=d.get("summary", ""),
             outline=d.get("outline", ""),
+            purpose=d.get("purpose", ""),
+            history=list(d.get("history", [])),
         )
 
 

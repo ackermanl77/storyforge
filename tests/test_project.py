@@ -6,9 +6,11 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.project import (
+    MAX_CHAPTER_HISTORY,
     MAX_CHAPTERS,
     MAX_OUTLINE_WORDS_PER_CHAPTER,
     MAX_WORDS_PER_CHAPTER,
+    Chapter,
     Project,
     count_words,
 )
@@ -84,6 +86,31 @@ class TestProjectValidation(unittest.TestCase):
         self.assertEqual(p.validate_inputs(), [])
 
 
+class TestChapterHistory(unittest.TestCase):
+    def test_push_history_does_nothing_for_empty_content(self):
+        ch = Chapter()
+        ch.push_history()
+        self.assertEqual(ch.history, [])
+
+    def test_push_history_records_current_content(self):
+        ch = Chapter(content="first draft")
+        ch.push_history()
+        self.assertEqual(ch.history, ["first draft"])
+        # push_history no vacia el content actual, solo lo copia a history --
+        # quien llama es responsable de sobrescribir content por separado.
+        self.assertEqual(ch.content, "first draft")
+
+    def test_push_history_caps_at_max_chapter_history(self):
+        ch = Chapter()
+        for i in range(MAX_CHAPTER_HISTORY + 3):
+            ch.content = f"draft {i}"
+            ch.push_history()
+        self.assertEqual(len(ch.history), MAX_CHAPTER_HISTORY)
+        # se conservan las mas recientes, se descartan las mas viejas
+        self.assertEqual(ch.history[-1], f"draft {MAX_CHAPTER_HISTORY + 2}")
+        self.assertEqual(ch.history[0], f"draft {3}")
+
+
 class TestPersistence(unittest.TestCase):
     def test_save_and_load_roundtrip(self):
         p = Project(name="Mi historia", plot="Once upon a time", characters="Ana", setting="A forest")
@@ -120,6 +147,34 @@ class TestPersistence(unittest.TestCase):
                 f.write('{"name": "Vieja", "plot": "x", "characters": "", "setting": "", "chapters": []}')
             loaded = Project.load(path)
         self.assertEqual(loaded.writing_style, "")
+
+    def test_chapter_purpose_and_history_round_trip(self):
+        p = Project()
+        chapter = p.add_chapter("Cap", target_words=100)
+        chapter.content = "final version"
+        chapter.purpose = "Escena climatica"
+        chapter.push_history()  # guarda "final version" antes de este cambio de ejemplo
+        chapter.content = "final version"
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "project.json")
+            p.save(path)
+            loaded = Project.load(path)
+
+        self.assertEqual(loaded.chapters[0].purpose, "Escena climatica")
+        self.assertEqual(loaded.chapters[0].history, ["final version"])
+
+    def test_loading_a_project_saved_without_purpose_or_history_defaults_to_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "old_project.json")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(
+                    '{"name": "Vieja", "plot": "", "characters": "", "setting": "", '
+                    '"chapters": [{"title": "Cap 1", "target_words": 100, "content": "x"}]}'
+                )
+            loaded = Project.load(path)
+        self.assertEqual(loaded.chapters[0].purpose, "")
+        self.assertEqual(loaded.chapters[0].history, [])
 
 
 if __name__ == "__main__":

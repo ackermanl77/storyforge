@@ -7,6 +7,7 @@ sin las dependencias de GUI instaladas.
 """
 import os
 import sys
+import tempfile
 import unittest
 from unittest import mock
 
@@ -22,7 +23,7 @@ try:
     import customtkinter  # noqa: F401
 
     from app.engine import ContextOverflowError, ModelNotLoadedError
-    from app.gui import StoryForgeApp
+    from app.gui import CHAPTER_PURPOSE_DEFAULT_LABEL, StoryForgeApp, VersionHistoryDialog
 except Exception as _import_exc:  # pragma: no cover - environment dependent
     GUI_AVAILABLE = False
     _SKIP_REASON = f"GUI dependencies not available: {_import_exc}"
@@ -167,6 +168,227 @@ class TestBackgroundErrorReporting(unittest.TestCase):
 
         self.assertEqual(self.callback_exceptions, [], f"deferred Tk callback raised: {self.callback_exceptions}")
         self.assertIn("bad gguf file", self.app.model_status.cget("text"))
+
+    def test_error_shown_when_expanding_a_field(self):
+        class FailingEngine:
+            is_loaded = True
+
+            def expand_field(self, *a, **k):
+                raise ModelNotLoadedError("no model loaded")
+
+        self.app.engine = FailingEngine()
+        self.app.plot_box.set("a short idea")
+
+        self.app._expand_field(self.app.plot_box, "plot", "Plot", 50_000)
+        self._flush_deferred_callbacks()
+
+        self.assertEqual(self.callback_exceptions, [], f"deferred Tk callback raised: {self.callback_exceptions}")
+        self.assertEqual(self.shown_errors, ["no model loaded"])
+        # el campo no debe haberse tocado si la expansion fallo
+        self.assertEqual(self.app.plot_box.get(), "a short idea")
+
+    def test_error_shown_when_refining_a_chapter(self):
+        class FailingEngine:
+            is_loaded = True
+
+            def refine_chapter(self, *a, **k):
+                raise ContextOverflowError("too much context")
+
+        self.app.engine = FailingEngine()
+        self.app.project.add_chapter("Cap 1", target_words=100)
+        self.app._render_chapters()
+        panel = self.app.chapter_panels[0]
+        panel.chapter.content = "Existing chapter text."
+        panel.content_box.insert("1.0", panel.chapter.content)
+        panel.refine_entry.insert(0, "make it darker")
+
+        # askyesno esta mockeado a False en este fixture (ver setUp) -- pero
+        # _on_refine solo pide confirmar si hay contenido, y aqui SI lo hay,
+        # asi que con askyesno=False la confirmacion se rechazaria y nunca
+        # llegaria a llamar al motor. Para este test se necesita True.
+        with mock.patch("app.gui.messagebox.askyesno", return_value=True):
+            panel._on_refine()
+        self._flush_deferred_callbacks()
+
+        self.assertEqual(self.callback_exceptions, [], f"deferred Tk callback raised: {self.callback_exceptions}")
+        self.assertEqual(len(self.shown_errors), 1)
+        self.assertIn("too much context", self.shown_errors[0])
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestChapterPurposeSync(unittest.TestCase):
+    def setUp(self):
+        self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=False)
+        self._askyesno_patcher.start()
+        self.app = StoryForgeApp()
+        self.app.project.add_chapter("Cap 1")
+        self.app._render_chapters()
+        self.panel = self.app.chapter_panels[0]
+
+    def tearDown(self):
+        self.app.destroy()
+        self._askyesno_patcher.stop()
+
+    def test_selecting_a_purpose_syncs_to_the_chapter(self):
+        self.panel.purpose_menu.set("Epilogo")
+        self.panel.sync_to_model()
+        self.assertEqual(self.panel.chapter.purpose, "Epilogo")
+
+    def test_default_label_syncs_to_empty_string(self):
+        self.panel.purpose_menu.set("Epilogo")
+        self.panel.sync_to_model()
+        self.panel.purpose_menu.set(CHAPTER_PURPOSE_DEFAULT_LABEL)
+        self.panel.sync_to_model()
+        self.assertEqual(self.panel.chapter.purpose, "")
+
+    def test_panel_starts_with_the_chapters_existing_purpose_selected(self):
+        self.app.project.chapters[0].purpose = "Final"
+        self.app._render_chapters()
+        panel = self.app.chapter_panels[0]
+        self.assertEqual(panel.purpose_menu.get(), "Final")
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestImportField(unittest.TestCase):
+    def setUp(self):
+        self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=False)
+        self._askyesno_patcher.start()
+        self.app = StoryForgeApp()
+
+    def tearDown(self):
+        self.app.destroy()
+        self._askyesno_patcher.stop()
+
+    def test_import_replaces_empty_field(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+            f.write("Imported text content.")
+            path = f.name
+        try:
+            self.app.plot_box.set("")
+            with mock.patch("app.gui.filedialog.askopenfilename", return_value=path):
+                self.app._import_field(self.app.plot_box)
+            self.assertEqual(self.app.plot_box.get(), "Imported text content.")
+        finally:
+            os.remove(path)
+
+    def test_import_over_existing_content_requires_confirmation(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+            f.write("New file content.")
+            path = f.name
+        try:
+            self.app.plot_box.set("existing content")
+            with mock.patch("app.gui.filedialog.askopenfilename", return_value=path), \
+                 mock.patch("app.gui.messagebox.askyesno", return_value=False) as mock_confirm:
+                self.app._import_field(self.app.plot_box)
+                self.assertTrue(mock_confirm.called)
+            # se rechazo la confirmacion -> el contenido original sigue intacto
+            self.assertEqual(self.app.plot_box.get(), "existing content")
+        finally:
+            os.remove(path)
+
+    def test_cancelling_the_file_dialog_does_nothing(self):
+        self.app.plot_box.set("existing content")
+        with mock.patch("app.gui.filedialog.askopenfilename", return_value=""):
+            self.app._import_field(self.app.plot_box)
+        self.assertEqual(self.app.plot_box.get(), "existing content")
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestExpandAndRefineHappyPath(unittest.TestCase):
+    def setUp(self):
+        self._thread_patcher = mock.patch("app.gui.threading.Thread", _SynchronousThread)
+        self._thread_patcher.start()
+        self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=True)
+        self._askyesno_patcher.start()
+        self.app = StoryForgeApp()
+
+    def tearDown(self):
+        self.app.destroy()
+        self._askyesno_patcher.stop()
+        self._thread_patcher.stop()
+
+    def test_expand_field_replaces_box_content(self):
+        class FakeEngine:
+            is_loaded = True
+
+            def expand_field(self, field_key, text, max_words=400):
+                return f"EXPANDED[{field_key}]: {text}"
+
+        self.app.engine = FakeEngine()
+        self.app.plot_box.set("a short idea")
+        self.app._expand_field(self.app.plot_box, "plot", "Plot", 50_000)
+        self.app.update()
+        self.assertEqual(self.app.plot_box.get(), "EXPANDED[plot]: a short idea")
+
+    def test_refine_chapter_replaces_content_and_records_history(self):
+        class FakeEngine:
+            is_loaded = True
+
+            def refine_chapter(self, project, chapter_index, instruction):
+                return f"REFINED per '{instruction}'"
+
+        self.app.engine = FakeEngine()
+        self.app.project.add_chapter("Cap 1", target_words=100)
+        self.app._render_chapters()
+        panel = self.app.chapter_panels[0]
+        panel.chapter.content = "Original text."
+        panel.content_box.insert("1.0", panel.chapter.content)
+        panel.refine_entry.insert(0, "make it darker")
+
+        panel._on_refine()
+        self.app.update()
+
+        self.assertEqual(panel.chapter.content, "REFINED per 'make it darker'")
+        self.assertEqual(panel.content_box.get("1.0", "end-1c"), panel.chapter.content)
+        self.assertEqual(panel.chapter.history, ["Original text."])
+        self.assertEqual(panel.history_btn.cget("text"), "Versiones anteriores (1)")
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestVersionHistoryDialog(unittest.TestCase):
+    def setUp(self):
+        self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=True)
+        self._askyesno_patcher.start()
+        self.app = StoryForgeApp()
+        self.app.project.add_chapter("Cap 1")
+        self.app._render_chapters()
+        self.panel = self.app.chapter_panels[0]
+        self.panel.chapter.content = "first draft"
+        self.panel.chapter.push_history()
+        self.panel.chapter.content = "second draft"
+        self.panel.chapter.push_history()
+        self.panel.chapter.content = "current draft"
+
+    def tearDown(self):
+        self.app.destroy()
+        self._askyesno_patcher.stop()
+
+    def test_most_recent_version_is_shown_first_and_previewed_by_default(self):
+        dialog = VersionHistoryDialog(self.app, self.panel)
+        try:
+            self.assertIn("Version 2", dialog._labels[0])
+            self.assertEqual(dialog.preview_box.get("1.0", "end-1c"), "second draft")
+        finally:
+            dialog.destroy()
+
+    def test_restore_replaces_content_and_preserves_it_in_history(self):
+        dialog = VersionHistoryDialog(self.app, self.panel)
+        try:
+            dialog._on_restore()  # restaura la version seleccionada por defecto (la mas reciente)
+        finally:
+            pass  # _on_restore ya se encarga de destroy()
+        self.assertEqual(self.panel.chapter.content, "second draft")
+        self.assertEqual(self.panel.content_box.get("1.0", "end-1c"), "second draft")
+        # "current draft" (lo que habia antes de restaurar) queda preservado
+        self.assertIn("current draft", self.panel.chapter.history)
+
+    def test_history_button_opens_dialog_only_when_history_exists(self):
+        self.app.project.add_chapter("Cap sin historial")
+        self.app._render_chapters()
+        empty_panel = self.app.chapter_panels[1]
+        with mock.patch("app.gui.messagebox.showinfo") as mock_info:
+            empty_panel._on_show_history()
+            mock_info.assert_called_once()
 
 
 if __name__ == "__main__":

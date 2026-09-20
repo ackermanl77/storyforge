@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from typing import List, Tuple
 
-from .project import Project
+from .project import Chapter, Project
 
 # Instruccion en ingles (la salida siempre se pide en ingles, ver STYLE_GUIDE
 # abajo) para cada valor posible de project.writing_style (project.WRITING_
@@ -55,6 +55,52 @@ def build_writing_style_instruction(project: Project) -> str:
     if not instruction:
         return ""
     return f"WRITING STYLE EMPHASIS: {instruction}\n\n"
+
+
+# Instruccion en ingles para cada valor posible de chapter.purpose (project.
+# CHAPTER_PURPOSES). A diferencia de WRITING_STYLE_INSTRUCTIONS (aplica a
+# toda la historia), esto es especifico de UN capitulo: le dice al modelo
+# que rol narrativo cumple este capitulo dentro del arco completo.
+CHAPTER_PURPOSE_INSTRUCTIONS = {
+    "Apertura": (
+        "This is the OPENING chapter of the story. Establish the setting, "
+        "introduce the protagonist and the normal world before it's "
+        "disrupted, and end with (or lead directly into) the inciting "
+        "incident that sets the story in motion. Do not resolve anything yet."
+    ),
+    "Escena climatica": (
+        "This is the story's CLIMAX. Build steadily toward the central "
+        "conflict's decisive confrontation or turning point, raise the "
+        "stakes and tension throughout, and deliver a genuine, consequential "
+        "turning point by the end of the chapter -- not a minor skirmish."
+    ),
+    "Final": (
+        "This is the story's FINAL chapter. Resolve the central conflict, "
+        "show the direct consequences of the climax, and give the main "
+        "character arc(s) a clear, earned conclusion. Do not introduce new "
+        "unresolved plot threads."
+    ),
+    "Epilogo": (
+        "This is an EPILOGUE. It takes place after the main story's events "
+        "are already resolved -- skip ahead in time if appropriate. Show the "
+        "lasting aftermath and where the characters end up, in a shorter, "
+        "more reflective register than a regular chapter. Do not introduce "
+        "new conflict."
+    ),
+}
+
+
+def build_chapter_purpose_instruction(chapter: Chapter) -> str:
+    """
+    Linea de instruccion adicional segun chapter.purpose. Vacio si el
+    capitulo no tiene uno asignado (o el valor guardado no coincide con
+    ningun proposito conocido) -- en ese caso se trata como un capitulo
+    regular, sin instruccion de rol narrativo.
+    """
+    instruction = CHAPTER_PURPOSE_INSTRUCTIONS.get(chapter.purpose.strip())
+    if not instruction:
+        return ""
+    return f"CHAPTER PURPOSE: {instruction}\n\n"
 
 
 STYLE_GUIDE = """\
@@ -168,6 +214,7 @@ def build_chapter_system_prompt(
             f"reorder the events described):\n{outline_text}\n\n"
         )
     style_emphasis = build_writing_style_instruction(project)
+    purpose_instruction = build_chapter_purpose_instruction(chapter)
     return (
         "You are a skilled fiction writer producing one chapter of a longer "
         "story for an adult creative-writing project. Stay fully consistent "
@@ -177,6 +224,7 @@ def build_chapter_system_prompt(
         f"{overview}\n"
         f"PROGRESS SO FAR:\n{previous}\n\n"
         f"{outline_block}"
+        f"{purpose_instruction}"
         f"{style_emphasis}"
         f"{STYLE_GUIDE}\n"
         f"Now write Chapter {chapter_index + 1}, titled \"{chapter.title}\". "
@@ -256,4 +304,71 @@ def build_continuation_prompt(already_written: str, remaining_words: int, tail_w
         f"...(end of what has been written so far)\n{tail}\n\n"
         f"Continue for about {remaining_words} more words, keeping the same "
         f"tone, characters and formatting rules."
+    )
+
+
+# Etiquetas en ingles para cada campo que puede expandirse con IA (ver
+# build_expand_field_prompt / engine.LocalStoryEngine.expand_field). Las
+# claves coinciden con las que usa app/gui.py al llamar a esa funcion.
+EXPAND_FIELD_LABELS = {
+    "plot": "story plot / premise",
+    "characters": "cast of characters",
+    "setting": "setting",
+}
+
+
+def build_expand_field_prompt(field_key: str, text: str, max_words: int) -> str:
+    """
+    Prompt para que el modelo tome una nota corta (p.ej. una idea de plot en
+    una linea) y la desarrolle en un texto mas completo, sin inventar una
+    historia distinta a la que el usuario ya planteo. `field_key` es una
+    clave de EXPAND_FIELD_LABELS ("plot"/"characters"/"setting").
+    """
+    label = EXPAND_FIELD_LABELS.get(field_key, field_key)
+    return (
+        f"You are a fiction editor helping an author flesh out their {label} "
+        "notes for a story they are planning. Expand the notes below into a "
+        "fuller, well-organized version in the same spirit — do not change "
+        "the core ideas, characters, or setting already implied, only "
+        "develop and clarify them with more detail. Do not start writing the "
+        "story itself, only the notes. Do not add meta-commentary or "
+        f"explanations outside the notes themselves. Keep it under {max_words} words.\n\n"
+        f"CURRENT {label.upper()} NOTES:\n{text.strip()}\n\n"
+        "Expanded notes:"
+    )
+
+
+def build_refine_chapter_prompt(
+    project: Project,
+    chapter_index: int,
+    instruction: str,
+    max_content_words: int = 3000,
+) -> str:
+    """
+    Prompt para revisar un capitulo YA generado segun una instruccion del
+    usuario (p.ej. "hazlo mas oscuro", "acorta la escena del mercado"), en
+    vez de generar texto nuevo desde cero. Mantiene el STYLE_GUIDE y el
+    enfasis de writing_style del proyecto (las reglas de formato siguen
+    aplicando a la version revisada).
+    """
+    chapter = project.chapters[chapter_index]
+    # A diferencia de build_continuation_prompt (que solo necesita el FINAL
+    # de lo escrito para saber donde retomar), una revision idealmente
+    # necesita el capitulo COMPLETO -- por eso se conserva el inicio
+    # (_trim_words) en vez de la cola si no cabe entero, como el resto de
+    # los campos de contexto de este archivo.
+    content = _trim_words(chapter.content.strip(), max_content_words)
+    style_emphasis = build_writing_style_instruction(project)
+    return (
+        "You are editing an already-written chapter of a longer story, per "
+        "the author's instruction below. Rewrite the chapter applying that "
+        "instruction, keeping the plot events, characters, and overall "
+        "length roughly the same unless the instruction says otherwise. "
+        "Output only the revised chapter text, nothing else — no notes, no "
+        "commentary, no explanation of what you changed.\n\n"
+        f"EDITING INSTRUCTION: {instruction.strip()}\n\n"
+        f"{style_emphasis}"
+        f"{STYLE_GUIDE}\n"
+        f"CURRENT CHAPTER TEXT:\n{content}\n\n"
+        "Revised chapter:"
     )
