@@ -7,6 +7,13 @@ These guides document current application behavior: what each feature does, wher
 - [Outline-first beat sheet](outline/workflow.md)
 - [Chapter generation](chapter-generation/workflow.md)
 - [Writing style emphasis](writing-style/workflow.md)
+- [Chapter purpose](chapter-purpose/workflow.md)
+- [Plot / Characters / Setting: expand and import](field-assist/workflow.md)
+
+## Editing Generated Content
+
+- [Chapter refinement](chapter-refinement/workflow.md)
+- [Chapter version history](version-history/workflow.md)
 
 ## Post-Processing and Output
 
