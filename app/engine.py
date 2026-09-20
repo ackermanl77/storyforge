@@ -13,7 +13,9 @@ from .project import MAX_CHAPTERS, Project, count_words
 from .prompts import (
     build_chapter_system_prompt,
     build_continuation_prompt,
+    build_expand_field_prompt,
     build_outline_prompt,
+    build_refine_chapter_prompt,
     parse_outline_response,
 )
 
@@ -36,10 +38,14 @@ OUTLINE_WORDS_PER_CHAPTER = 100  # presupuesto de salida por capitulo al generar
 # esquema de capitulo inusualmente largo podia hacer que ni el nivel mas
 # chico de presupuesto cupiera, con un error que sugeria enganosamente que
 # "ya se redujo al minimo" cuando el esquema nunca se toco.
+# max_content_words cubre refine_chapter(): el capitulo completo a revisar
+# se prioriza sobre plot/personajes/setting (refine_chapter no los incluye
+# en absoluto -- ver build_refine_chapter_prompt), asi que se le da un
+# presupuesto generoso relativo a los demas campos.
 CONTEXT_BUDGET_LEVELS = [
-    dict(max_plot_words=1200, max_characters_words=600, max_setting_words=600, max_previous_words=500, max_outline_words=400, tail_words=400),
-    dict(max_plot_words=700, max_characters_words=400, max_setting_words=400, max_previous_words=300, max_outline_words=250, tail_words=250),
-    dict(max_plot_words=350, max_characters_words=200, max_setting_words=200, max_previous_words=150, max_outline_words=120, tail_words=150),
+    dict(max_plot_words=1200, max_characters_words=600, max_setting_words=600, max_previous_words=500, max_outline_words=400, max_content_words=3000, tail_words=400),
+    dict(max_plot_words=700, max_characters_words=400, max_setting_words=400, max_previous_words=300, max_outline_words=250, max_content_words=1800, tail_words=250),
+    dict(max_plot_words=350, max_characters_words=200, max_setting_words=200, max_previous_words=150, max_outline_words=120, max_content_words=900, tail_words=150),
 ]
 
 
@@ -304,3 +310,49 @@ class LocalStoryEngine:
         text_to_summarize = self._fit_text_to_token_budget(text, available_for_text)
         prompt = f"{instructions}{text_to_summarize}{suffix}"
         return self._complete(prompt, max_tokens=max_out_tokens)
+
+    def expand_field(self, field_key: str, text: str, max_words: int = 400) -> str:
+        """
+        Toma una nota corta (p.ej. una idea de plot en una linea) y la
+        desarrolla en un texto mas completo, sin inventar una historia
+        distinta. `field_key` es "plot"/"characters"/"setting" (ver
+        prompts.EXPAND_FIELD_LABELS). Recorta `text` si por si solo ya no
+        cabria en la ventana de contexto, igual que summarize().
+        """
+        if self._llm is None:
+            raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
+
+        max_out_tokens = int(max_words * TOKENS_PER_WORD_ESTIMATE) + 60
+        scaffolding_tokens = self._count_tokens(build_expand_field_prompt(field_key, "", max_words))
+        available_for_text = self._available_context(max_out_tokens) - scaffolding_tokens
+
+        trimmed_text = self._fit_text_to_token_budget(text, available_for_text)
+        prompt = build_expand_field_prompt(field_key, trimmed_text, max_words)
+        return self._complete(prompt, max_tokens=max_out_tokens)
+
+    def refine_chapter(self, project: Project, chapter_index: int, instruction: str) -> str:
+        """
+        Revisa un capitulo YA generado segun una instruccion del usuario
+        (p.ej. "hazlo mas oscuro"), en vez de generar texto nuevo. A
+        diferencia de generate_chapter(), no incluye plot/personajes/setting
+        en el prompt -- prioriza conservar la mayor parte posible del
+        capitulo original a revisar (ver build_refine_chapter_prompt), asi
+        que un capitulo muy largo con un n_ctx chico puede seguir sin caber
+        incluso con el presupuesto mas chico; el mensaje de
+        ContextOverflowError ya sugiere aumentar n_ctx, que ahora es
+        configurable desde la pestana Modelo.
+        """
+        if self._llm is None:
+            raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
+
+        chapter = project.chapters[chapter_index]
+        target_words = max(chapter.word_count(), chapter.target_words)
+        max_tokens = int(target_words * TOKENS_PER_WORD_ESTIMATE) + 128
+
+        def prompt_for_budget(budget: dict) -> str:
+            return build_refine_chapter_prompt(
+                project, chapter_index, instruction,
+                max_content_words=budget["max_content_words"],
+            )
+
+        return self._complete_with_shrinking_budget(prompt_for_budget, max_tokens)

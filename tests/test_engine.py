@@ -13,6 +13,7 @@ from app.engine import (
 from app.project import Project
 from app.prompts import (
     _trim_words_tail,
+    build_chapter_purpose_instruction,
     build_chapter_system_prompt,
     build_outline_prompt,
     build_writing_style_instruction,
@@ -198,6 +199,106 @@ class TestWritingStyleEmphasis(unittest.TestCase):
         prompt = build_outline_prompt(project, num_chapters=3)
         self.assertIn("WRITING STYLE EMPHASIS", prompt)
         self.assertIn("fast pacing", prompt)
+
+
+class TestChapterPurposeInstruction(unittest.TestCase):
+    def test_no_purpose_selected_adds_no_instruction(self):
+        project = make_project()
+        project.chapters[0].purpose = ""
+        self.assertEqual(build_chapter_purpose_instruction(project.chapters[0]), "")
+        self.assertNotIn("CHAPTER PURPOSE", build_chapter_system_prompt(project, 0))
+
+    def test_unknown_purpose_value_is_ignored_not_an_error(self):
+        project = make_project()
+        project.chapters[0].purpose = "algo que ya no existe"
+        self.assertEqual(build_chapter_purpose_instruction(project.chapters[0]), "")
+
+    def test_known_purpose_adds_its_instruction_to_the_chapter_prompt(self):
+        project = make_project()
+        project.chapters[0].purpose = "Epilogo"
+        prompt = build_chapter_system_prompt(project, 0)
+        self.assertIn("CHAPTER PURPOSE", prompt)
+        self.assertIn("EPILOGUE", prompt)
+
+    def test_opening_purpose_instruction(self):
+        project = make_project()
+        project.chapters[0].purpose = "Apertura"
+        prompt = build_chapter_system_prompt(project, 0)
+        self.assertIn("OPENING chapter", prompt)
+
+    def test_climax_purpose_instruction(self):
+        project = make_project()
+        project.chapters[0].purpose = "Escena climatica"
+        prompt = build_chapter_system_prompt(project, 0)
+        self.assertIn("CLIMAX", prompt)
+
+    def test_final_purpose_instruction(self):
+        project = make_project()
+        project.chapters[0].purpose = "Final"
+        prompt = build_chapter_system_prompt(project, 0)
+        self.assertIn("FINAL chapter", prompt)
+
+
+class TestExpandField(unittest.TestCase):
+    def test_expand_field_without_model_raises(self):
+        engine = LocalStoryEngine()
+        with self.assertRaises(ModelNotLoadedError):
+            engine.expand_field("plot", "a short idea", max_words=100)
+
+    def test_expand_field_returns_model_output(self):
+        engine = LocalStoryEngine()
+        engine._llm = FakeLlama()
+        result = engine.expand_field("plot", "a hero's journey", max_words=100)
+        self.assertTrue(result.strip())
+
+    def test_expand_field_trims_very_long_input_to_fit_context(self):
+        engine = LocalStoryEngine()
+        engine._llm = FakeLlama()
+        engine._n_ctx = 500
+        long_note = "idea " * 5000
+        result = engine.expand_field("characters", long_note, max_words=50)
+        self.assertTrue(result.strip())
+
+
+class TestRefineChapter(unittest.TestCase):
+    def test_refine_chapter_without_model_raises(self):
+        engine = LocalStoryEngine()
+        project = make_project()
+        project.chapters[0].content = "Once upon a time."
+        with self.assertRaises(ModelNotLoadedError):
+            engine.refine_chapter(project, 0, "make it darker")
+
+    def test_refine_chapter_returns_model_output(self):
+        engine = LocalStoryEngine()
+        engine._llm = FakeLlama()
+        project = make_project()
+        project.chapters[0].content = "Once upon a time, a hero set out."
+        result = engine.refine_chapter(project, 0, "make it darker")
+        self.assertTrue(result.strip())
+
+    def test_refine_chapter_shrinks_budget_until_it_fits(self):
+        engine = LocalStoryEngine()
+        engine._llm = FakeLlama()
+        engine._count_tokens = lambda text: len(text.split())
+        engine._n_ctx = 6000
+        project = make_project(target_words=100)
+        # 2500 palabras: menos que max_content_words del nivel completo
+        # (3000, asi que no se recorta ahi y el prompt no cabe), pero mas que
+        # el del nivel intermedio (1800, donde si se recorta y termina
+        # cabiendo).
+        project.chapters[0].content = "word " * 2500
+        result = engine.refine_chapter(project, 0, "shorten this")
+        self.assertTrue(result.strip())
+
+    def test_refine_chapter_does_not_leak_plot_characters_setting(self):
+        # build_refine_chapter_prompt deliberadamente no incluye plot/
+        # personajes/setting -- prioriza conservar el capitulo completo.
+        from app.prompts import build_refine_chapter_prompt
+        project = make_project()
+        project.plot = "UNIQUE_PLOT_MARKER_TEXT"
+        project.chapters[0].content = "Once upon a time."
+        prompt = build_refine_chapter_prompt(project, 0, "make it darker")
+        self.assertNotIn("UNIQUE_PLOT_MARKER_TEXT", prompt)
 
 
 class TestModelReload(unittest.TestCase):

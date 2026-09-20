@@ -20,6 +20,19 @@ externa una vez que tienes el modelo descargado.
   Accion rapida, o ninguno) que se le pide al modelo respetar tanto al
   generar el esquema como la prosa de cada capitulo, encima de las
   convenciones de formato de siempre.
+- **Proposito de capitulo**: cada capitulo (no toda la historia) puede
+  marcarse como Apertura, Escena climatica, Final, o Epilogo, para que el
+  modelo sepa que rol narrativo cumple ese capitulo especifico.
+- **Refinar un capitulo ya generado**: en vez de regenerarlo desde cero,
+  puedes pedirle al modelo que lo reescriba segun una instruccion puntual
+  ("hazlo mas oscuro", "acorta el dialogo del final").
+- **Versiones anteriores por capitulo**: regenerar, refinar, o reducir
+  repeticion guarda la version previa (hasta 5 por capitulo), recuperable
+  desde un boton en cada capitulo.
+- **Expandir con IA / Importar desde archivo**: en Plot, Personajes y
+  Setting, puedes pedirle al modelo que desarrolle una nota corta en un
+  texto mas completo, o importar el contenido directo desde un archivo
+  `.txt`.
 - Limites de palabras validados: plot ≤ 50,000, personajes ≤ 10,000,
   setting ≤ 10,000, hasta 10 capitulos de hasta 10,000 palabras cada uno.
 - Generacion de capitulos por secciones (para poder llegar a objetivos
@@ -33,6 +46,21 @@ externa una vez que tienes el modelo descargado.
   texto plano (.txt).
 
 ## Historial de cambios
+
+**Nuevas funcionalidades — inspiradas en un generador de historias de la competencia (toolsaday.com), a pedido del usuario:**
+- **Proposito de capitulo**: selector "Proposito" (Apertura/Escena climatica/
+  Final/Epilogo) en cada capitulo, independiente del "Tipo de escritura"
+  (que es de toda la historia).
+- **Refinar capitulo**: reescribe un capitulo ya generado segun una
+  instruccion puntual, sin tener que regenerarlo entero. Nota: a diferencia
+  de generar (que se hace por secciones), refinar necesita que el capitulo
+  completo quepa en el contexto del modelo de una sola vez — un capitulo muy
+  largo puede necesitar subir `n_ctx` en la pestaña Modelo.
+- **Versiones anteriores**: regenerar, refinar, o reducir repeticion ya no
+  son irreversibles — se guarda la version previa (hasta 5 por capitulo) y
+  se puede recuperar desde un boton nuevo en cada capitulo.
+- **Expandir con IA / Importar desde archivo**: en Plot, Personajes y
+  Setting, dos botones nuevos junto al contador de palabras.
 
 **Corrección importante — los errores dejaban de mostrarse silenciosamente:**
 - Si algo fallaba al generar un capítulo, generar el esquema, o cargar un
