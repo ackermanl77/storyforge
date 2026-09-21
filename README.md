@@ -6,6 +6,11 @@ y un setting que tu escribes. Genera el texto en ingles usando un modelo de
 IA que corre **localmente en tu PC**, sin depender de internet ni de una API
 externa una vez que tienes el modelo descargado.
 
+Para una guia paso a paso de como usar cada pestana y cada funcion, ver
+[GUIA_DE_USUARIO.md](GUIA_DE_USUARIO.md). Este README cubre instalacion,
+rendimiento y limitaciones; para documentacion tecnica ver la seccion
+correspondiente mas abajo.
+
 ## Que incluye
 
 - Interfaz grafica (pestanas: Modelo, Plot, Personajes, Setting, **Esquema**, Capitulos).
@@ -236,6 +241,7 @@ storyforge/
   models/             Coloca aqui tu modelo .gguf
   tests/              Pruebas automatizadas (unittest, sin dependencias extra)
   docs/               Documentacion tecnica (arquitectura, workflows, historial de fixes)
+  GUIA_DE_USUARIO.md  Guia de uso de cada pestana y funcion, para quien usa la app
 ```
 
 ## Pruebas
