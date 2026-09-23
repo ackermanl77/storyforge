@@ -22,6 +22,15 @@ MAX_OUTLINE_WORDS_PER_CHAPTER = 800
 # capitulo que ya tenia contenido -- ver Chapter.push_history().
 MAX_CHAPTER_HISTORY = 5
 
+# Limites del Lorebook / World Info: entradas de contexto que solo se
+# inyectan en el prompt cuando alguna de sus keywords aparece en el texto
+# cercano de la generacion en curso (ver prompts.find_relevant_lore_entries),
+# a diferencia de plot/personajes/setting que siempre se incluyen completos.
+# Esto es lo que permite mantener un elenco/mundo mucho mas grande del que
+# cabria en el contexto de un modelo local si todo se incluyera siempre.
+MAX_LORE_ENTRIES = 200
+MAX_LORE_ENTRY_WORDS = 500
+
 # Tipos de escritura seleccionables (aplican a toda la historia, no por
 # capitulo). "" (sin seleccionar) significa usar solo el STYLE_GUIDE por
 # defecto de prompts.py, sin enfasis adicional.
@@ -109,6 +118,39 @@ class Chapter:
 
 
 @dataclass
+class LoreEntry:
+    """
+    Una entrada del Lorebook / World Info: un personaje secundario, lugar,
+    objeto u otro dato de mundo que no necesita repetirse en el bloque de
+    contexto completo de cada capitulo. `keywords` es una lista separada por
+    comas (texto libre, igual que el resto de los campos de este archivo);
+    `prompts.find_relevant_lore_entries()` la parte y busca cada termino en
+    el texto cercano de la generacion en curso para decidir si esta entrada
+    es relevante ahora mismo.
+    """
+    name: str = ""
+    keywords: str = ""
+    text: str = ""
+
+    def keyword_list(self) -> List[str]:
+        return [k.strip() for k in self.keywords.split(",") if k.strip()]
+
+    def word_count(self) -> int:
+        return count_words(self.text)
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+    @staticmethod
+    def from_dict(d: dict) -> "LoreEntry":
+        return LoreEntry(
+            name=d.get("name", ""),
+            keywords=d.get("keywords", ""),
+            text=d.get("text", ""),
+        )
+
+
+@dataclass
 class Project:
     name: str = "Historia sin titulo"
     plot: str = ""
@@ -118,6 +160,8 @@ class Project:
     model_path: Optional[str] = None
     # Uno de WRITING_STYLES, o "" para no aplicar ningun enfasis adicional.
     writing_style: str = ""
+    # Lorebook / World Info -- ver LoreEntry arriba.
+    lore_entries: List[LoreEntry] = field(default_factory=list)
 
     # ---------------- validaciones ----------------
     def plot_words(self) -> int:
@@ -165,6 +209,17 @@ class Project:
                     f"Capitulo {i}: el esquema tiene {ch.outline_words():,} palabras "
                     f"(maximo {MAX_OUTLINE_WORDS_PER_CHAPTER:,})."
                 )
+        if len(self.lore_entries) > MAX_LORE_ENTRIES:
+            errors.append(
+                f"Hay {len(self.lore_entries)} entradas de lorebook (maximo {MAX_LORE_ENTRIES})."
+            )
+        for i, entry in enumerate(self.lore_entries, start=1):
+            if entry.word_count() > MAX_LORE_ENTRY_WORDS:
+                label = entry.name.strip() or f"entrada {i}"
+                errors.append(
+                    f"Lorebook '{label}': el texto tiene {entry.word_count():,} palabras "
+                    f"(maximo {MAX_LORE_ENTRY_WORDS:,})."
+                )
         return errors
 
     def can_add_chapter(self) -> bool:
@@ -182,6 +237,17 @@ class Project:
         self.chapters.append(chapter)
         return chapter
 
+    # ---------------- lorebook / world info ----------------
+    def can_add_lore_entry(self) -> bool:
+        return len(self.lore_entries) < MAX_LORE_ENTRIES
+
+    def add_lore_entry(self, name: str = "", keywords: str = "", text: str = "") -> LoreEntry:
+        if not self.can_add_lore_entry():
+            raise ValueError(f"No se pueden tener mas de {MAX_LORE_ENTRIES} entradas de lorebook.")
+        entry = LoreEntry(name=name, keywords=keywords, text=text)
+        self.lore_entries.append(entry)
+        return entry
+
     # ---------------- persistencia ----------------
     def to_dict(self) -> dict:
         return {
@@ -192,6 +258,7 @@ class Project:
             "chapters": [c.to_dict() for c in self.chapters],
             "model_path": self.model_path,
             "writing_style": self.writing_style,
+            "lore_entries": [e.to_dict() for e in self.lore_entries],
         }
 
     def save(self, path: str | Path) -> None:
@@ -211,4 +278,5 @@ class Project:
             writing_style=data.get("writing_style", ""),
         )
         proj.chapters = [Chapter.from_dict(c) for c in data.get("chapters", [])]
+        proj.lore_entries = [LoreEntry.from_dict(e) for e in data.get("lore_entries", [])]
         return proj

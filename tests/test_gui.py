@@ -23,10 +23,47 @@ try:
     import customtkinter  # noqa: F401
 
     from app.engine import ContextOverflowError, ModelNotLoadedError
-    from app.gui import CHAPTER_PURPOSE_DEFAULT_LABEL, StoryForgeApp, VersionHistoryDialog
+    from app.gui import (
+        AUTOSAVE_PATH,
+        CHAPTER_PURPOSE_DEFAULT_LABEL,
+        StoryForgeApp,
+        VersionHistoryDialog,
+        _lore_entry_matches_search,
+    )
+    from app.project import LoreEntry, MAX_LORE_ENTRIES
 except Exception as _import_exc:  # pragma: no cover - environment dependent
     GUI_AVAILABLE = False
     _SKIP_REASON = f"GUI dependencies not available: {_import_exc}"
+
+
+def _clear_autosave() -> None:
+    """
+    Several actions that call the engine (generate/refine/generate outline)
+    autosave in their `finally` block regardless of success or failure (see
+    app/gui.py::StoryForgeApp._autosave, always writing the real
+    AUTOSAVE_PATH on disk -- there is no test-only override). Without
+    clearing it before each test, StoryForgeApp() -- constructed fresh in
+    every test's setUp -- would find a leftover autosave.json from a
+    PREVIOUS test/class and, depending on how that test mocked askyesno(),
+    either silently recover it (corrupting this test's supposedly-fresh
+    project/chapter indices) or discard it as a side effect of an unrelated
+    test. Called at the very start of every setUp() in this module, before
+    StoryForgeApp() is constructed, so every test starts from a guaranteed
+    clean slate regardless of execution order or what an earlier test left
+    behind.
+    """
+    try:
+        os.remove(AUTOSAVE_PATH)
+    except OSError:
+        pass
+
+
+def tearDownModule():
+    # Ultima limpieza para no dejar un autosave.json real tirado en el
+    # working tree del proyecto despues de correr esta suite (autosave/ esta
+    # en .gitignore, pero no hay razon para ensuciar el checkout de todas
+    # formas).
+    _clear_autosave()
 
 
 class _SynchronousThread:
@@ -77,6 +114,7 @@ class TestBackgroundErrorReporting(unittest.TestCase):
     """
 
     def setUp(self):
+        _clear_autosave()
         self.shown_errors = []
         self._messagebox_patcher = mock.patch(
             "app.gui.messagebox.showerror",
@@ -218,6 +256,7 @@ class TestBackgroundErrorReporting(unittest.TestCase):
 @unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
 class TestChapterPurposeSync(unittest.TestCase):
     def setUp(self):
+        _clear_autosave()
         self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=False)
         self._askyesno_patcher.start()
         self.app = StoryForgeApp()
@@ -251,6 +290,7 @@ class TestChapterPurposeSync(unittest.TestCase):
 @unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
 class TestImportField(unittest.TestCase):
     def setUp(self):
+        _clear_autosave()
         self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=False)
         self._askyesno_patcher.start()
         self.app = StoryForgeApp()
@@ -296,6 +336,7 @@ class TestImportField(unittest.TestCase):
 @unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
 class TestExpandAndRefineHappyPath(unittest.TestCase):
     def setUp(self):
+        _clear_autosave()
         self._thread_patcher = mock.patch("app.gui.threading.Thread", _SynchronousThread)
         self._thread_patcher.start()
         self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=True)
@@ -347,6 +388,7 @@ class TestExpandAndRefineHappyPath(unittest.TestCase):
 @unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
 class TestVersionHistoryDialog(unittest.TestCase):
     def setUp(self):
+        _clear_autosave()
         self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=True)
         self._askyesno_patcher.start()
         self.app = StoryForgeApp()
@@ -389,6 +431,463 @@ class TestVersionHistoryDialog(unittest.TestCase):
         with mock.patch("app.gui.messagebox.showinfo") as mock_info:
             empty_panel._on_show_history()
             mock_info.assert_called_once()
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestLorebookPanel(unittest.TestCase):
+    """
+    The Lorebook tab's list-editor (LoreEntryPanel/_render_lore_entries),
+    following the same add/edit/remove-via-panel pattern already used for
+    chapters (ChapterPanel/_render_chapters).
+    """
+
+    def setUp(self):
+        _clear_autosave()
+        self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=True)
+        self._askyesno_patcher.start()
+        self.app = StoryForgeApp()
+
+    def tearDown(self):
+        self.app.destroy()
+        self._askyesno_patcher.stop()
+
+    def test_starts_with_no_entries(self):
+        self.assertEqual(self.app.project.lore_entries, [])
+        self.assertEqual(self.app.lore_panels, [])
+
+    def test_add_entry_creates_a_panel(self):
+        self.app.add_lore_entry()
+        self.assertEqual(len(self.app.project.lore_entries), 1)
+        self.assertEqual(len(self.app.lore_panels), 1)
+
+    def test_editing_fields_and_syncing_updates_the_model(self):
+        self.app.add_lore_entry()
+        panel = self.app.lore_panels[0]
+        panel.name_entry.insert(0, "Elena")
+        panel.keywords_entry.insert(0, "Elena, the queen")
+        panel.text_box.insert("1.0", "Ruler of the kingdom.")
+
+        panel.sync_to_model()
+
+        self.assertEqual(panel.entry.name, "Elena")
+        self.assertEqual(panel.entry.keyword_list(), ["Elena", "the queen"])
+        self.assertEqual(panel.entry.text, "Ruler of the kingdom.")
+
+    def test_app_sync_all_syncs_lore_panels_too(self):
+        self.app.add_lore_entry()
+        panel = self.app.lore_panels[0]
+        panel.name_entry.insert(0, "Elena")
+
+        self.app._sync_all()
+
+        self.assertEqual(self.app.project.lore_entries[0].name, "Elena")
+
+    def test_remove_lore_entry_removes_the_right_one(self):
+        self.app.add_lore_entry()
+        self.app.add_lore_entry()
+        first_entry = self.app.project.lore_entries[0]
+        second_entry = self.app.project.lore_entries[1]
+
+        self.app.remove_lore_entry(0)
+
+        self.assertEqual(len(self.app.project.lore_entries), 1)
+        self.assertIs(self.app.project.lore_entries[0], second_entry)
+        self.assertIsNot(self.app.project.lore_entries[0], first_entry)
+
+    def test_remove_button_requires_confirmation(self):
+        self.app.add_lore_entry()
+        panel = self.app.lore_panels[0]
+        with mock.patch("app.gui.messagebox.askyesno", return_value=False) as mock_confirm:
+            panel._on_remove()
+            mock_confirm.assert_called_once()
+        # confirmacion rechazada -> la entrada sigue ahi
+        self.assertEqual(len(self.app.project.lore_entries), 1)
+
+    def test_cannot_add_more_than_max_lore_entries(self):
+        self.app.project.lore_entries = [LoreEntry() for _ in range(MAX_LORE_ENTRIES)]
+        with mock.patch("app.gui.messagebox.showinfo") as mock_info:
+            self.app.add_lore_entry()
+            mock_info.assert_called_once()
+        self.assertEqual(len(self.app.project.lore_entries), MAX_LORE_ENTRIES)
+
+    def test_load_into_ui_renders_the_projects_lore_entries(self):
+        self.app.project.add_lore_entry(name="Elena", keywords="Elena", text="Ruler.")
+        self.app._load_into_ui()
+        self.assertEqual(len(self.app.lore_panels), 1)
+        self.assertEqual(self.app.lore_panels[0].name_entry.get(), "Elena")
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestChapterStreamingDisplay(unittest.TestCase):
+    """
+    LocalStoryEngine.generate_chapter() now calls progress_callback much
+    more often (token-level streaming -- see app/engine.py) instead of once
+    per ~900-word section. ChapterPanel._on_generate()'s `progress` closure
+    throttles how often it actually schedules a screen update (see
+    CHAPTER_STREAM_UI_INTERVAL_SECONDS in app/gui.py) so a fast burst of
+    calls -- as happens here, since the worker runs synchronously -- doesn't
+    flood the Tk event queue. This must never cause the FINAL displayed text
+    to be a stale, throttled-away partial update instead of the engine's
+    real final result.
+    """
+
+    def setUp(self):
+        _clear_autosave()
+        self._thread_patcher = mock.patch("app.gui.threading.Thread", _SynchronousThread)
+        self._thread_patcher.start()
+        self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=True)
+        self._askyesno_patcher.start()
+        self.app = StoryForgeApp()
+        self.app.project.add_chapter("Cap 1", target_words=50)
+        self.app._render_chapters()
+        self.panel = self.app.chapter_panels[0]
+
+    def tearDown(self):
+        self.app.destroy()
+        self._askyesno_patcher.stop()
+        self._thread_patcher.stop()
+
+    def test_final_content_matches_result_despite_throttled_partial_updates(self):
+        class FakeEngine:
+            is_loaded = True
+
+            def generate_chapter(self, project, chapter_index, progress_callback=None, cancel_check=None):
+                # Simula una rafaga de actualizaciones de streaming, como
+                # llegarian token a token en una generacion real -- todas
+                # ocurren practicamente al mismo tiempo (ejecucion
+                # sincronica), asi que el throttle de la UI debe descartar
+                # la mayoria de ellas sin perder el resultado final.
+                for i in range(1, 6):
+                    progress_callback(f"partial {i}", i * 10, 50)
+                return "FINAL COMPLETE CHAPTER TEXT"
+
+            def summarize(self, text, max_words=150):
+                return "a summary"
+
+        self.app.engine = FakeEngine()
+
+        self.panel._on_generate()
+        self.app.update()
+
+        self.assertEqual(self.panel.content_box.get("1.0", "end-1c"), "FINAL COMPLETE CHAPTER TEXT")
+        self.assertEqual(self.panel.chapter.content, "FINAL COMPLETE CHAPTER TEXT")
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestChapterStreamingAppend(unittest.TestCase):
+    """
+    ChapterPanel._on_generate()'s `progress` closure used to do a full
+    content_box.delete("1.0", "end") + insert("1.0", text) on every
+    throttled update -- a flash-and-reset that snapped the view back to the
+    top if the user had scrolled down mid-generation. It now tracks how
+    much text is already shown and only appends the new suffix at "end",
+    auto-following with content_box.see("end"); a full delete+reinsert is
+    kept only for the guaranteed-correct final redraw (see
+    TestChapterStreamingDisplay above, which already covers that the FINAL
+    text is always correct regardless of throttling).
+
+    The interval throttle is patched to 0 here so every progress_callback
+    call actually reaches the UI instead of being throttled away -- this
+    test is specifically about the append-vs-replace mechanics of each
+    individual update, not the throttling itself.
+    """
+
+    def setUp(self):
+        _clear_autosave()
+        self._thread_patcher = mock.patch("app.gui.threading.Thread", _SynchronousThread)
+        self._thread_patcher.start()
+        self._interval_patcher = mock.patch("app.gui.CHAPTER_STREAM_UI_INTERVAL_SECONDS", 0.0)
+        self._interval_patcher.start()
+        self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=True)
+        self._askyesno_patcher.start()
+        self.app = StoryForgeApp()
+        self.app.project.add_chapter("Cap 1", target_words=50)
+        self.app._render_chapters()
+        self.panel = self.app.chapter_panels[0]
+
+    def tearDown(self):
+        self.app.destroy()
+        self._askyesno_patcher.stop()
+        self._interval_patcher.stop()
+        self._thread_patcher.stop()
+
+    def test_incremental_updates_append_instead_of_replacing_everything(self):
+        class FakeEngine:
+            is_loaded = True
+
+            def generate_chapter(self, project, chapter_index, progress_callback=None, cancel_check=None):
+                progress_callback("Once", 1, 50)
+                progress_callback("Once upon", 2, 50)
+                progress_callback("Once upon a time", 4, 50)
+                return "Once upon a time"
+
+            def summarize(self, text, max_words=150):
+                return "a summary"
+
+        self.app.engine = FakeEngine()
+        insert_calls = []
+        real_insert = self.panel.content_box.insert
+
+        def spy_insert(index, text, *a, **k):
+            insert_calls.append((index, text))
+            return real_insert(index, text, *a, **k)
+
+        self.panel.content_box.insert = spy_insert
+
+        self.panel._on_generate()
+        self.app.update()
+
+        end_inserts = [text for index, text in insert_calls if index == "end"]
+        start_inserts = [text for index, text in insert_calls if index == "1.0"]
+
+        # Cada actualizacion incremental durante el streaming debe ser un
+        # append pequeno en "end" -- nunca el texto completo reinsertado
+        # desde "1.0".
+        self.assertEqual(len(end_inserts), 3)
+        self.assertEqual(end_inserts, ["Once", " upon", " a time"])
+        # Solo el redibujado final (show_final) puede insertar desde "1.0",
+        # y debe hacerlo exactamente una vez.
+        self.assertEqual(start_inserts, ["Once upon a time"])
+        self.assertEqual(self.panel.content_box.get("1.0", "end-1c"), "Once upon a time")
+        self.assertEqual(self.panel.chapter.content, "Once upon a time")
+
+    def test_auto_follows_to_the_end_on_each_incremental_update(self):
+        # Documenta la eleccion deliberada: el cuadro siempre sigue el texto
+        # nuevo automaticamente (comportamiento habitual de streaming),
+        # en vez de intentar detectar si el usuario scrolleo manualmente.
+        class FakeEngine:
+            is_loaded = True
+
+            def generate_chapter(self, project, chapter_index, progress_callback=None, cancel_check=None):
+                progress_callback("Once upon a time", 4, 50)
+                return "Once upon a time"
+
+            def summarize(self, text, max_words=150):
+                return "a summary"
+
+        self.app.engine = FakeEngine()
+        see_calls = []
+        real_see = self.panel.content_box.see
+
+        def spy_see(index):
+            see_calls.append(index)
+            return real_see(index)
+
+        self.panel.content_box.see = spy_see
+
+        self.panel._on_generate()
+        self.app.update()
+
+        self.assertIn("end", see_calls)
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestLorebookSearchFilter(unittest.TestCase):
+    """
+    Pure filter-matching logic (_lore_entry_matches_search) plus the search
+    box wired into _render_lore_entries().
+    """
+
+    def test_matches_name_case_insensitively(self):
+        entry = LoreEntry(name="Elena Vasquez", keywords="")
+        self.assertTrue(_lore_entry_matches_search(entry, "elena"))
+        self.assertTrue(_lore_entry_matches_search(entry, "VASQUEZ".lower()))
+        self.assertFalse(_lore_entry_matches_search(entry, "marco"))
+
+    def test_matches_keyword_substring(self):
+        entry = LoreEntry(name="Dark Forest", keywords="forest, ancient woods")
+        self.assertTrue(_lore_entry_matches_search(entry, "wood"))
+        self.assertTrue(_lore_entry_matches_search(entry, "forest"))
+        self.assertFalse(_lore_entry_matches_search(entry, "ocean"))
+
+    def test_empty_query_matches_everything(self):
+        entry = LoreEntry(name="Anyone", keywords="")
+        self.assertTrue(_lore_entry_matches_search(entry, ""))
+
+    def setUp(self):
+        _clear_autosave()
+        self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=True)
+        self._askyesno_patcher.start()
+        self.app = StoryForgeApp()
+
+    def tearDown(self):
+        self.app.destroy()
+        self._askyesno_patcher.stop()
+
+    def test_search_entry_filters_the_rendered_panels_by_name(self):
+        self.app.project.add_lore_entry(name="Elena Vasquez", keywords="Elena")
+        self.app.project.add_lore_entry(name="Dark Forest", keywords="forest, woods")
+        self.app._render_lore_entries()
+        self.assertEqual(len(self.app.lore_panels), 2)
+
+        self.app.lore_search_entry.insert(0, "elena")
+        self.app._render_lore_entries()
+
+        self.assertEqual(len(self.app.lore_panels), 1)
+        self.assertEqual(self.app.lore_panels[0].entry.name, "Elena Vasquez")
+
+    def test_search_entry_filters_the_rendered_panels_by_keyword(self):
+        self.app.project.add_lore_entry(name="Elena Vasquez", keywords="the queen")
+        self.app.project.add_lore_entry(name="Dark Forest", keywords="forest, woods")
+        self.app._render_lore_entries()
+
+        self.app.lore_search_entry.insert(0, "wood")
+        self.app._render_lore_entries()
+
+        self.assertEqual(len(self.app.lore_panels), 1)
+        self.assertEqual(self.app.lore_panels[0].entry.name, "Dark Forest")
+
+    def test_no_matches_shows_placeholder_instead_of_erroring(self):
+        self.app.project.add_lore_entry(name="Elena Vasquez", keywords="Elena")
+        self.app._render_lore_entries()
+
+        self.app.lore_search_entry.insert(0, "nonexistent-xyz")
+        self.app._render_lore_entries()
+
+        self.assertEqual(self.app.lore_panels, [])
+
+    def test_editing_a_field_survives_a_search_triggered_rerender(self):
+        # _render_lore_entries() now runs on every keystroke in the search
+        # box (destroying and recreating every panel) -- it must sync
+        # pending edits from the currently-visible panels into the model
+        # first, or typing a search term while another entry has unsaved
+        # edits would silently discard them.
+        self.app.project.add_lore_entry(name="Elena Vasquez", keywords="Elena")
+        self.app._render_lore_entries()
+        panel = self.app.lore_panels[0]
+        panel.name_entry.delete(0, "end")
+        panel.name_entry.insert(0, "Elena Renamed")
+
+        self.app.lore_search_entry.insert(0, "x")  # no matches, forces a rerender
+        self.app._render_lore_entries()
+
+        self.assertEqual(self.app.project.lore_entries[0].name, "Elena Renamed")
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestLorebookMatchedLastGeneration(unittest.TestCase):
+    def setUp(self):
+        _clear_autosave()
+        self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=True)
+        self._askyesno_patcher.start()
+        self.app = StoryForgeApp()
+
+    def tearDown(self):
+        self.app.destroy()
+        self._askyesno_patcher.stop()
+
+    def test_badge_shown_only_for_entries_in_last_lore_match_ids(self):
+        matched_entry = self.app.project.add_lore_entry(name="Elena", keywords="Elena")
+        other_entry = self.app.project.add_lore_entry(name="Marco", keywords="Marco")
+        self.app.last_lore_match_ids = {id(matched_entry)}
+        self.app._render_lore_entries()
+
+        by_name = {p.entry.name: p for p in self.app.lore_panels}
+        self.assertTrue(by_name["Elena"].matched_last_generation)
+        self.assertFalse(by_name["Marco"].matched_last_generation)
+
+    def test_generating_a_chapter_records_and_surfaces_lore_matches(self):
+        entry = self.app.project.add_lore_entry(name="Elena", keywords="Elena")
+        self.app.project.add_chapter("Cap 1", target_words=50, outline="Elena arrives at the castle.")
+        self.app._render_chapters()
+        panel = self.app.chapter_panels[0]
+
+        class FakeEngine:
+            is_loaded = True
+
+            def generate_chapter(self, project, chapter_index, progress_callback=None, cancel_check=None):
+                return "Elena walked in."
+
+            def summarize(self, text, max_words=150):
+                return "a summary"
+
+        self.app.engine = FakeEngine()
+        with mock.patch("app.gui.threading.Thread", _SynchronousThread):
+            panel._on_generate()
+        self.app.update()
+
+        self.assertIn(id(entry), self.app.last_lore_match_ids)
+        self.app._render_lore_entries()
+        self.assertTrue(self.app.lore_panels[0].matched_last_generation)
+
+    def test_new_project_clears_previous_matches(self):
+        entry = self.app.project.add_lore_entry(name="Elena", keywords="Elena")
+        self.app.last_lore_match_ids = {id(entry)}
+
+        self.app.project = self.app.project.__class__()
+        self.app.current_path = None
+        self.app._load_into_ui()
+
+        self.assertEqual(self.app.last_lore_match_ids, set())
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestChapterSidebar(unittest.TestCase):
+    """
+    A slim, persistent chapter list next to the main scrollable chapter
+    panels (_render_chapters() stacks every chapter's full 220px+6-button
+    panel expanded, which becomes a long scroll with no way to jump
+    directly to one) -- clicking an entry here jumps chapters_scroll to
+    that chapter's panel via _jump_to_chapter().
+    """
+
+    def setUp(self):
+        _clear_autosave()
+        self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=False)
+        self._askyesno_patcher.start()
+        self.app = StoryForgeApp()
+
+    def tearDown(self):
+        self.app.destroy()
+        self._askyesno_patcher.stop()
+
+    def _sidebar_buttons(self):
+        return [
+            w for w in self.app.chapter_sidebar.winfo_children()
+            if isinstance(w, customtkinter.CTkButton)
+        ]
+
+    def test_no_chapters_shows_placeholder_and_no_buttons(self):
+        self.assertEqual(self._sidebar_buttons(), [])
+
+    def test_sidebar_lists_one_entry_per_chapter_with_its_title(self):
+        self.app.project.add_chapter("Intro")
+        self.app.project.add_chapter("Middle")
+        self.app._render_chapters()
+
+        buttons = self._sidebar_buttons()
+        self.assertEqual(len(buttons), 2)
+        self.assertIn("Intro", buttons[0].cget("text"))
+        self.assertIn("Middle", buttons[1].cget("text"))
+
+    def test_clicking_a_sidebar_entry_jumps_to_the_right_chapter(self):
+        self.app.project.add_chapter("Intro")
+        self.app.project.add_chapter("Middle")
+        self.app._render_chapters()
+
+        with mock.patch.object(self.app, "_jump_to_chapter") as mock_jump:
+            self._sidebar_buttons()[1].cget("command")()
+        mock_jump.assert_called_once_with(1)
+
+    def test_jump_to_chapter_scrolls_without_raising(self):
+        self.app.project.add_chapter("Intro")
+        self.app.project.add_chapter("Middle")
+        self.app.project.add_chapter("End")
+        self.app._render_chapters()
+        self.app.update()
+
+        try:
+            self.app._jump_to_chapter(2)
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"_jump_to_chapter raised: {exc}")
+
+    def test_jump_to_chapter_ignores_out_of_range_index(self):
+        self.app.project.add_chapter("Intro")
+        self.app._render_chapters()
+        try:
+            self.app._jump_to_chapter(5)
+        except Exception as exc:  # noqa: BLE001
+            self.fail(f"_jump_to_chapter raised for an out-of-range index: {exc}")
 
 
 if __name__ == "__main__":

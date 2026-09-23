@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox
@@ -14,16 +15,19 @@ import customtkinter as ctk
 
 from .engine import ContextOverflowError, LocalStoryEngine, ModelNotLoadedError, find_local_models
 from .export import export_docx, export_txt
+from .prompts import build_previous_context, find_relevant_lore_entries
 from .project import (
     CHAPTER_PURPOSES,
     MAX_CHAPTERS,
     MAX_CHARACTERS_WORDS,
+    MAX_LORE_ENTRIES,
     MAX_OUTLINE_WORDS_PER_CHAPTER,
     MAX_PLOT_WORDS,
     MAX_SETTING_WORDS,
     MAX_WORDS_PER_CHAPTER,
     WRITING_STYLES,
     Chapter,
+    LoreEntry,
     Project,
     count_words,
 )
@@ -45,6 +49,15 @@ CHAPTER_PURPOSE_OPTIONS = [CHAPTER_PURPOSE_DEFAULT_LABEL] + CHAPTER_PURPOSES
 # perderia todo ese progreso.
 AUTOSAVE_PATH = os.path.join(APP_ROOT, "autosave", "autosave.json")
 AUTOSAVE_INTERVAL_MS = 20_000  # cada cuanto se reintenta el autoguardado mientras hay una generacion en curso
+# LocalStoryEngine.generate_chapter() ahora llama a progress_callback en vivo
+# mientras el modelo transmite cada token (ver engine.py), no solo una vez
+# por seccion completa (~900 palabras) como antes -- programar un
+# self.after(0, ...) por cada token saturaria la cola de eventos de Tk
+# durante los minutos que dura una generacion en CPU. Este es el intervalo
+# minimo entre refrescos de pantalla durante el streaming token a token; la
+# actualizacion de cada seccion ya completa nunca pasa por este throttle
+# (ver ChapterPanel._on_generate).
+CHAPTER_STREAM_UI_INTERVAL_SECONDS = 0.15
 
 
 class LimitedTextBox(ctk.CTkFrame):
@@ -232,7 +245,11 @@ class ChapterPanel(ctk.CTkFrame):
         if self._cancel_flag is not None:
             self._cancel_flag["cancel"] = True
             self.cancel_btn.configure(state="disabled")
-            self.status_label.configure(text="Cancelando... se detendra al terminar la seccion actual.")
+            # Con streaming token a token (ver engine.generate_chapter), el
+            # cancel_check ahora se revisa dentro de cada seccion, no solo
+            # entre secciones -- ya no hay que esperar a que termine la
+            # seccion completa para que surta efecto.
+            self.status_label.configure(text="Cancelando... se detendra en breve.")
 
     def _on_generate(self) -> None:
         if not self.app.engine.is_loaded:
@@ -266,13 +283,67 @@ class ChapterPanel(ctk.CTkFrame):
         self._refresh_history_btn()
         self.app._set_engine_busy(True)
         self._set_busy(True, "Generando... esto puede tardar varios minutos en CPU.")
+        # Limpiamos el cuadro una sola vez aqui, de forma sincronica (todavia
+        # en el hilo principal, antes de lanzar el hilo de trabajo) -- de ahi
+        # en adelante progress() solo AGREGA texto nuevo al final (ver mas
+        # abajo), nunca vuelve a borrar todo el cuadro hasta el redibujado
+        # final garantizado (show_final).
+        self.content_box.delete("1.0", "end")
         cancel_flag = {"cancel": False}
         self._cancel_flag = cancel_flag
+        # Estado del throttle de UI (ver CHAPTER_STREAM_UI_INTERVAL_SECONDS):
+        # vive en el closure de esta llamada a _on_generate, no en self, para
+        # no pisarse entre dos generaciones sucesivas del mismo panel.
+        # "shown_text" es el texto que ya esta efectivamente insertado en
+        # content_box -- progress_callback siempre entrega el texto COMPLETO
+        # generado hasta ahora (no un delta), asi que cada llamada es
+        # normalmente una extension de la anterior (mismo prefijo + texto
+        # nuevo al final).
+        stream_state = {"last_update": 0.0, "shown_text": ""}
 
         def progress(text: str, words: int, target: int) -> None:
+            now = time.monotonic()
+            if now - stream_state["last_update"] < CHAPTER_STREAM_UI_INTERVAL_SECONDS:
+                # Actualizacion descartada a proposito: llega demasiado
+                # seguido (streaming token a token). La proxima llamada que
+                # pase el intervalo, o el refresco final de la seccion
+                # completa (mas abajo en engine.generate_chapter), va a
+                # mostrar texto mas nuevo igual -- no se pierde nada, solo
+                # se evita saturar la cola de eventos de Tk.
+                return
+            stream_state["last_update"] = now
+
             def apply():
-                self.content_box.delete("1.0", "end")
-                self.content_box.insert("1.0", text)
+                shown_text = stream_state["shown_text"]
+                # Append en vez de borrar+reinsertar todo: antes, cada
+                # actualizacion (cada ~150ms durante el streaming) hacia
+                # content_box.delete("1.0", "end") + insert("1.0", text) con
+                # el texto COMPLETO generado hasta el momento -- si el
+                # usuario habia bajado el scroll para leer, la vista saltaba
+                # de vuelta al principio en cada tick. Como `text` es
+                # siempre una extension de `shown_text` (progress_callback
+                # entrega el texto acumulado completo, no un delta), alcanza
+                # con insertar solo lo nuevo al final.
+                if text.startswith(shown_text):
+                    delta = text[len(shown_text):]
+                    if delta:
+                        self.content_box.insert("end", delta)
+                else:
+                    # No deberia pasar (ver comentario arriba), pero si el
+                    # texto nuevo no es una extension del anterior, un
+                    # append parcial mostraria contenido incorrecto -- mejor
+                    # un reemplazo completo que garantice que lo mostrado
+                    # sea correcto, aunque sea una actualizacion de menos.
+                    self.content_box.delete("1.0", "end")
+                    self.content_box.insert("1.0", text)
+                stream_state["shown_text"] = text
+                # Auto-scroll: seguimos el texto nuevo automaticamente en
+                # cada actualizacion (comportamiento habitual de la mayoria
+                # de las UIs de streaming) en vez de intentar detectar si el
+                # usuario scrolleo manualmente hacia arriba para no
+                # interrumpirlo -- eleccion deliberada, mas simple, documentada
+                # aqui en vez de rastrear la posicion de scroll del usuario.
+                self.content_box.see("end")
                 self._refresh_word_count()
                 self.status_label.configure(text=f"Generando... {words:,} / {target:,} palabras")
             self.app.after(0, apply)
@@ -285,7 +356,26 @@ class ChapterPanel(ctk.CTkFrame):
                 )
                 self.chapter.content = result
 
+                # El ultimo refresco de pantalla durante la generacion pudo
+                # haberse descartado por el throttle de arriba -- nos
+                # aseguramos de que el contenido final mostrado siempre
+                # coincida exactamente con `result`, sin pasar por ese
+                # throttle.
+                def show_final():
+                    self.content_box.delete("1.0", "end")
+                    self.content_box.insert("1.0", result)
+                    self.content_box.see("end")
+                    self._refresh_word_count()
+                self.app.after(0, show_final)
+
                 if result.strip() and not cancel_flag["cancel"]:
+                    # Registra que entradas del lorebook coincidieron con esta
+                    # generacion (mismo texto de escaneo que usa el prompt
+                    # real -- ver build_chapter_system_prompt/lore_scan_text
+                    # en prompts.py) para que la pestana Lorebook pueda
+                    # mostrar una marca "usada en la ultima generacion" junto
+                    # a cada entrada que aplico.
+                    self.app.after(0, lambda: self.app._record_lore_matches(self.index))
                     # Resumimos el capitulo para dar continuidad al siguiente
                     # (en vez de pasarle solo un recorte del texto crudo).
                     self.app.after(0, lambda: self.status_label.configure(
@@ -534,6 +624,92 @@ class OutlinePanel(ctk.CTkFrame):
         self.chapter.outline = self.outline_box.get("1.0", "end-1c")
 
 
+class LoreEntryPanel(ctk.CTkFrame):
+    """
+    Panel para una entrada del Lorebook / World Info: nombre, keywords
+    (separadas por coma) y el texto que se inyecta en el prompt de un
+    capitulo SOLO cuando alguna de esas keywords aparece en el texto cercano
+    de esa generacion (el esquema del capitulo y el resumen de capitulos
+    anteriores -- ver prompts.find_relevant_lore_entries). A diferencia de
+    Personajes/Setting, que siempre se incluyen completos, esto permite
+    mantener un elenco o mundo mucho mas grande sin gastar el contexto de un
+    modelo local en datos que no aplican al capitulo que se esta escribiendo
+    ahora. Sigue el mismo patron de panel-por-item que ChapterPanel/
+    OutlinePanel (indexado por posicion en la pestana 'Capitulos'/'Esquema').
+    """
+
+    def __init__(
+        self, master, app: "StoryForgeApp", index: int, entry: LoreEntry,
+        matched_last_generation: bool = False, **kwargs,
+    ):
+        super().__init__(master, border_width=1, corner_radius=8, **kwargs)
+        self.app = app
+        self.index = index
+        self.entry = entry
+        # Si esta entrada coincidio (via prompts.find_relevant_lore_entries)
+        # con el texto de escaneo de la ultima generacion de capitulo -- ver
+        # StoryForgeApp._record_lore_matches(). Guardado en la instancia
+        # ademas de solo mostrarse, para que sea verificable directamente en
+        # tests sin tener que inspeccionar el widget de la etiqueta.
+        self.matched_last_generation = matched_last_generation
+        self.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(self, text="Nombre:").grid(row=0, column=0, padx=8, pady=(8, 2), sticky="w")
+        self.name_entry = ctk.CTkEntry(self, placeholder_text="p.ej. Elena Vasquez")
+        self.name_entry.insert(0, entry.name)
+        self.name_entry.grid(row=0, column=1, padx=8, pady=(8, 2), sticky="ew")
+
+        if matched_last_generation:
+            ctk.CTkLabel(
+                self, text="✓ usada en la ultima generacion", text_color="#9fd39f",
+                font=ctk.CTkFont(size=11),
+            ).grid(row=0, column=2, padx=(8, 0), pady=(8, 2), sticky="e")
+
+        self.remove_btn = ctk.CTkButton(
+            self, text="Eliminar", width=90, fg_color="#8a3b3b", hover_color="#6e2f2f",
+            command=self._on_remove,
+        )
+        self.remove_btn.grid(row=0, column=3, padx=8, pady=(8, 2))
+
+        ctk.CTkLabel(self, text="Keywords (separadas por coma):").grid(
+            row=1, column=0, padx=8, pady=2, sticky="w"
+        )
+        self.keywords_entry = ctk.CTkEntry(self, placeholder_text="p.ej. Elena, la reina, Su Majestad")
+        self.keywords_entry.insert(0, entry.keywords)
+        self.keywords_entry.grid(row=1, column=1, columnspan=2, padx=8, pady=2, sticky="ew")
+
+        ctk.CTkLabel(self, text="Texto:").grid(row=2, column=0, padx=8, pady=(2, 8), sticky="nw")
+        self.text_box = ctk.CTkTextbox(self, height=80, wrap="word")
+        self.text_box.insert("1.0", entry.text)
+        self.text_box.grid(row=2, column=1, columnspan=2, padx=8, pady=(2, 8), sticky="ew")
+
+    def sync_to_model(self) -> None:
+        self.entry.name = self.name_entry.get().strip()
+        self.entry.keywords = self.keywords_entry.get().strip()
+        self.entry.text = self.text_box.get("1.0", "end-1c")
+
+    def _on_remove(self) -> None:
+        label = self.entry.name.strip() or f"entrada {self.index + 1}"
+        if messagebox.askyesno(APP_TITLE, f"¿Eliminar la entrada de lorebook '{label}'?"):
+            self.app.remove_lore_entry(self.index)
+
+
+def _lore_entry_matches_search(entry: LoreEntry, query: str) -> bool:
+    """
+    True si `entry` deberia mostrarse bajo el termino de busqueda `query`
+    (ya en minusculas, ya sin espacios sobrantes) del cuadro de busqueda del
+    Lorebook -- substring, sin distinguir mayusculas/minusculas, contra el
+    nombre o cualquiera de las keywords de la entrada. Una funcion aparte
+    (en vez de vivir inline en _render_lore_entries) para poder probarla
+    directamente sin tener que construir una StoryForgeApp completa.
+    """
+    if not query:
+        return True
+    if query in entry.name.lower():
+        return True
+    return any(query in keyword.lower() for keyword in entry.keyword_list())
+
+
 class StoryForgeApp(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
@@ -545,6 +721,13 @@ class StoryForgeApp(ctk.CTk):
         self.current_path: Optional[str] = None
         self.chapter_panels: list[ChapterPanel] = []
         self.outline_panels: list[OutlinePanel] = []
+        self.lore_panels: list[LoreEntryPanel] = []
+        # ids (id(), no indices -- una entrada puede filtrarse fuera de vista
+        # por la busqueda) de las LoreEntry que coincidieron con el texto de
+        # escaneo de la ULTIMA generacion de capitulo completada (ver
+        # _record_lore_matches()). Vacio hasta la primera generacion, o tras
+        # cargar/crear un proyecto nuevo (ver _load_into_ui).
+        self.last_lore_match_ids: set[int] = set()
         # El motor local envuelve una sola instancia de Llama, que no es segura
         # para llamadas concurrentes: este flag evita que se generen dos
         # capitulos a la vez, o que se cargue un modelo nuevo mientras el
@@ -582,6 +765,7 @@ class StoryForgeApp(ctk.CTk):
         self.tab_plot = self.tabview.add("Plot")
         self.tab_characters = self.tabview.add("Personajes")
         self.tab_setting = self.tabview.add("Setting")
+        self.tab_lorebook = self.tabview.add("Lorebook")
         self.tab_outline = self.tabview.add("Esquema")
         self.tab_chapters = self.tabview.add("Capitulos")
 
@@ -589,6 +773,7 @@ class StoryForgeApp(ctk.CTk):
         self._build_plot_tab()
         self._build_characters_tab()
         self._build_setting_tab()
+        self._build_lorebook_tab()
         self._build_outline_tab()
         self._build_chapters_tab()
 
@@ -762,6 +947,128 @@ class StoryForgeApp(ctk.CTk):
             on_import=lambda: self._import_field(self.setting_box),
         )
         self.setting_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+
+    def _build_lorebook_tab(self) -> None:
+        tab = self.tab_lorebook
+        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_rowconfigure(3, weight=1)
+
+        ctk.CTkLabel(
+            tab,
+            text=(
+                "El Lorebook guarda personajes secundarios, lugares u objetos que no "
+                "necesitas repetir en Personajes/Setting. Cada entrada solo se agrega al "
+                "prompt del capitulo cuando alguna de sus keywords aparece en el esquema de "
+                "ese capitulo o en el resumen de los capitulos anteriores -- asi podes "
+                "mantener un elenco o mundo mucho mas grande sin agotar el contexto de un "
+                "modelo local."
+            ),
+            wraplength=850, justify="left",
+        ).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 0))
+
+        top = ctk.CTkFrame(tab, fg_color="transparent")
+        top.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
+        self.add_lore_btn = ctk.CTkButton(top, text="+ Agregar entrada", command=self.add_lore_entry)
+        self.add_lore_btn.pack(side="left")
+        ctk.CTkLabel(top, text=f"(maximo {MAX_LORE_ENTRIES} entradas)").pack(side="left", padx=8)
+
+        search_row = ctk.CTkFrame(tab, fg_color="transparent")
+        search_row.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
+        search_row.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(search_row, text="Buscar:").grid(row=0, column=0, padx=(0, 6))
+        self.lore_search_entry = ctk.CTkEntry(
+            search_row, placeholder_text="Filtrar por nombre o keyword..."
+        )
+        self.lore_search_entry.grid(row=0, column=1, sticky="ew")
+        # Solo filtra la vista (no toca project.lore_entries) -- re-renderiza
+        # en cada tecla, igual que agregar/eliminar una entrada ya hacia.
+        self.lore_search_entry.bind("<KeyRelease>", lambda _e: self._render_lore_entries())
+
+        self.lorebook_scroll = ctk.CTkScrollableFrame(tab)
+        self.lorebook_scroll.grid(row=3, column=0, sticky="nsew", padx=10, pady=(0, 10))
+        self.lorebook_scroll.grid_columnconfigure(0, weight=1)
+        self._render_lore_entries()
+
+    # ---------------- gestion del lorebook ----------------
+    def add_lore_entry(self) -> None:
+        if not self.project.can_add_lore_entry():
+            messagebox.showinfo(APP_TITLE, f"Ya hay {MAX_LORE_ENTRIES} entradas (el maximo).")
+            return
+        self.project.add_lore_entry()
+        self._render_lore_entries()
+
+    def remove_lore_entry(self, index: int) -> None:
+        del self.project.lore_entries[index]
+        self._render_lore_entries()
+
+    def _render_lore_entries(self) -> None:
+        # Este metodo se re-ejecuta en cada tecla escrita en el buscador (no
+        # solo al agregar/eliminar una entrada), asi que sincronizamos
+        # cualquier edicion pendiente en los paneles actuales ANTES de
+        # destruirlos -- de lo contrario, escribir en el buscador mientras
+        # otro campo del lorebook tiene cambios sin sincronizar los perderia.
+        for panel in self.lore_panels:
+            panel.sync_to_model()
+
+        for child in self.lorebook_scroll.winfo_children():
+            child.destroy()
+        self.lore_panels = []
+
+        query = self.lore_search_entry.get().strip().lower() if hasattr(self, "lore_search_entry") else ""
+        visible = [
+            (i, entry) for i, entry in enumerate(self.project.lore_entries)
+            if _lore_entry_matches_search(entry, query)
+        ]
+
+        if not self.project.lore_entries:
+            ctk.CTkLabel(
+                self.lorebook_scroll,
+                text="Aun no hay entradas de lorebook. Agrega una arriba.",
+                text_color="gray", wraplength=800, justify="left",
+            ).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+        elif not visible:
+            ctk.CTkLabel(
+                self.lorebook_scroll,
+                text="Ninguna entrada coincide con la busqueda.",
+                text_color="gray", wraplength=800, justify="left",
+            ).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+        else:
+            for row, (i, entry) in enumerate(visible):
+                matched = id(entry) in self.last_lore_match_ids
+                panel = LoreEntryPanel(self.lorebook_scroll, self, i, entry, matched_last_generation=matched)
+                panel.grid(row=row, column=0, sticky="ew", pady=6)
+                self.lore_panels.append(panel)
+        self.add_lore_btn.configure(
+            state="normal" if self.project.can_add_lore_entry() else "disabled"
+        )
+        # Igual que _render_chapters(): si se agrego/elimino una entrada
+        # mientras una generacion seguia en curso, los paneles recien
+        # creados nacen ya deshabilitados.
+        if self.busy:
+            self._set_engine_busy(True)
+
+    def _record_lore_matches(self, chapter_index: int) -> None:
+        """
+        Recalcula que entradas del lorebook coincidieron con el texto de
+        escaneo (esquema del capitulo + resumen de capitulos anteriores)
+        usado por la generacion de capitulo que acaba de terminar -- el
+        mismo calculo que build_chapter_system_prompt() ya hace
+        internamente via prompts.find_relevant_lore_entries(), pero cuyo
+        resultado no se devuelve desde generate_chapter(). Se recalcula aqui
+        en vez de hacer que el motor lo devuelva porque es solo coincidencia
+        de texto (sin llamar al modelo), barato, y evita cambiar la firma de
+        LocalStoryEngine.generate_chapter() solo para esto. Refresca la
+        pestana Lorebook al final para que la marca "usada en la ultima
+        generacion" aparezca sin que el usuario tenga que hacer nada mas.
+        """
+        if not (0 <= chapter_index < len(self.project.chapters)):
+            return
+        chapter = self.project.chapters[chapter_index]
+        previous = build_previous_context(self.project, chapter_index)
+        scan_text = f"{chapter.outline}\n{previous}"
+        matched = find_relevant_lore_entries(self.project.lore_entries, scan_text)
+        self.last_lore_match_ids = {id(entry) for entry in matched}
+        self._render_lore_entries()
 
     def _import_field(self, box: LimitedTextBox) -> None:
         """Reemplaza el contenido de `box` con el texto de un archivo elegido
@@ -972,18 +1279,37 @@ class StoryForgeApp(ctk.CTk):
 
     def _build_chapters_tab(self) -> None:
         tab = self.tab_chapters
-        tab.grid_columnconfigure(0, weight=1)
+        tab.grid_columnconfigure(0, weight=0)
+        tab.grid_columnconfigure(1, weight=1)
         tab.grid_rowconfigure(1, weight=1)
 
         top = ctk.CTkFrame(tab, fg_color="transparent")
-        top.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
+        top.grid(row=0, column=0, columnspan=2, sticky="ew", padx=10, pady=(10, 0))
         self.add_chapter_btn = ctk.CTkButton(top, text="+ Agregar capitulo", command=self.add_chapter)
         self.add_chapter_btn.pack(side="left")
         ctk.CTkLabel(top, text=f"(maximo {MAX_CHAPTERS} capitulos)").pack(side="left", padx=8)
 
+        # Sidebar de navegacion rapida: _render_chapters() apila TODOS los
+        # paneles de capitulo completos y expandidos (220px + 6 botones cada
+        # uno) en un solo frame scrolleable -- con varios capitulos eso se
+        # vuelve un scroll muy largo sin forma de saltar directo a uno en
+        # particular. Esta columna angosta lista numero + titulo de cada
+        # capitulo; un click salta la columna principal hasta ese panel (ver
+        # _jump_to_chapter()). No colapsa capitulos ya visitados, solo
+        # agrega el atajo de navegacion.
+        self.chapter_sidebar = ctk.CTkScrollableFrame(tab, width=170, label_text="Capitulos")
+        self.chapter_sidebar.grid(row=1, column=0, sticky="ns", padx=(10, 0), pady=10)
+        self.chapter_sidebar.grid_columnconfigure(0, weight=1)
+
         self.chapters_scroll = ctk.CTkScrollableFrame(tab)
-        self.chapters_scroll.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
+        self.chapters_scroll.grid(row=1, column=1, sticky="nsew", padx=10, pady=10)
         self.chapters_scroll.grid_columnconfigure(0, weight=1)
+        # A diferencia de las pestanas Lorebook/Esquema (que ya renderizaban
+        # su lista, aunque estuviera vacia, al construirse), esta pestana no
+        # lo hacia -- inofensivo antes (nada que mostrar con 0 capitulos),
+        # pero ahora la sidebar necesita su placeholder "Sin capitulos."
+        # inicial igual que las otras listas.
+        self._render_chapters()
 
     # ---------------- gestion de capitulos ----------------
     def add_chapter(self) -> None:
@@ -1015,6 +1341,58 @@ class StoryForgeApp(ctk.CTk):
         # deshabilitados en vez de dejar una ventana para dispararla en paralelo.
         if self.busy:
             self._set_engine_busy(True)
+        # La sidebar de navegacion (numero + titulo de cada capitulo) debe
+        # reflejar siempre el mismo conjunto de capitulos que chapters_scroll
+        # -- se re-renderiza aca para no tener que acordarse de llamarla por
+        # separado en cada lugar que llama a _render_chapters() (add/remove,
+        # _load_into_ui, _apply_outline tras generar el esquema).
+        self._render_chapter_sidebar()
+
+    def _render_chapter_sidebar(self) -> None:
+        for child in self.chapter_sidebar.winfo_children():
+            child.destroy()
+        if not self.project.chapters:
+            ctk.CTkLabel(
+                self.chapter_sidebar, text="Sin capitulos.", text_color="gray",
+            ).grid(row=0, column=0, sticky="w", padx=6, pady=6)
+            return
+        for i, chapter in enumerate(self.project.chapters):
+            title = chapter.title.strip() or f"Capitulo {i + 1}"
+            preview = " ".join(chapter.content.split()[:6])
+            label = f"{i + 1}. {title}"
+            if preview:
+                label += f"\n{preview}..."
+            btn = ctk.CTkButton(
+                self.chapter_sidebar, text=label, anchor="w", fg_color="transparent",
+                hover_color="#2b2b2b", command=lambda idx=i: self._jump_to_chapter(idx),
+            )
+            btn.grid(row=i, column=0, sticky="ew", padx=4, pady=2)
+
+    def _jump_to_chapter(self, index: int) -> None:
+        """
+        Desplaza chapters_scroll hasta el panel del capitulo `index`. Un
+        CTkScrollableFrame no tiene un ".see(widget)" publico como
+        CTkTextbox; internamente envuelve un tkinter.Canvas normal
+        (self._parent_canvas, atributo privado pero estable en la version de
+        customtkinter que usa este proyecto -- ver
+        customtkinter/windows/widgets/ctk_scrollable_frame.py) al que si se
+        le puede pedir moverse a una fraccion dada del scrollregion total
+        con yview_moveto(). Calculamos esa fraccion a partir de la posicion Y
+        real del panel dentro del frame scrolleable.
+        """
+        if not (0 <= index < len(self.chapter_panels)):
+            return
+        panel = self.chapter_panels[index]
+        self.chapters_scroll.update_idletasks()
+        canvas = self.chapters_scroll._parent_canvas
+        bbox = canvas.bbox("all")
+        if not bbox:
+            return
+        total_height = bbox[3] - bbox[1]
+        if total_height <= 0:
+            return
+        fraction = max(0.0, min(1.0, panel.winfo_y() / total_height))
+        canvas.yview_moveto(fraction)
 
     # ---------------- exclusion mutua del motor ----------------
     def _set_engine_busy(self, busy: bool) -> None:
@@ -1043,6 +1421,15 @@ class StoryForgeApp(ctk.CTk):
             expand_btn = getattr(box, "expand_btn", None)
             if expand_btn is not None:
                 expand_btn.configure(state=state)
+        # Agregar/quitar entradas de lorebook mientras una generacion esta en
+        # curso podria cambiar que entradas coinciden a mitad de una seccion
+        # ya en marcha -- se bloquea por la misma razon que add/remove de
+        # capitulos arriba.
+        self.add_lore_btn.configure(
+            state="disabled" if busy else ("normal" if self.project.can_add_lore_entry() else "disabled")
+        )
+        for panel in self.lore_panels:
+            panel.remove_btn.configure(state=state)
 
     # ---------------- autoguardado ----------------
     def _offer_autosave_recovery(self) -> None:
@@ -1101,6 +1488,8 @@ class StoryForgeApp(ctk.CTk):
             panel.sync_to_model()
         for panel in self.chapter_panels:
             panel.sync_to_model()
+        for panel in self.lore_panels:
+            panel.sync_to_model()
 
     def _load_into_ui(self) -> None:
         self.plot_box.set(self.project.plot)
@@ -1112,6 +1501,13 @@ class StoryForgeApp(ctk.CTk):
             self.project.writing_style if self.project.writing_style in WRITING_STYLES
             else WRITING_STYLE_DEFAULT_LABEL
         )
+        # Los matches de la "ultima generacion" pertenecen al proyecto que se
+        # acaba de dejar atras -- no tiene sentido seguir marcando entradas
+        # del lorebook del proyecto NUEVO como si hubieran sido usadas.
+        self.last_lore_match_ids = set()
+        if hasattr(self, "lore_search_entry"):
+            self.lore_search_entry.delete(0, "end")
+        self._render_lore_entries()
         self._render_outline_panels()
         self._render_chapters()
 

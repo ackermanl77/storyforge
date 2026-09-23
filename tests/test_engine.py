@@ -10,13 +10,15 @@ from app.engine import (
     MAX_SECTIONS_PER_CHAPTER,
     ModelNotLoadedError,
 )
-from app.project import Project
+from app.project import LoreEntry, Project
 from app.prompts import (
     _trim_words_tail,
     build_chapter_purpose_instruction,
     build_chapter_system_prompt,
+    build_lorebook_block,
     build_outline_prompt,
     build_writing_style_instruction,
+    find_relevant_lore_entries,
 )
 
 
@@ -32,6 +34,40 @@ class FakeLlama:
         self.calls += 1
         words = " ".join(f"word{self.calls}_{i}" for i in range(150))
         return {"choices": [{"text": words}]}
+
+
+class StreamingFakeLlama:
+    """
+    A llama_cpp.Llama stand-in that actually honors stream=True, unlike
+    FakeLlama above (which always returns a complete dict, the same way a
+    handful of existing tests' engine._llm doubles do -- LocalStoryEngine.
+    _complete() is deliberately written to accept either shape, see
+    app/engine.py). When stream=True is passed, this returns a generator of
+    incremental text deltas (NOT cumulative), matching llama_cpp's own
+    streaming format. `stream_requests` records whether stream=True was
+    passed on each call, so tests can confirm generate_chapter() only asks
+    for streaming when it actually has a progress_callback to feed.
+    """
+
+    def __init__(self, words_per_call: int = 150, chunk_size: int = 10):
+        self.calls = 0
+        self.words_per_call = words_per_call
+        self.chunk_size = chunk_size
+        self.stream_requests = []
+
+    def __call__(self, prompt, max_tokens=0, stream=False, **kwargs):
+        self.calls += 1
+        self.stream_requests.append(stream)
+        words = [f"word{self.calls}_{i}" for i in range(self.words_per_call)]
+        if not stream:
+            return {"choices": [{"text": " ".join(words)}]}
+        return self._stream(words)
+
+    def _stream(self, words):
+        for i in range(0, len(words), self.chunk_size):
+            chunk = words[i:i + self.chunk_size]
+            delta = (" " if i > 0 else "") + " ".join(chunk)
+            yield {"choices": [{"text": delta}]}
 
 
 def make_project(target_words=400):
@@ -338,6 +374,163 @@ class TestModelReload(unittest.TestCase):
 
         self.assertEqual(saw_previous_model_released, [True])
         self.assertIsNotNone(engine._llm)
+
+
+class TestFindRelevantLoreEntries(unittest.TestCase):
+    def test_empty_scan_text_matches_nothing(self):
+        entries = [LoreEntry(name="A", keywords="a", text="x")]
+        self.assertEqual(find_relevant_lore_entries(entries, ""), [])
+
+    def test_matches_case_insensitively(self):
+        entries = [LoreEntry(name="Queen", keywords="queen", text="royal")]
+        self.assertEqual(find_relevant_lore_entries(entries, "Then the QUEEN spoke."), entries)
+
+    def test_matches_multi_word_keyword_phrase(self):
+        entries = [LoreEntry(name="Queen", keywords="the queen", text="royal")]
+        self.assertEqual(find_relevant_lore_entries(entries, "Then the queen spoke."), entries)
+
+    def test_does_not_match_as_a_substring_of_another_word(self):
+        entries = [LoreEntry(name="Ann", keywords="Ann", text="x")]
+        self.assertEqual(find_relevant_lore_entries(entries, "The announcement echoed."), [])
+
+    def test_entry_with_no_keywords_never_matches(self):
+        entries = [LoreEntry(name="Empty", keywords="", text="x")]
+        self.assertEqual(find_relevant_lore_entries(entries, "anything at all"), [])
+
+    def test_preserves_entry_order(self):
+        first = LoreEntry(name="First", keywords="alpha", text="1")
+        second = LoreEntry(name="Second", keywords="beta", text="2")
+        result = find_relevant_lore_entries([first, second], "alpha and beta both appear")
+        self.assertEqual(result, [first, second])
+
+
+class TestBuildLorebookBlock(unittest.TestCase):
+    def test_empty_string_when_nothing_matches(self):
+        entries = [LoreEntry(name="A", keywords="zzz", text="text")]
+        self.assertEqual(build_lorebook_block(entries, "no match here"), "")
+
+    def test_trims_matched_entry_text_to_budget(self):
+        entries = [LoreEntry(name="A", keywords="alpha", text="word " * 500)]
+        block = build_lorebook_block(entries, "alpha appears", max_entry_words=20)
+        self.assertIn("[...]", block)
+
+    def test_caps_number_of_matched_entries(self):
+        entries = [LoreEntry(name=f"E{i}", keywords="alpha", text=f"body{i}") for i in range(20)]
+        block = build_lorebook_block(entries, "alpha appears", max_entries=3)
+        self.assertEqual(block.count("body"), 3)
+
+
+class TestLorebookInChapterPrompt(unittest.TestCase):
+    """
+    Lorebook / World Info integration point: build_chapter_system_prompt()
+    scans the current chapter's outline plus the previous chapters' summary
+    text (the narratively "nearby" material for this generation) and only
+    pulls in a lore entry's text when one of its keywords actually appears
+    there -- unlike plot/characters/setting, which are always included in
+    full.
+    """
+
+    def test_entry_not_included_when_no_keyword_matches(self):
+        project = make_project()
+        project.lore_entries.append(
+            LoreEntry(name="Unrelated", keywords="Bob, Bobby", text="UNIQUE_LORE_MARKER")
+        )
+        project.chapters[0].outline = "Hero meets mentor in the forest."
+        prompt = build_chapter_system_prompt(project, 0)
+        self.assertNotIn("UNIQUE_LORE_MARKER", prompt)
+        self.assertNotIn("RELEVANT WORLD INFO", prompt)
+
+    def test_entry_included_when_outline_mentions_a_keyword(self):
+        project = make_project()
+        project.lore_entries.append(
+            LoreEntry(name="The Mentor", keywords="mentor, old sage", text="UNIQUE_LORE_MARKER")
+        )
+        project.chapters[0].outline = "Hero meets the mentor in the forest."
+        prompt = build_chapter_system_prompt(project, 0)
+        self.assertIn("UNIQUE_LORE_MARKER", prompt)
+        self.assertIn("RELEVANT WORLD INFO", prompt)
+
+    def test_previous_chapter_summary_can_also_trigger_a_match(self):
+        project = make_project()
+        project.add_chapter("Chapter Two", target_words=200)
+        project.chapters[0].summary = "The hero defeated the dragon."
+        project.lore_entries.append(LoreEntry(name="Dragon", keywords="dragon", text="UNIQUE_LORE_MARKER"))
+        prompt = build_chapter_system_prompt(project, 1)
+        self.assertIn("UNIQUE_LORE_MARKER", prompt)
+
+    def test_no_lore_entries_adds_no_block(self):
+        project = make_project()
+        prompt = build_chapter_system_prompt(project, 0)
+        self.assertNotIn("RELEVANT WORLD INFO", prompt)
+
+
+class TestStreamingGeneration(unittest.TestCase):
+    """
+    LocalStoryEngine.generate_chapter() streams each section token-by-token
+    via llama_cpp.Llama.__call__(..., stream=True) when a progress_callback
+    is supplied, instead of only reporting once the whole ~900-word section
+    is done -- see app/engine.py::_complete().
+    """
+
+    def test_does_not_request_streaming_without_a_progress_callback(self):
+        engine = LocalStoryEngine()
+        llm = StreamingFakeLlama()
+        engine._llm = llm
+        project = make_project(target_words=100)
+        engine.generate_chapter(project, 0)
+        self.assertTrue(llm.stream_requests)
+        self.assertFalse(any(llm.stream_requests))
+
+    def test_requests_streaming_when_progress_callback_is_given(self):
+        engine = LocalStoryEngine()
+        llm = StreamingFakeLlama()
+        engine._llm = llm
+        project = make_project(target_words=100)
+        engine.generate_chapter(project, 0, progress_callback=lambda *a: None)
+        self.assertTrue(any(llm.stream_requests))
+
+    def test_progress_callback_fires_many_times_within_a_single_section(self):
+        engine = LocalStoryEngine()
+        engine._llm = StreamingFakeLlama(words_per_call=150, chunk_size=10)
+        project = make_project(target_words=100)
+        updates = []
+        engine.generate_chapter(
+            project, 0, progress_callback=lambda text, words, target: updates.append(words)
+        )
+        # 150 words / 10-word chunks = 15 token-level updates for the first
+        # section alone, plus the section-end update -- far more than the
+        # old one-call-per-section behavior.
+        self.assertGreater(len(updates), 5)
+        # Word counts reported must never go backwards (cumulative text).
+        self.assertEqual(updates, sorted(updates))
+
+    def test_final_result_contains_all_streamed_text(self):
+        engine = LocalStoryEngine()
+        engine._llm = StreamingFakeLlama(words_per_call=150, chunk_size=10)
+        project = make_project(target_words=100)
+        result = engine.generate_chapter(project, 0, progress_callback=lambda *a: None)
+        self.assertIn("word1_0", result)
+        self.assertIn("word1_149", result)
+
+    def test_cancel_check_can_stop_generation_mid_stream(self):
+        engine = LocalStoryEngine()
+        engine._llm = StreamingFakeLlama(words_per_call=150, chunk_size=10)
+        project = make_project(target_words=100_000)  # unreachable within one section
+
+        state = {"n": 0}
+
+        def cancel_check():
+            state["n"] += 1
+            return state["n"] > 3  # cancel partway through the first section's stream
+
+        result = engine.generate_chapter(
+            project, 0, progress_callback=lambda *a: None, cancel_check=cancel_check
+        )
+        # Cancelling a few chunks into a 15-chunk section must leave
+        # noticeably less than the section's full 150 words -- proof
+        # cancellation took effect DURING the section, not only between
+        # sections like before streaming existed.
+        self.assertLess(len(result.split()), 150)
 
 
 if __name__ == "__main__":

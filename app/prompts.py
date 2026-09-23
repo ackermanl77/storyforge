@@ -8,7 +8,7 @@ from __future__ import annotations
 import re
 from typing import List, Tuple
 
-from .project import Chapter, Project
+from .project import Chapter, LoreEntry, Project
 
 # Instruccion en ingles (la salida siempre se pide en ingles, ver STYLE_GUIDE
 # abajo) para cada valor posible de project.writing_style (project.WRITING_
@@ -182,6 +182,54 @@ def build_story_outline_overview(project: Project) -> str:
     return f"STORY OUTLINE OVERVIEW (all planned chapters, for context only):\n{lines}\n"
 
 
+def find_relevant_lore_entries(entries: List[LoreEntry], scan_text: str) -> List[LoreEntry]:
+    """
+    Lorebook / World Info matcher: devuelve las entradas cuyo keyword (al
+    menos uno de LoreEntry.keyword_list()) aparece como palabra/frase
+    completa (sin distinguir mayusculas/minusculas) en `scan_text` -- el
+    texto NARRATIVAMENTE CERCANO a la generacion en curso (p.ej. el esquema
+    del capitulo y el resumen de los capitulos anteriores), no el plot
+    completo. A diferencia de plot/personajes/setting (siempre incluidos
+    enteros via build_context_block), esto deja mantener un elenco o mundo
+    mucho mas grande del que cabria en el contexto de un modelo local si
+    cada entrada se incluyera siempre, incluso cuando no es relevante ahora.
+    Conserva el orden de `entries` (orden de aparicion en el lorebook).
+    """
+    if not scan_text or not scan_text.strip():
+        return []
+    matches: List[LoreEntry] = []
+    for entry in entries:
+        for keyword in entry.keyword_list():
+            pattern = r"(?i)\b" + re.escape(keyword) + r"\b"
+            if re.search(pattern, scan_text):
+                matches.append(entry)
+                break
+    return matches
+
+
+def build_lorebook_block(
+    entries: List[LoreEntry], scan_text: str, max_entry_words: int = 200, max_entries: int = 8,
+) -> str:
+    """
+    Bloque de contexto con SOLO las entradas del lorebook relevantes a
+    `scan_text` (ver find_relevant_lore_entries) -- vacio si ninguna
+    coincide, para no gastar contexto en absoluto cuando el lorebook no
+    aplica a esta seccion. `max_entries` acota cuantas entradas coincidentes
+    como maximo se incluyen (por si muchas coinciden a la vez); cada una se
+    recorta a `max_entry_words`, igual que el resto de los campos de este
+    archivo.
+    """
+    matched = find_relevant_lore_entries(entries, scan_text)[:max_entries]
+    if not matched:
+        return ""
+    lines = []
+    for entry in matched:
+        name = entry.name.strip() or "(sin nombre)"
+        text = _trim_words(entry.text.strip(), max_entry_words)
+        lines.append(f"{name}: {text}")
+    return "RELEVANT WORLD INFO (only what applies to this part of the story):\n" + "\n".join(lines) + "\n\n"
+
+
 def build_chapter_system_prompt(
     project: Project,
     chapter_index: int,
@@ -190,6 +238,7 @@ def build_chapter_system_prompt(
     max_setting_words: int = 600,
     max_previous_words: int = 500,
     max_outline_words: int = 400,
+    max_lore_words: int = 200,
 ) -> str:
     """
     Construye el prompt de sistema para un capitulo. Los parametros max_*
@@ -213,6 +262,13 @@ def build_chapter_system_prompt(
             "sensory detail, dialogue and internal thoughts, but do not skip or "
             f"reorder the events described):\n{outline_text}\n\n"
         )
+    # Lorebook: se escanean el esquema de ESTE capitulo y el resumen de los
+    # capitulos anteriores -- el texto narrativamente mas cercano a lo que se
+    # esta por escribir -- en busca de las keywords de cada entrada, en vez
+    # de incluir el lorebook completo (que podria no caber en absoluto en el
+    # contexto de un modelo local con un elenco/mundo grande).
+    lore_scan_text = f"{chapter.outline}\n{previous}"
+    lore_block = build_lorebook_block(project.lore_entries, lore_scan_text, max_entry_words=max_lore_words)
     style_emphasis = build_writing_style_instruction(project)
     purpose_instruction = build_chapter_purpose_instruction(chapter)
     return (
@@ -224,6 +280,7 @@ def build_chapter_system_prompt(
         f"{overview}\n"
         f"PROGRESS SO FAR:\n{previous}\n\n"
         f"{outline_block}"
+        f"{lore_block}"
         f"{purpose_instruction}"
         f"{style_emphasis}"
         f"{STYLE_GUIDE}\n"
