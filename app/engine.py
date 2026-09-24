@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import glob
 import os
+import re
 import sys
 from typing import Callable, List, Optional, Tuple
 
-from .project import MAX_CHAPTERS, Project, count_words
+from .project import MAX_CHAPTERS, MAX_WORDS_PER_CHAPTER, Project, count_words
 from .prompts import (
     build_chapter_system_prompt,
     build_continuation_prompt,
@@ -28,6 +29,18 @@ MAX_SECTIONS_PER_CHAPTER = 14  # 14 * 900 ~= 12,600 palabras de margen
 TOKENS_PER_WORD_ESTIMATE = 1.4
 SAFETY_MARGIN_TOKENS = 64  # colchon para no rozar el limite exacto del modelo
 OUTLINE_WORDS_PER_CHAPTER = 100  # presupuesto de salida por capitulo al generar el esquema
+# Margen de salida al refinar: la version revisada puede salir algo mas larga
+# que el original ("agrega mas dialogo"), asi que se reserva un 30% extra.
+REFINE_OUTPUT_HEADROOM = 1.3
+
+# Secuencias de corte por defecto de _complete() (prosa de un capitulo: que el
+# modelo no empiece por su cuenta el capitulo siguiente). NO sirven para el
+# esquema (cuyo formato es justamente "...\n\nChapter 2: ..." -- con estas se
+# cortaba despues del capitulo 1), ni para refinar/expandir, donde un parrafo
+# que empieza con "Chapter" es texto legitimo. Esas llamadas usan
+# ONLY_END_MARKER_STOP.
+DEFAULT_PROSE_STOP = ["\n\nCHAPTER", "\n\nChapter", "[END]"]
+ONLY_END_MARKER_STOP = ["[END]"]
 
 # Niveles de presupuesto de contexto (en palabras) para plot/personajes/
 # setting/resumen previo/esquema del capitulo/cola del capitulo en curso. Si
@@ -39,19 +52,18 @@ OUTLINE_WORDS_PER_CHAPTER = 100  # presupuesto de salida por capitulo al generar
 # esquema de capitulo inusualmente largo podia hacer que ni el nivel mas
 # chico de presupuesto cupiera, con un error que sugeria enganosamente que
 # "ya se redujo al minimo" cuando el esquema nunca se toco.
-# max_content_words cubre refine_chapter(): el capitulo completo a revisar
-# se prioriza sobre plot/personajes/setting (refine_chapter no los incluye
-# en absoluto -- ver build_refine_chapter_prompt), asi que se le da un
-# presupuesto generoso relativo a los demas campos.
+# refine_chapter() no usa estos niveles: nunca recorta el capitulo a revisar
+# (antes lo hacia, y la version revisada reemplazaba el capitulo completo,
+# perdiendo en silencio el final) -- si no cabe entero, lo revisa por partes.
 # max_lore_words cubre el bloque de Lorebook / World Info (prompts.
 # build_lorebook_block): igual que max_outline_words, se reduce junto con
 # todo lo demas en cada nivel para que las entradas que coincidan (ver
 # prompts.find_relevant_lore_entries) no sean, por si solas, lo que hace que
 # ni el presupuesto mas chico quepa en la ventana de contexto del modelo.
 CONTEXT_BUDGET_LEVELS = [
-    dict(max_plot_words=1200, max_characters_words=600, max_setting_words=600, max_previous_words=500, max_outline_words=400, max_content_words=3000, tail_words=400, max_lore_words=200),
-    dict(max_plot_words=700, max_characters_words=400, max_setting_words=400, max_previous_words=300, max_outline_words=250, max_content_words=1800, tail_words=250, max_lore_words=120),
-    dict(max_plot_words=350, max_characters_words=200, max_setting_words=200, max_previous_words=150, max_outline_words=120, max_content_words=900, tail_words=150, max_lore_words=60),
+    dict(max_plot_words=1200, max_characters_words=600, max_setting_words=600, max_previous_words=500, max_outline_words=400, tail_words=400, max_lore_words=200),
+    dict(max_plot_words=700, max_characters_words=400, max_setting_words=400, max_previous_words=300, max_outline_words=250, tail_words=250, max_lore_words=120),
+    dict(max_plot_words=350, max_characters_words=200, max_setting_words=200, max_previous_words=150, max_outline_words=120, tail_words=150, max_lore_words=60),
 ]
 
 
@@ -246,14 +258,23 @@ class LocalStoryEngine:
         approx_words = max(int(available_tokens / TOKENS_PER_WORD_ESTIMATE), 40)
         if len(words) <= approx_words:
             return text
-        head = approx_words // 2
-        tail = approx_words - head
-        trimmed = " ".join(words[:head]) + " [...] " + " ".join(words[-tail:])
-        while self._count_tokens(trimmed) > available_tokens and head > 20:
-            head -= 20
-            tail = max(approx_words - head, 20)
-            trimmed = " ".join(words[:head]) + " [...] " + " ".join(words[-tail:])
+        trimmed = self._head_tail_join(words, approx_words)
+        # Si el tokenizador real cuenta mas tokens por palabra que la
+        # estimacion, hay que achicar el TOTAL de palabras conservadas en cada
+        # pasada (antes solo se movian palabras de la cabeza a la cola, con el
+        # total constante, asi que el bucle nunca lograba que cupiera).
+        while self._count_tokens(trimmed) > available_tokens and approx_words > 1:
+            approx_words = int(approx_words * 0.8)
+            trimmed = self._head_tail_join(words, approx_words)
         return trimmed
+
+    @staticmethod
+    def _head_tail_join(words: List[str], keep_words: int) -> str:
+        head = keep_words // 2
+        tail = keep_words - head
+        # words[-0:] devolveria la lista COMPLETA, no una vacia.
+        tail_words = words[-tail:] if tail > 0 else []
+        return " ".join(words[:head]) + " [...] " + " ".join(tail_words)
 
     def _complete(
         self,
@@ -280,7 +301,7 @@ class LocalStoryEngine:
             temperature=0.85,
             top_p=0.92,
             repeat_penalty=1.15,
-            stop=stop or ["\n\nCHAPTER", "\n\nChapter", "[END]"],
+            stop=stop or DEFAULT_PROSE_STOP,
         )
         # Solo pedimos streaming token a token (llama_cpp.Llama.__call__(...,
         # stream=True), que devuelve un generador en vez de un dict) cuando
@@ -329,6 +350,7 @@ class LocalStoryEngine:
         max_tokens: int,
         on_token: Optional[Callable[[str], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
+        stop: Optional[List[str]] = None,
     ) -> str:
         """
         Intenta completar con cada nivel de CONTEXT_BUDGET_LEVELS (de mayor a
@@ -341,7 +363,7 @@ class LocalStoryEngine:
         for budget in CONTEXT_BUDGET_LEVELS:
             try:
                 return self._complete(
-                    prompt_for_budget(budget), max_tokens=max_tokens,
+                    prompt_for_budget(budget), max_tokens=max_tokens, stop=stop,
                     on_token=on_token, cancel_check=cancel_check,
                 )
             except ContextOverflowError as exc:
@@ -376,7 +398,10 @@ class LocalStoryEngine:
                 max_setting_words=budget["max_setting_words"],
             )
 
-        raw = self._complete_with_shrinking_budget(prompt_for_budget, max_tokens)
+        # stop explicito: con el corte por defecto ("\n\nChapter") el modelo
+        # se detenia justo al empezar "Chapter 2:" y el esquema salia con un
+        # solo capitulo.
+        raw = self._complete_with_shrinking_budget(prompt_for_budget, max_tokens, stop=ONLY_END_MARKER_STOP)
         return parse_outline_response(raw, num_chapters)
 
     def generate_chapter(
@@ -416,8 +441,15 @@ class LocalStoryEngine:
         while count_words(full_text) < target and section < MAX_SECTIONS_PER_CHAPTER:
             if cancel_check and cancel_check():
                 break
-            remaining = max(target - count_words(full_text), 200)
+            written = count_words(full_text)
+            remaining = max(target - written, 200)
             section_words = min(SECTION_TARGET_WORDS, remaining + 150)
+            # La ultima seccion no debe empujar el capitulo por encima de
+            # MAX_WORDS_PER_CHAPTER: con el piso de 200 + 150 palabras de
+            # arriba, un objetivo de 10,000 podia terminar en ~10,300.
+            section_words = min(section_words, MAX_WORDS_PER_CHAPTER - written)
+            if section_words <= 0:
+                break
             max_tokens = int(section_words * TOKENS_PER_WORD_ESTIMATE)
 
             def prompt_for_budget(budget: dict, _section=section, _remaining=remaining) -> str:
@@ -509,31 +541,115 @@ class LocalStoryEngine:
 
         trimmed_text = self._fit_text_to_token_budget(text, available_for_text)
         prompt = build_expand_field_prompt(field_key, trimmed_text, max_words)
-        return self._complete(prompt, max_tokens=max_out_tokens)
+        # Notas de plot/personajes pueden organizarse en lineas tipo
+        # "Chapter 1: ..." -- el corte por defecto de prosa las cortaria.
+        return self._complete(prompt, max_tokens=max_out_tokens, stop=ONLY_END_MARKER_STOP)
 
     def refine_chapter(self, project: Project, chapter_index: int, instruction: str) -> str:
         """
         Revisa un capitulo YA generado segun una instruccion del usuario
-        (p.ej. "hazlo mas oscuro"), en vez de generar texto nuevo. A
-        diferencia de generate_chapter(), no incluye plot/personajes/setting
-        en el prompt -- prioriza conservar la mayor parte posible del
-        capitulo original a revisar (ver build_refine_chapter_prompt), asi
-        que un capitulo muy largo con un n_ctx chico puede seguir sin caber
-        incluso con el presupuesto mas chico; el mensaje de
-        ContextOverflowError ya sugiere aumentar n_ctx, que ahora es
-        configurable desde la pestana Modelo.
+        (p.ej. "hazlo mas oscuro"), en vez de generar texto nuevo. No incluye
+        plot/personajes/setting en el prompt (ver build_refine_chapter_prompt).
+
+        El capitulo NUNCA se recorta: el resultado reemplaza el capitulo
+        completo, asi que revisar solo un recorte perdia en silencio todo lo
+        que quedaba fuera (normalmente el final). Si el capitulo entero mas la
+        respuesta no caben en la ventana de contexto, se revisa por partes
+        (grupos de parrafos consecutivos, ver _split_for_refine) y las partes
+        revisadas se vuelven a unir en orden.
         """
         if self._llm is None:
             raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
 
-        chapter = project.chapters[chapter_index]
-        target_words = max(chapter.word_count(), chapter.target_words)
-        max_tokens = int(target_words * TOKENS_PER_WORD_ESTIMATE) + 128
+        content = project.chapters[chapter_index].content.strip()
+        max_tokens = self._refine_output_tokens(count_words(content))
+        prompt = build_refine_chapter_prompt(project, chapter_index, instruction)
+        if self._count_tokens(prompt) <= self._available_context(max_tokens):
+            return self._complete(prompt, max_tokens=max_tokens, stop=ONLY_END_MARKER_STOP)
 
-        def prompt_for_budget(budget: dict) -> str:
-            return build_refine_chapter_prompt(
-                project, chapter_index, instruction,
-                max_content_words=budget["max_content_words"],
+        # El andamiaje (instruccion + guia de estilo + aviso de "parte i de n")
+        # es igual para todas las partes; se mide una vez, con texto vacio.
+        scaffolding = self._count_tokens(
+            build_refine_chapter_prompt(project, chapter_index, instruction, content="", part=99, total_parts=99)
+        )
+        parts = self._split_for_refine(content, scaffolding)
+        revised: List[str] = []
+        for i, part in enumerate(parts, start=1):
+            part_prompt = build_refine_chapter_prompt(
+                project, chapter_index, instruction, content=part, part=i, total_parts=len(parts),
+            )
+            out = self._complete(
+                part_prompt, max_tokens=self._refine_output_tokens(count_words(part)),
+                stop=ONLY_END_MARKER_STOP,
+            )
+            if not out.strip():
+                # Unir las demas partes sin esta perderia texto del capitulo.
+                raise RuntimeError(
+                    f"El modelo devolvio un texto vacio al refinar la parte {i} de {len(parts)} "
+                    "del capitulo. No se modifico el capitulo; intentalo de nuevo."
+                )
+            revised.append(out.strip())
+        return "\n\n".join(revised)
+
+    @staticmethod
+    def _refine_output_tokens(words: int) -> int:
+        return int(words * TOKENS_PER_WORD_ESTIMATE * REFINE_OUTPUT_HEADROOM) + 128
+
+    def _split_for_refine(self, content: str, scaffolding_tokens: int) -> List[str]:
+        """
+        Parte `content` en trozos consecutivos que, cada uno con su prompt y
+        su respuesta, quepan en la ventana de contexto. Corta entre parrafos;
+        solo si un parrafo por si solo no cabe se corta entre oraciones, y
+        solo si una oracion no cabe, por palabras. Nunca descarta texto: los
+        trozos juntos contienen todas las palabras de `content`, en orden.
+        """
+        budget = self._n_ctx - SAFETY_MARGIN_TOKENS - scaffolding_tokens
+
+        def fits(text: str) -> bool:
+            return self._count_tokens(text) + self._refine_output_tokens(count_words(text)) <= budget
+
+        if not fits(" ".join(["word"] * 20)):
+            raise ContextOverflowError(
+                "El capitulo no cabe completo en la ventana de contexto del modelo "
+                f"({self._n_ctx:,} tokens) y ni siquiera hay espacio para refinarlo por partes. "
+                "Carga el modelo con un n_ctx mayor en la pestana Modelo."
             )
 
-        return self._complete_with_shrinking_budget(prompt_for_budget, max_tokens)
+        def split_units(text: str, level: int) -> List[str]:
+            if fits(text):
+                return [text]
+            if level >= 2:
+                # Ultimo recurso (una "oracion" enorme sin puntuacion): cortar
+                # por palabras, en ventanas del mayor tamano que quepa.
+                words = text.split()
+                size = 20
+                while size * 2 <= len(words) and fits(" ".join(words[:size * 2])):
+                    size *= 2
+                return [" ".join(words[j:j + size]) for j in range(0, len(words), size)]
+            if level == 0:
+                pieces, joiner = re.split(r"\n\s*\n", text), "\n\n"
+            else:
+                pieces, joiner = re.split(r"(?<=[.!?\"\u201d])\s+", text), " "
+            pieces = [p.strip() for p in pieces if p.strip()]
+            if len(pieces) <= 1:
+                return split_units(text, level + 1)
+            # Agrupa piezas consecutivas mientras quepan juntas.
+            chunks: List[str] = []
+            current = ""
+            for piece in pieces:
+                candidate = f"{current}{joiner}{piece}" if current else piece
+                if fits(candidate):
+                    current = candidate
+                    continue
+                if current:
+                    chunks.append(current)
+                if fits(piece):
+                    current = piece
+                else:
+                    chunks.extend(split_units(piece, level + 1))
+                    current = ""
+            if current:
+                chunks.append(current)
+            return chunks
+
+        return split_units(content, 0)

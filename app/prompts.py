@@ -6,7 +6,7 @@ para pensamientos internos, dialogo y cambios de punto de vista.
 from __future__ import annotations
 
 import re
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 from .project import Chapter, LoreEntry, Project
 
@@ -399,7 +399,9 @@ def build_refine_chapter_prompt(
     project: Project,
     chapter_index: int,
     instruction: str,
-    max_content_words: int = 3000,
+    content: Optional[str] = None,
+    part: int = 1,
+    total_parts: int = 1,
 ) -> str:
     """
     Prompt para revisar un capitulo YA generado segun una instruccion del
@@ -407,15 +409,27 @@ def build_refine_chapter_prompt(
     vez de generar texto nuevo desde cero. Mantiene el STYLE_GUIDE y el
     enfasis de writing_style del proyecto (las reglas de formato siguen
     aplicando a la version revisada).
+
+    `content` es el texto a revisar (por defecto, el capitulo completo). A
+    diferencia del resto de los campos de este archivo, NUNCA se recorta
+    aqui: la respuesta reemplaza el capitulo entero, asi que recortar perdia
+    en silencio lo que quedaba fuera. Si no cabe, engine.refine_chapter()
+    lo divide en partes y llama a esta funcion una vez por parte, con
+    `part`/`total_parts` para que el modelo sepa que revisa solo un tramo.
     """
     chapter = project.chapters[chapter_index]
-    # A diferencia de build_continuation_prompt (que solo necesita el FINAL
-    # de lo escrito para saber donde retomar), una revision idealmente
-    # necesita el capitulo COMPLETO -- por eso se conserva el inicio
-    # (_trim_words) en vez de la cola si no cabe entero, como el resto de
-    # los campos de contexto de este archivo.
-    content = _trim_words(chapter.content.strip(), max_content_words)
+    if content is None:
+        content = chapter.content
+    content = content.strip()
     style_emphasis = build_writing_style_instruction(project)
+    part_note = ""
+    if total_parts > 1:
+        part_note = (
+            f"NOTE: this is part {part} of {total_parts} of the chapter, which is being "
+            "revised in consecutive parts. Rewrite ONLY this part, applying the "
+            "instruction where it is relevant to this part; do not add a chapter "
+            "heading, a recap of earlier parts, or an ending that is not in this part.\n\n"
+        )
     return (
         "You are editing an already-written chapter of a longer story, per "
         "the author's instruction below. Rewrite the chapter applying that "
@@ -424,6 +438,7 @@ def build_refine_chapter_prompt(
         "Output only the revised chapter text, nothing else — no notes, no "
         "commentary, no explanation of what you changed.\n\n"
         f"EDITING INSTRUCTION: {instruction.strip()}\n\n"
+        f"{part_note}"
         f"{style_emphasis}"
         f"{STYLE_GUIDE}\n"
         f"CURRENT CHAPTER TEXT:\n{content}\n\n"
