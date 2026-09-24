@@ -576,6 +576,32 @@ class TestCudaDllDiscovery(unittest.TestCase):
                 engine_module._ensure_cuda_dlls_discoverable()
                 self.assertEqual(path_after_first, os.environ["PATH"])
 
+    def test_finds_cuda12_layout_with_dlls_directly_in_bin(self):
+        # nvidia-cublas-cu12 & co. put the DLLs in nvidia/<pkg>/bin/*.dll,
+        # one level shallower than cu13's nvidia/cu13/bin/x86_64/.
+        with tempfile.TemporaryDirectory() as tmp:
+            site_packages = os.path.join(tmp, "site-packages")
+            cublas_bin = os.path.join(site_packages, "nvidia", "cublas", "bin")
+            runtime_bin = os.path.join(site_packages, "nvidia", "cuda_runtime", "bin")
+            for d, dll in ((cublas_bin, "cublas64_12.dll"), (runtime_bin, "cudart64_12.dll")):
+                os.makedirs(d)
+                open(os.path.join(d, dll), "wb").close()
+            self.assertEqual(
+                sorted(engine_module.find_nvidia_dll_dirs(site_packages)), sorted([cublas_bin, runtime_bin])
+            )
+            with unittest.mock.patch.object(sys, "path", sys.path + [site_packages]), \
+                    unittest.mock.patch.object(engine_module.sys, "platform", "win32"), \
+                    unittest.mock.patch.object(engine_module.os, "add_dll_directory", create=True):
+                engine_module._ensure_cuda_dlls_discoverable()
+            self.assertIn(cublas_bin, os.environ["PATH"])
+            self.assertIn(runtime_bin, os.environ["PATH"])
+
+    def test_bin_dir_without_dlls_is_ignored(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            site_packages = os.path.join(tmp, "site-packages")
+            os.makedirs(os.path.join(site_packages, "nvidia", "cublas", "bin"))
+            self.assertEqual(engine_module.find_nvidia_dll_dirs(site_packages), [])
+
     def test_no_op_when_no_nvidia_packages_present(self):
         with tempfile.TemporaryDirectory() as tmp:
             site_packages = os.path.join(tmp, "site-packages")
