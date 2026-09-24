@@ -43,6 +43,13 @@ if exist StoryForge-App\StoryForge.exe (
 xcopy /e /i /y dist\StoryForge StoryForge-App >nul
 if errorlevel 1 goto :fail
 
+REM dist\ quedaria como una segunda copia completa de la app (~800 MB) y build\
+REM es la carpeta de trabajo de PyInstaller (se regenera con --clean de todos
+REM modos): se borran solo despues de copiar bien. Si algo falla antes, se
+REM conservan para poder revisar el error.
+rmdir /s /q dist 2>nul
+rmdir /s /q build 2>nul
+
 echo.
 echo [4/4] Listo.
 echo El programa quedo en: StoryForge-App\StoryForge.exe
