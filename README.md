@@ -52,15 +52,43 @@ correspondiente mas abajo.
 
 ## Historial de cambios
 
+**Correcciones de una revision de codigo:**
+- **El esquema ya no se corta despues del capitulo 1**: generar esquema (y
+  refinar/expandir con IA) usaba la misma secuencia de corte que la prosa
+  (`"\n\nChapter"`), que el formato del esquema dispara justo al empezar
+  "Chapter 2:".
+- **Refinar ya no pierde el final de capitulos largos**: antes el capitulo
+  se recortaba para caber en el contexto y la version "revisada" de ese
+  recorte reemplazaba el capitulo entero. Ahora nunca se recorta: si no
+  cabe, se refina por partes (grupos de parrafos) y se vuelve a unir.
+- **`build.bat` ya no borra `StoryForge-App\models\`** (tus `.gguf`) en cada
+  build, y se detiene con un error si falla pip, PyInstaller o la copia.
+- **`.exe` empaquetado**: `models\` y `nltk_data\` se buscan junto a
+  `StoryForge.exe` (antes se buscaban dentro de `_internal\`); el
+  autoguardado va a `%APPDATA%\StoryForge\autosave\` y los errores a
+  `%APPDATA%\StoryForge\storyforge.log`. Un autoguardado que falla ahora
+  avisa (una vez por sesion) en vez de fallar en silencio.
+- **CUDA 12**: se detectan tambien las DLLs de los paquetes `nvidia-*-cu12`
+  (`nvidia\<pkg>\bin\*.dll`, no solo el layout anidado de cu13). Si
+  `llama.dll` o sus DLLs no cargan, el mensaje ahora explica que hacer.
+- **Agregar/eliminar un capitulo o restaurar una version** ya no descarta lo
+  que habias escrito sin sincronizar.
+- **Guardado atomico** (archivo temporal + reemplazo, con copia `.bak` de la
+  version anterior) y los errores al guardar ahora se muestran.
+- **Un capitulo con apenas mas de 10,000 palabras ya no bloquea toda la
+  generacion**: es una advertencia, y la ultima seccion se ajusta para no
+  pasarse del limite.
+- El empaquetado ya no incluye cuBLAS dos veces (~550 MB menos) ni las
+  import libraries `.lib` de llama_cpp.
+
 **Nuevas funcionalidades — inspiradas en un generador de historias de la competencia (toolsaday.com), a pedido del usuario:**
 - **Proposito de capitulo**: selector "Proposito" (Apertura/Escena climatica/
   Final/Epilogo) en cada capitulo, independiente del "Tipo de escritura"
   (que es de toda la historia).
 - **Refinar capitulo**: reescribe un capitulo ya generado segun una
-  instruccion puntual, sin tener que regenerarlo entero. Nota: a diferencia
-  de generar (que se hace por secciones), refinar necesita que el capitulo
-  completo quepa en el contexto del modelo de una sola vez — un capitulo muy
-  largo puede necesitar subir `n_ctx` en la pestaña Modelo.
+  instruccion puntual, sin tener que regenerarlo entero. Si el capitulo no
+  cabe completo en el contexto del modelo, se refina por partes (ver
+  arriba); subir `n_ctx` en la pestaña Modelo permite refinarlo de una vez.
 - **Versiones anteriores**: regenerar, refinar, o reducir repeticion ya no
   son irreversibles — se guarda la version previa (hasta 5 por capitulo) y
   se puede recuperar desde un boton nuevo en cada capitulo.
@@ -165,7 +193,8 @@ computadora.
    carpeta de trabajo de PyInstaller y se borra/regenera en cada build).
 5. Copia la carpeta `models/` (con tu modelo adentro) junto al .exe, dentro
    de `StoryForge-App\`, si no quedo ahi automaticamente, y ejecuta
-   `StoryForge-App\StoryForge.exe`.
+   `StoryForge-App\StoryForge.exe`. `build.bat` conserva
+   `StoryForge-App\models\` entre builds (reemplaza todo lo demas).
 
 Por que no viene ya compilado: el .exe tiene que compilarse en Windows (no
 puedo generar un ejecutable nativo de Windows desde el entorno Linux donde
