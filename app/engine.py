@@ -87,6 +87,11 @@ def _ensure_cuda_dlls_discoverable() -> None:
     A CPU-only environment (no `nvidia-*` packages installed, or the default
     PyPI CPU-only wheel) hits none of this: the glob below just finds nothing
     and the import proceeds exactly as it always did.
+
+    Two package layouts exist: the CUDA 13 packages nest the DLLs one level
+    deeper (nvidia/cu13/bin/x86_64/*.dll), while the CUDA 12 ones
+    (nvidia-cublas-cu12 etc.) put them directly in nvidia/<pkg>/bin/*.dll --
+    both are checked (see find_nvidia_dll_dirs()).
     """
     global _cuda_dlls_prepared
     if _cuda_dlls_prepared or sys.platform != "win32":
@@ -94,14 +99,28 @@ def _ensure_cuda_dlls_discoverable() -> None:
     _cuda_dlls_prepared = True
 
     for site_packages in (p for p in sys.path if p.endswith("site-packages")):
-        for dll_dir in glob.glob(os.path.join(site_packages, "nvidia", "*", "bin", "*")):
-            if not os.path.isdir(dll_dir) or not glob.glob(os.path.join(dll_dir, "*.dll")):
-                continue
+        for dll_dir in find_nvidia_dll_dirs(site_packages):
             try:
                 os.add_dll_directory(dll_dir)
             except OSError:
                 pass
             os.environ["PATH"] = dll_dir + os.pathsep + os.environ.get("PATH", "")
+
+
+def find_nvidia_dll_dirs(site_packages: str) -> List[str]:
+    """Carpetas bajo site-packages/nvidia que contienen DLLs, en cualquiera de
+    los dos layouts conocidos: nvidia/<pkg>/bin/*.dll (CUDA 12) o
+    nvidia/<pkg>/bin/<arch>/*.dll (CUDA 13)."""
+    found: List[str] = []
+    patterns = (
+        os.path.join(site_packages, "nvidia", "*", "bin"),
+        os.path.join(site_packages, "nvidia", "*", "bin", "*"),
+    )
+    for pattern in patterns:
+        for dll_dir in sorted(glob.glob(pattern)):
+            if os.path.isdir(dll_dir) and glob.glob(os.path.join(dll_dir, "*.dll")):
+                found.append(dll_dir)
+    return found
 
 
 def supports_gpu_offload() -> bool:
@@ -157,6 +176,19 @@ class LocalStoryEngine:
             raise RuntimeError(
                 "El paquete 'llama-cpp-python' no esta instalado. "
                 "Instala las dependencias con: pip install -r requirements.txt"
+            ) from exc
+        except Exception as exc:
+            # Un build de llama-cpp-python con CUDA cuyas DLLs de runtime
+            # (cudart/cublas) no se encuentran NO lanza ImportError, sino
+            # RuntimeError("Failed to load shared library ...") u OSError
+            # desde el propio import -- antes eso llegaba al usuario como un
+            # mensaje crudo en ingles sin pista de como resolverlo.
+            raise RuntimeError(
+                "llama-cpp-python esta instalado, pero no se pudo cargar su libreria nativa "
+                "(llama.dll o alguna de las DLLs que necesita). Si instalaste la version con "
+                "CUDA, instala tambien las DLLs de runtime (pip install nvidia-cuda-runtime "
+                "nvidia-cublas, ver README > Rendimiento / GPU) o vuelve a la version "
+                f"solo-CPU.\n\nDetalle: {exc}"
             ) from exc
 
         if not os.path.isfile(model_path):
