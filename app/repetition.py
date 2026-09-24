@@ -12,6 +12,8 @@ import re
 from collections import Counter
 from typing import Dict, List, Optional, Tuple
 
+from .paths import app_root
+
 _TOKEN_RE = re.compile(r"[A-Za-z']+")
 
 _FALLBACK_STOPWORDS = {
@@ -33,7 +35,9 @@ _NLTK_READY: Optional[bool] = None  # None = not checked yet, True/False = check
 
 
 def _local_nltk_data_dir() -> str:
-    return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "nltk_data")
+    # app_root() y no "dos carpetas arriba de __file__": en el .exe eso
+    # apuntaria a _internal\ en vez de a la carpeta del ejecutable.
+    return os.path.join(app_root(), "nltk_data")
 
 
 def _ensure_nltk_data() -> bool:
