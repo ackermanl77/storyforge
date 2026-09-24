@@ -400,10 +400,22 @@ class TestVersionHistoryDialog(unittest.TestCase):
         self.panel.chapter.content = "second draft"
         self.panel.chapter.push_history()
         self.panel.chapter.content = "current draft"
+        # The text box is the source of truth for the current content (what
+        # sync_to_model() reads) -- keep it consistent with chapter.content.
+        self.panel.content_box.insert("1.0", "current draft")
 
     def tearDown(self):
         self.app.destroy()
         self._askyesno_patcher.stop()
+
+    def test_restore_preserves_unsynced_manual_edits_in_history(self):
+        # Before: push_history() saved the stale chapter.content, so edits
+        # typed since the last sync were lost for good on restore.
+        self.panel.content_box.insert("end", " plus a hand-typed ending")
+        dialog = VersionHistoryDialog(self.app, self.panel)
+        dialog._on_restore()
+        self.assertIn("current draft plus a hand-typed ending", self.panel.chapter.history)
+        self.assertEqual(self.panel.chapter.content, "second draft")
 
     def test_most_recent_version_is_shown_first_and_previewed_by_default(self):
         dialog = VersionHistoryDialog(self.app, self.panel)
@@ -888,6 +900,136 @@ class TestChapterSidebar(unittest.TestCase):
             self.app._jump_to_chapter(5)
         except Exception as exc:  # noqa: BLE001
             self.fail(f"_jump_to_chapter raised for an out-of-range index: {exc}")
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestChapterAddRemoveKeepsUnsavedEdits(unittest.TestCase):
+    """add_chapter()/remove_chapter() destroy and rebuild every chapter and
+    outline panel from project.chapters -- without a _sync_all() first, any
+    text typed since the last sync was silently thrown away."""
+
+    def setUp(self):
+        _clear_autosave()
+        self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=True)
+        self._askyesno_patcher.start()
+        self.app = StoryForgeApp()
+        self.app.project.add_chapter("Cap 1")
+        self.app.project.add_chapter("Cap 2")
+        self.app._render_chapters()
+        self.app._render_outline_panels()
+
+    def tearDown(self):
+        self.app.destroy()
+        self._askyesno_patcher.stop()
+
+    def test_add_chapter_keeps_unsynced_content_and_outline(self):
+        self.app.chapter_panels[0].content_box.insert("1.0", "typed but never synced")
+        self.app.outline_panels[1].outline_box.insert("1.0", "outline typed by hand")
+        self.app.add_chapter()
+        self.assertEqual(self.app.project.chapters[0].content, "typed but never synced")
+        self.assertEqual(self.app.chapter_panels[0].content_box.get("1.0", "end-1c"), "typed but never synced")
+        self.assertEqual(self.app.project.chapters[1].outline, "outline typed by hand")
+        self.assertEqual(len(self.app.chapter_panels), 3)
+
+    def test_remove_chapter_keeps_unsynced_edits_in_other_chapters(self):
+        self.app.chapter_panels[0].content_box.insert("1.0", "keep me")
+        self.app.remove_chapter(1)
+        self.assertEqual(len(self.app.project.chapters), 1)
+        self.assertEqual(self.app.chapter_panels[0].content_box.get("1.0", "end-1c"), "keep me")
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestSaveErrors(unittest.TestCase):
+    def setUp(self):
+        _clear_autosave()
+        self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=True)
+        self._askyesno_patcher.start()
+        self._info_patcher = mock.patch("app.gui.messagebox.showinfo")
+        self._info_patcher.start()
+        self._warn_patcher = mock.patch("app.gui.messagebox.showwarning")
+        self.mock_warning = self._warn_patcher.start()
+        self._error_patcher = mock.patch("app.gui.messagebox.showerror")
+        self.mock_error = self._error_patcher.start()
+        self.app = StoryForgeApp()
+
+    def tearDown(self):
+        self.app.destroy()
+        for patcher in (self._error_patcher, self._warn_patcher, self._info_patcher, self._askyesno_patcher):
+            patcher.stop()
+
+    def test_failed_save_shows_an_error_and_reports_failure(self):
+        self.app.current_path = os.path.join(tempfile.gettempdir(), "storyforge-test.json")
+        with mock.patch.object(self.app.project, "save", side_effect=PermissionError("read-only")):
+            self.assertFalse(self.app.save_project())
+        self.mock_error.assert_called_once()
+        self.assertIn("read-only", self.mock_error.call_args[0][1])
+
+    def test_failed_save_as_does_not_switch_current_path(self):
+        with mock.patch("app.gui.filedialog.asksaveasfilename", return_value="Z:/nope/project.json"), \
+                mock.patch.object(self.app.project, "save", side_effect=OSError("no such drive")):
+            self.assertFalse(self.app.save_project_as())
+        self.assertIsNone(self.app.current_path)
+
+    def test_close_is_aborted_when_save_fails(self):
+        self.app.current_path = os.path.join(tempfile.gettempdir(), "storyforge-test.json")
+        with mock.patch("app.gui.messagebox.askyesnocancel", return_value=True), \
+                mock.patch.object(self.app.project, "save", side_effect=OSError("disk full")), \
+                mock.patch.object(self.app, "destroy") as mock_destroy:
+            self.app._on_close()
+        mock_destroy.assert_not_called()
+
+    def test_successful_save_writes_the_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "p.json")
+            self.app.current_path = path
+            self.assertTrue(self.app.save_project())
+            self.assertTrue(os.path.isfile(path))
+
+    def test_autosave_failure_is_reported_once_not_swallowed(self):
+        with mock.patch.object(self.app.project, "save", side_effect=OSError("denied")), \
+                self.assertLogs("app.gui", level="ERROR"):
+            self.app._autosave()
+            self.app._autosave()
+        self.assertEqual(self.mock_warning.call_count, 1)
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestOverLengthChapterDoesNotBlockGeneration(unittest.TestCase):
+    def setUp(self):
+        _clear_autosave()
+        self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=True)
+        self._askyesno_patcher.start()
+        self.app = StoryForgeApp()
+
+    def tearDown(self):
+        self.app.destroy()
+        self._askyesno_patcher.stop()
+
+    def test_other_chapter_can_still_be_generated(self):
+        from app.project import MAX_WORDS_PER_CHAPTER
+        calls = []
+
+        class FakeEngine:
+            is_loaded = True
+
+            def generate_chapter(self, project, chapter_index, progress_callback=None, cancel_check=None):
+                calls.append(chapter_index)
+                return "new text"
+
+            def summarize(self, text, max_words=150):
+                return "summary"
+
+        self.app.engine = FakeEngine()
+        self.app.project.add_chapter("Cap 1")
+        self.app.project.add_chapter("Cap 2")
+        self.app._render_chapters()
+        self.app.chapter_panels[0].content_box.insert("1.0", "word " * (MAX_WORDS_PER_CHAPTER + 5))
+        with mock.patch("app.gui.threading.Thread", _SynchronousThread), \
+                mock.patch("app.gui.messagebox.showwarning") as mock_warning:
+            self.app.chapter_panels[1]._on_generate()
+        self.app.update()
+        mock_warning.assert_not_called()
+        self.assertEqual(calls, [1])
 
 
 if __name__ == "__main__":

@@ -583,6 +583,11 @@ class VersionHistoryDialog(ctk.CTkToplevel):
             "es reversible. ¿Continuar?",
         ):
             return
+        # Sincronizamos primero lo que hay en pantalla: chapter.content solo
+        # se actualiza al sincronizar, asi que sin esto se guardaba como
+        # "version anterior" un texto viejo y se perdian las ediciones a mano
+        # hechas desde el ultimo generar/guardar.
+        self.panel.sync_to_model()
         self.panel.chapter.push_history()
         self.panel.chapter.content = text
         self.panel.content_box.delete("1.0", "end")
@@ -1277,6 +1282,11 @@ class StoryForgeApp(ctk.CTk):
         threading.Thread(target=worker, daemon=True).start()
 
     def _apply_outline(self, outline_items: list[tuple[str, str]]) -> None:
+        # Los paneles se recrean abajo: sincronizamos ANTES de aplicar el
+        # esquema nuevo (despues pisaria el esquema recien generado con el
+        # texto viejo de los paneles) para no perder la prosa editada a mano
+        # mientras el esquema se generaba.
+        self._sync_all()
         for i, (title, outline) in enumerate(outline_items):
             if i < len(self.project.chapters):
                 self.project.chapters[i].title = title or self.project.chapters[i].title
@@ -1342,11 +1352,16 @@ class StoryForgeApp(ctk.CTk):
         if not self.project.can_add_chapter():
             messagebox.showinfo(APP_TITLE, f"Ya hay {MAX_CHAPTERS} capitulos (el maximo).")
             return
+        # Igual que _render_lore_entries(): los paneles se destruyen y
+        # recrean desde project.chapters, asi que cualquier edicion todavia
+        # sin sincronizar (texto, titulo, esquema) se perderia sin esto.
+        self._sync_all()
         self.project.add_chapter()
         self._render_chapters()
         self._render_outline_panels()
 
     def remove_chapter(self, index: int) -> None:
+        self._sync_all()
         del self.project.chapters[index]
         self._render_chapters()
         self._render_outline_panels()
@@ -1592,10 +1607,8 @@ class StoryForgeApp(ctk.CTk):
         choice = messagebox.askyesnocancel(APP_TITLE, "¿Guardar el proyecto antes de salir?")
         if choice is None:  # Cancelar: no salir
             return
-        if choice:  # Si: guardar (si el dialogo "guardar como" se cancela, no salimos)
-            path_before = self.current_path
-            self.save_project()
-            if self.current_path is None and path_before is None:
+        if choice:  # Si: guardar (si el dialogo "guardar como" se cancela o el guardado falla, no salimos)
+            if not self.save_project():
                 return
         else:
             # El usuario decidio explicitamente no guardar: no le ofrezcamos
@@ -1603,30 +1616,43 @@ class StoryForgeApp(ctk.CTk):
             self._discard_autosave()
         self.destroy()
 
-    def save_project(self) -> None:
+    def save_project(self) -> bool:
+        """Devuelve True si el proyecto quedo guardado (False si se cancelo o fallo)."""
         if not self.current_path:
-            self.save_project_as()
-            return
-        self._sync_all()
-        errors = self.project.validate_inputs()
-        if errors:
-            messagebox.showwarning(APP_TITLE, "Se guardara con estas advertencias:\n\n" + "\n".join(errors))
-        self.project.save(self.current_path)
-        # Ya hay un guardado explicito y mas reciente: la copia de
-        # autoguardado quedaria obsoleta y solo generaria una oferta de
-        # "recuperar" confusa en el proximo arranque.
-        self._discard_autosave()
-        messagebox.showinfo(APP_TITLE, "Proyecto guardado.")
+            return self.save_project_as()
+        return self._save_to(self.current_path)
 
-    def save_project_as(self) -> None:
+    def save_project_as(self) -> bool:
         path = filedialog.asksaveasfilename(
             title="Guardar proyecto como", defaultextension=".json",
             filetypes=[("Proyecto StoryForge", "*.json")],
         )
         if not path:
-            return
+            return False
+        return self._save_to(path)
+
+    def _save_to(self, path: str) -> bool:
+        self._sync_all()
+        problems = self.project.validate_inputs() + self.project.validate_warnings()
+        if problems:
+            messagebox.showwarning(APP_TITLE, "Se guardara con estas advertencias:\n\n" + "\n".join(problems))
+        try:
+            self.project.save(path)
+        except Exception as exc:  # noqa: BLE001
+            # En el .exe (sin consola) una excepcion aqui no se veria en
+            # ningun lado: el usuario creeria haber guardado. Project.save()
+            # es atomico, asi que el archivo anterior (si existia) sigue intacto.
+            logger.exception("No se pudo guardar el proyecto en %s", path)
+            messagebox.showerror(APP_TITLE, f"No se pudo guardar el proyecto en:\n{path}\n\n{exc}")
+            return False
+        # current_path solo cambia si el guardado realmente funciono.
         self.current_path = path
-        self.save_project()
+        # Ya hay un guardado explicito y mas reciente: la copia de
+        # autoguardado quedaria obsoleta y solo generaria una oferta de
+        # "recuperar" confusa en el proximo arranque.
+        self._discard_autosave()
+        messagebox.showinfo(APP_TITLE, "Proyecto guardado.")
+        return True
 
     def export_word(self) -> None:
         self._sync_all()
