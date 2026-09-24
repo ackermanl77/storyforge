@@ -1,14 +1,19 @@
 import os
 import sys
+import tempfile
+import types
 import unittest
+import unittest.mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import app.engine as engine_module
 from app.engine import (
     ContextOverflowError,
     LocalStoryEngine,
     MAX_SECTIONS_PER_CHAPTER,
     ModelNotLoadedError,
+    supports_gpu_offload,
 )
 from app.project import LoreEntry, Project
 from app.prompts import (
@@ -531,6 +536,95 @@ class TestStreamingGeneration(unittest.TestCase):
         # cancellation took effect DURING the section, not only between
         # sections like before streaming existed.
         self.assertLess(len(result.split()), 150)
+
+
+class TestCudaDllDiscovery(unittest.TestCase):
+    """_ensure_cuda_dlls_discoverable() locates the standalone nvidia-cuda-runtime/
+    nvidia-cublas pip packages' DLL folders and puts them on PATH so a CUDA-enabled
+    llama-cpp-python wheel can actually load (see README's "Rendimiento / GPU").
+    """
+
+    def setUp(self):
+        self._orig_prepared = engine_module._cuda_dlls_prepared
+        engine_module._cuda_dlls_prepared = False
+        self._orig_path = os.environ.get("PATH", "")
+
+    def tearDown(self):
+        engine_module._cuda_dlls_prepared = self._orig_prepared
+        os.environ["PATH"] = self._orig_path
+
+    def _make_fake_nvidia_dll_dir(self, tmp):
+        site_packages = os.path.join(tmp, "site-packages")
+        dll_dir = os.path.join(site_packages, "nvidia", "cu13", "bin", "x86_64")
+        os.makedirs(dll_dir)
+        open(os.path.join(dll_dir, "cublas64_13.dll"), "wb").close()
+        return site_packages, dll_dir
+
+    def test_finds_and_adds_nvidia_dll_directory_to_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            site_packages, dll_dir = self._make_fake_nvidia_dll_dir(tmp)
+            with unittest.mock.patch.object(sys, "path", sys.path + [site_packages]):
+                engine_module._ensure_cuda_dlls_discoverable()
+            self.assertIn(dll_dir, os.environ["PATH"])
+
+    def test_is_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            site_packages, _dll_dir = self._make_fake_nvidia_dll_dir(tmp)
+            with unittest.mock.patch.object(sys, "path", sys.path + [site_packages]):
+                engine_module._ensure_cuda_dlls_discoverable()
+                path_after_first = os.environ["PATH"]
+                engine_module._ensure_cuda_dlls_discoverable()
+                self.assertEqual(path_after_first, os.environ["PATH"])
+
+    def test_no_op_when_no_nvidia_packages_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            site_packages = os.path.join(tmp, "site-packages")
+            os.makedirs(site_packages)
+            with unittest.mock.patch.object(sys, "path", [site_packages]):
+                engine_module._ensure_cuda_dlls_discoverable()  # must not raise
+            self.assertEqual(os.environ.get("PATH", ""), self._orig_path)
+
+
+class TestSupportsGpuOffload(unittest.TestCase):
+    def test_returns_false_when_llama_cpp_not_installed(self):
+        with unittest.mock.patch.dict(sys.modules, {"llama_cpp": None, "llama_cpp.llama_cpp": None}):
+            self.assertFalse(supports_gpu_offload())
+
+    def test_reflects_the_real_llama_cpp_offload_capability_flag(self):
+        fake_lib = types.ModuleType("llama_cpp.llama_cpp")
+        fake_lib.llama_supports_gpu_offload = lambda: True
+        fake_pkg = types.ModuleType("llama_cpp")
+        fake_pkg.llama_cpp = fake_lib
+        with unittest.mock.patch.dict(sys.modules, {"llama_cpp": fake_pkg, "llama_cpp.llama_cpp": fake_lib}):
+            self.assertTrue(supports_gpu_offload())
+
+        fake_lib.llama_supports_gpu_offload = lambda: False
+        with unittest.mock.patch.dict(sys.modules, {"llama_cpp": fake_pkg, "llama_cpp.llama_cpp": fake_lib}):
+            self.assertFalse(supports_gpu_offload())
+
+    def test_returns_false_when_llama_cpp_fails_to_load_its_dlls(self):
+        # A CUDA-built llama_cpp whose CUDA runtime DLLs can't be resolved raises RuntimeError
+        # ("Failed to load shared library ...") from the import itself, not ImportError -- this
+        # runs while the GUI builds its Model tab, so it must degrade to "no GPU", not crash.
+        class _DllLoadFailure(types.ModuleType):
+            def __getattr__(self, name):
+                raise RuntimeError("Failed to load shared library 'llama.dll'")
+
+        with unittest.mock.patch.dict(sys.modules, {"llama_cpp": _DllLoadFailure("llama_cpp")}):
+            sys.modules.pop("llama_cpp.llama_cpp", None)
+            self.assertFalse(supports_gpu_offload())
+
+    def test_returns_false_instead_of_raising_if_the_capability_check_itself_errors(self):
+        fake_lib = types.ModuleType("llama_cpp.llama_cpp")
+
+        def _boom():
+            raise OSError("no CUDA-capable device")
+
+        fake_lib.llama_supports_gpu_offload = _boom
+        fake_pkg = types.ModuleType("llama_cpp")
+        fake_pkg.llama_cpp = fake_lib
+        with unittest.mock.patch.dict(sys.modules, {"llama_cpp": fake_pkg, "llama_cpp.llama_cpp": fake_lib}):
+            self.assertFalse(supports_gpu_offload())
 
 
 if __name__ == "__main__":
