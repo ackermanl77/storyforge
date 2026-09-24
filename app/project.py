@@ -5,7 +5,9 @@ Incluye conteo de palabras y validacion de limites.
 from __future__ import annotations
 
 import json
+import os
 import re
+import shutil
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import List, Optional
@@ -199,11 +201,6 @@ class Project:
                     f"Capitulo {i}: objetivo de {ch.target_words:,} palabras "
                     f"excede el maximo ({MAX_WORDS_PER_CHAPTER:,})."
                 )
-            if ch.word_count() > MAX_WORDS_PER_CHAPTER:
-                errors.append(
-                    f"Capitulo {i}: el contenido generado tiene {ch.word_count():,} "
-                    f"palabras y excede el maximo ({MAX_WORDS_PER_CHAPTER:,})."
-                )
             if ch.outline_words() > MAX_OUTLINE_WORDS_PER_CHAPTER:
                 errors.append(
                     f"Capitulo {i}: el esquema tiene {ch.outline_words():,} palabras "
@@ -221,6 +218,23 @@ class Project:
                     f"(maximo {MAX_LORE_ENTRY_WORDS:,})."
                 )
         return errors
+
+    def validate_warnings(self) -> List[str]:
+        """
+        Avisos que NO deben bloquear la generacion. Un capitulo cuyo texto ya
+        generado pasa de MAX_WORDS_PER_CHAPTER (la ultima seccion de
+        generate_chapter() puede pasarse un poco, o el usuario lo edito a
+        mano) antes era un error en validate_inputs(), lo que bloqueaba
+        generar CUALQUIER capitulo o el esquema hasta recortarlo a mano.
+        """
+        warnings = []
+        for i, ch in enumerate(self.chapters, start=1):
+            if ch.word_count() > MAX_WORDS_PER_CHAPTER:
+                warnings.append(
+                    f"Capitulo {i}: el contenido tiene {ch.word_count():,} palabras, "
+                    f"mas que el maximo recomendado ({MAX_WORDS_PER_CHAPTER:,})."
+                )
+        return warnings
 
     def can_add_chapter(self) -> bool:
         return len(self.chapters) < MAX_CHAPTERS
@@ -262,8 +276,30 @@ class Project:
         }
 
     def save(self, path: str | Path) -> None:
+        """
+        Guardado atomico: se escribe a un archivo temporal en la misma
+        carpeta y se reemplaza el destino con os.replace(), asi que un fallo
+        a mitad de escritura (disco lleno, cierre inesperado) nunca deja el
+        proyecto truncado. Antes de reemplazarlo, la version anterior se
+        conserva como `<archivo>.bak`.
+        """
         path = Path(path)
-        path.write_text(json.dumps(self.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+        data = json.dumps(self.to_dict(), ensure_ascii=False, indent=2)
+        tmp_path = path.with_name(path.name + ".tmp")
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                f.write(data)
+                f.flush()
+                os.fsync(f.fileno())
+            if path.exists():
+                shutil.copy2(path, path.with_name(path.name + ".bak"))
+            os.replace(tmp_path, path)
+        except BaseException:
+            try:
+                tmp_path.unlink()
+            except OSError:
+                pass
+            raise
 
     @staticmethod
     def load(path: str | Path) -> "Project":
