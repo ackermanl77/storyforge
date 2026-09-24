@@ -3,6 +3,7 @@ Interfaz grafica de escritorio (CustomTkinter) para StoryForge Local.
 """
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
@@ -21,6 +22,7 @@ from .engine import (
     supports_gpu_offload,
 )
 from .export import export_docx, export_txt
+from .paths import app_root, user_data_dir
 from .prompts import build_previous_context, find_relevant_lore_entries
 from .project import (
     CHAPTER_PURPOSES,
@@ -43,7 +45,9 @@ ctk.set_appearance_mode("dark")
 ctk.set_default_color_theme("blue")
 
 APP_TITLE = "StoryForge Local"
-APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Ver app/paths.py: en el .exe, "dos carpetas arriba de __file__" seria
+# _internal\, no la carpeta de StoryForge.exe donde el usuario pone models\.
+APP_ROOT = app_root()
 MODELS_DIR = os.path.join(APP_ROOT, "models")
 WRITING_STYLE_DEFAULT_LABEL = "(Por defecto)"
 WRITING_STYLE_OPTIONS = [WRITING_STYLE_DEFAULT_LABEL] + WRITING_STYLES
@@ -52,8 +56,9 @@ CHAPTER_PURPOSE_OPTIONS = [CHAPTER_PURPOSE_DEFAULT_LABEL] + CHAPTER_PURPOSES
 # Copia de autoguardado, separada del guardado explicito del usuario: un
 # capitulo puede tardar 15-40 minutos en generarse, asi que sin esto un
 # cierre inesperado (crash, corte de luz) a mitad de una generacion larga
-# perderia todo ese progreso.
-AUTOSAVE_PATH = os.path.join(APP_ROOT, "autosave", "autosave.json")
+# perderia todo ese progreso. Vive en user_data_dir() (%APPDATA%\StoryForge
+# en el .exe), no junto al programa, que puede no ser escribible.
+AUTOSAVE_PATH = os.path.join(user_data_dir(), "autosave", "autosave.json")
 AUTOSAVE_INTERVAL_MS = 20_000  # cada cuanto se reintenta el autoguardado mientras hay una generacion en curso
 # LocalStoryEngine.generate_chapter() ahora llama a progress_callback en vivo
 # mientras el modelo transmite cada token (ver engine.py), no solo una vez
@@ -64,6 +69,8 @@ AUTOSAVE_INTERVAL_MS = 20_000  # cada cuanto se reintenta el autoguardado mientr
 # actualizacion de cada seccion ya completa nunca pasa por este throttle
 # (ver ChapterPanel._on_generate).
 CHAPTER_STREAM_UI_INTERVAL_SECONDS = 0.15
+
+logger = logging.getLogger(__name__)
 
 
 class LimitedTextBox(ctk.CTkFrame):
@@ -1457,7 +1464,9 @@ class StoryForgeApp(ctk.CTk):
         try:
             recovered = Project.load(AUTOSAVE_PATH)
         except Exception:
-            return  # autoguardado corrupto/ilegible: lo ignoramos en vez de tronar al abrir la app
+            # autoguardado corrupto/ilegible: lo ignoramos en vez de tronar al abrir la app
+            logger.exception("No se pudo leer el autoguardado %s", AUTOSAVE_PATH)
+            return
         if not messagebox.askyesno(
             APP_TITLE,
             "Se encontro una copia de autoguardado, probablemente de una generacion "
@@ -1480,21 +1489,34 @@ class StoryForgeApp(ctk.CTk):
         Guarda el estado actual en AUTOSAVE_PATH (separado del archivo que el
         usuario guarda explicitamente) para poder recuperar el progreso si la
         app se cierra a medio camino de una generacion larga (15-40 minutos
-        por capitulo). Nunca debe interrumpir la generacion: cualquier error
-        se ignora en silencio.
+        por capitulo). Nunca debe interrumpir la generacion: un error se
+        registra en el log y se avisa UNA sola vez por sesion (antes se
+        ignoraba en silencio, asi que un autoguardado roto -- p.ej. carpeta
+        sin permisos de escritura -- pasaba desapercibido hasta que hacia
+        falta recuperarlo).
         """
         try:
             self._sync_all()
             os.makedirs(os.path.dirname(AUTOSAVE_PATH), exist_ok=True)
             self.project.save(AUTOSAVE_PATH)
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("No se pudo escribir el autoguardado en %s", AUTOSAVE_PATH)
+            if not getattr(self, "_autosave_error_reported", False):
+                self._autosave_error_reported = True
+                messagebox.showwarning(
+                    APP_TITLE,
+                    f"No se pudo escribir el autoguardado en:\n{AUTOSAVE_PATH}\n\n{exc}\n\n"
+                    "La generacion sigue normalmente, pero guarda el proyecto a mano de vez "
+                    "en cuando. (Este aviso no se repite en esta sesion.)",
+                )
 
     def _discard_autosave(self) -> None:
-        try:
-            os.remove(AUTOSAVE_PATH)
-        except OSError:
-            pass
+        # Project.save() deja tambien una copia .bak de la version anterior.
+        for path in (AUTOSAVE_PATH, AUTOSAVE_PATH + ".bak"):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
     # ---------------- sincronizacion general ----------------
     def _sync_all(self) -> None:
