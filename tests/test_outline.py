@@ -85,6 +85,24 @@ class TestGenerateOutline(unittest.TestCase):
         self.assertEqual(len(result), 3)
         self.assertEqual(result[0][0], "The Arrival")
 
+    def test_default_chapter_stop_does_not_cut_the_outline_after_chapter_one(self):
+        # With the prose default stop ("\n\nChapter"), a stop-honoring model
+        # halts right where "Chapter 2:" begins -- the outline had 1 chapter.
+        stops = []
+
+        def stop_honoring_llama(prompt, max_tokens=0, stop=None, **kwargs):
+            stops.append(stop)
+            text = SAMPLE_OUTLINE_RESPONSE
+            cut = min((text.find(s) for s in (stop or []) if s in text), default=-1)
+            return {"choices": [{"text": text[:cut] if cut >= 0 else text}]}
+
+        engine = LocalStoryEngine()
+        engine._llm = stop_honoring_llama
+        project = Project(plot="A mystery in a harbor town.", characters="Mara", setting="A coastal town")
+        result = engine.generate_outline(project, num_chapters=3)
+        self.assertEqual([t for t, _ in result], ["The Arrival", "Old Secrets", "The Storm"])
+        self.assertNotIn("\n\nChapter", stops[0])
+
     def test_without_model_raises(self):
         engine = LocalStoryEngine()
         project = Project()

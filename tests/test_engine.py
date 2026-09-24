@@ -75,6 +75,46 @@ class StreamingFakeLlama:
             yield {"choices": [{"text": delta}]}
 
 
+class StopHonoringFakeLlama:
+    """
+    A llama_cpp.Llama stand-in that, unlike FakeLlama/StreamingFakeLlama
+    above, honors `stop` and `max_tokens` the way llama.cpp does: the
+    response is cut right before the earliest stop sequence, and to at most
+    int(max_tokens / TOKENS_PER_WORD_ESTIMATE) words. `respond(prompt)`
+    produces the model's "full" answer; `stops`/`max_tokens` record what each
+    call asked for.
+    """
+
+    def __init__(self, respond):
+        self.respond = respond
+        self.calls = 0
+        self.stops = []
+        self.max_tokens = []
+        self.prompts = []
+
+    def __call__(self, prompt, max_tokens=0, stop=None, **kwargs):
+        self.calls += 1
+        self.stops.append(stop)
+        self.max_tokens.append(max_tokens)
+        self.prompts.append(prompt)
+        text = self.respond(prompt)
+        cut = min((text.find(s) for s in (stop or []) if s in text), default=-1)
+        if cut >= 0:
+            text = text[:cut]
+        max_words = int(max_tokens / engine_module.TOKENS_PER_WORD_ESTIMATE)
+        words = text.split(" ")
+        if len(words) > max_words:
+            text = " ".join(words[:max_words])
+        return {"choices": [{"text": text}]}
+
+
+def _echo_refine_chunk(prompt):
+    """Answers a refine prompt with exactly the text it was asked to revise."""
+    start = prompt.index("CURRENT CHAPTER TEXT:\n") + len("CURRENT CHAPTER TEXT:\n")
+    end = prompt.rindex("\n\nRevised chapter:")
+    return prompt[start:end]
+
+
 def make_project(target_words=400):
     p = Project(plot="A hero's journey.", characters="Hero", setting="A village")
     p.add_chapter("Chapter One", target_words=target_words)
@@ -317,19 +357,74 @@ class TestRefineChapter(unittest.TestCase):
         result = engine.refine_chapter(project, 0, "make it darker")
         self.assertTrue(result.strip())
 
-    def test_refine_chapter_shrinks_budget_until_it_fits(self):
+    def test_refine_long_chapter_in_parts_keeps_the_whole_chapter(self):
+        # Antes: el capitulo se recortaba para caber (conservando el inicio)
+        # y la version "revisada" de ese recorte reemplazaba el capitulo
+        # completo -- el final se perdia en silencio.
+        engine = LocalStoryEngine()
+        engine._llm = StopHonoringFakeLlama(_echo_refine_chunk)
+        engine._count_tokens = lambda text: len(text.split())
+        engine._n_ctx = 3000
+        project = make_project(target_words=100)
+        paragraphs = [f"PARA{i} " + " ".join(["word"] * 99) for i in range(40)]  # 4,000 palabras
+        project.chapters[0].content = "\n\n".join(paragraphs)
+
+        result = engine.refine_chapter(project, 0, "shorten this")
+
+        self.assertGreater(engine._llm.calls, 1, "should have been refined in several parts")
+        for i in range(40):
+            self.assertIn(f"PARA{i} ", result)
+        self.assertEqual(result, project.chapters[0].content)
+        self.assertIn("part 1 of", engine._llm.prompts[0])
+
+    def test_refine_single_huge_paragraph_is_split_without_losing_words(self):
+        engine = LocalStoryEngine()
+        engine._llm = StopHonoringFakeLlama(_echo_refine_chunk)
+        engine._count_tokens = lambda text: len(text.split())
+        engine._n_ctx = 3000
+        project = make_project(target_words=100)
+        project.chapters[0].content = " ".join(f"w{i}" for i in range(3000))  # sin parrafos ni puntuacion
+
+        result = engine.refine_chapter(project, 0, "shorten this")
+
+        self.assertEqual(result.split(), project.chapters[0].content.split())
+
+    def test_refine_short_chapter_is_a_single_call(self):
+        engine = LocalStoryEngine()
+        engine._llm = StopHonoringFakeLlama(_echo_refine_chunk)
+        project = make_project()
+        project.chapters[0].content = "Once upon a time, a hero set out."
+        engine.refine_chapter(project, 0, "make it darker")
+        self.assertEqual(engine._llm.calls, 1)
+        self.assertNotIn("part 1 of", engine._llm.prompts[0])
+
+    def test_refine_does_not_stop_at_a_paragraph_starting_with_chapter(self):
+        engine = LocalStoryEngine()
+        engine._llm = StopHonoringFakeLlama(_echo_refine_chunk)
+        project = make_project()
+        project.chapters[0].content = "She closed the book.\n\nChapter by chapter, her life had changed."
+        result = engine.refine_chapter(project, 0, "make it darker")
+        self.assertIn("her life had changed", result)
+
+    def test_refine_empty_part_raises_instead_of_dropping_text(self):
+        engine = LocalStoryEngine()
+        engine._llm = StopHonoringFakeLlama(lambda prompt: "" if "PARA20 " in prompt else _echo_refine_chunk(prompt))
+        engine._count_tokens = lambda text: len(text.split())
+        engine._n_ctx = 3000
+        project = make_project(target_words=100)
+        project.chapters[0].content = "\n\n".join(f"PARA{i} " + " ".join(["word"] * 99) for i in range(40))
+        with self.assertRaises(RuntimeError):
+            engine.refine_chapter(project, 0, "shorten this")
+
+    def test_refine_raises_clear_error_when_not_even_a_small_part_fits(self):
         engine = LocalStoryEngine()
         engine._llm = FakeLlama()
         engine._count_tokens = lambda text: len(text.split())
-        engine._n_ctx = 6000
+        engine._n_ctx = 400
         project = make_project(target_words=100)
-        # 2500 palabras: menos que max_content_words del nivel completo
-        # (3000, asi que no se recorta ahi y el prompt no cabe), pero mas que
-        # el del nivel intermedio (1800, donde si se recorta y termina
-        # cabiendo).
-        project.chapters[0].content = "word " * 2500
-        result = engine.refine_chapter(project, 0, "shorten this")
-        self.assertTrue(result.strip())
+        project.chapters[0].content = "word " * 2000
+        with self.assertRaises(ContextOverflowError):
+            engine.refine_chapter(project, 0, "shorten this")
 
     def test_refine_chapter_does_not_leak_plot_characters_setting(self):
         # build_refine_chapter_prompt deliberadamente no incluye plot/
@@ -651,6 +746,66 @@ class TestSupportsGpuOffload(unittest.TestCase):
         fake_pkg.llama_cpp = fake_lib
         with unittest.mock.patch.dict(sys.modules, {"llama_cpp": fake_pkg, "llama_cpp.llama_cpp": fake_lib}):
             self.assertFalse(supports_gpu_offload())
+
+
+class TestLoadDllFailure(unittest.TestCase):
+    def test_native_library_load_failure_becomes_a_readable_error(self):
+        class _DllLoadFailure(types.ModuleType):
+            def __getattr__(self, name):
+                raise RuntimeError("Failed to load shared library 'llama.dll'")
+
+        engine = LocalStoryEngine()
+        with unittest.mock.patch.dict(sys.modules, {"llama_cpp": _DllLoadFailure("llama_cpp")}), \
+                unittest.mock.patch.object(engine_module, "_ensure_cuda_dlls_discoverable"):
+            with self.assertRaises(RuntimeError) as ctx:
+                engine.load("whatever.gguf")
+        self.assertIn("no se pudo cargar su libreria nativa", str(ctx.exception))
+        self.assertIn("Failed to load shared library", str(ctx.exception))
+
+
+class TestFitTextToTokenBudget(unittest.TestCase):
+    def test_shrinks_until_it_fits_when_tokenizer_exceeds_the_estimate(self):
+        # 3 tokens por palabra (la estimacion es 1.4): antes el bucle solo
+        # movia palabras de la cabeza a la cola sin achicar el total, y
+        # devolvia un texto que seguia sin caber.
+        engine = LocalStoryEngine()
+        engine._count_tokens = lambda text: len(text.split()) * 3
+        text = " ".join(f"w{i}" for i in range(5000))
+        trimmed = engine._fit_text_to_token_budget(text, 600)
+        self.assertLessEqual(engine._count_tokens(trimmed), 600)
+        self.assertIn("w0", trimmed)
+        self.assertIn("w4999", trimmed)
+
+    def test_text_that_fits_is_untouched(self):
+        engine = LocalStoryEngine()
+        self.assertEqual(engine._fit_text_to_token_budget("a few words", 100), "a few words")
+
+
+class TestStopSequences(unittest.TestCase):
+    def test_expand_field_does_not_stop_at_chapter_headings(self):
+        engine = LocalStoryEngine()
+        engine._llm = StopHonoringFakeLlama(lambda p: "Chapter 1: intro.\n\nChapter 2: the twist.")
+        result = engine.expand_field("plot", "a twist story", max_words=100)
+        self.assertIn("the twist", result)
+        self.assertNotIn("\n\nChapter", engine._llm.stops[0])
+
+    def test_chapter_prose_still_uses_the_default_chapter_stop(self):
+        engine = LocalStoryEngine()
+        engine._llm = StopHonoringFakeLlama(lambda p: "word " * 150)
+        engine.generate_chapter(make_project(target_words=100), 0)
+        self.assertIn("\n\nChapter", engine._llm.stops[0])
+
+
+class TestChapterLengthCap(unittest.TestCase):
+    def test_last_section_does_not_push_a_max_length_chapter_over_the_limit(self):
+        from app.project import MAX_WORDS_PER_CHAPTER, count_words
+        engine = LocalStoryEngine()
+        # Responde siempre todo lo que max_tokens permite.
+        engine._llm = StopHonoringFakeLlama(lambda p: " ".join(["word"] * 5000))
+        project = make_project(target_words=MAX_WORDS_PER_CHAPTER)
+        result = engine.generate_chapter(project, 0)
+        self.assertLessEqual(count_words(result), MAX_WORDS_PER_CHAPTER)
+        self.assertGreater(count_words(result), MAX_WORDS_PER_CHAPTER - 200)
 
 
 if __name__ == "__main__":
