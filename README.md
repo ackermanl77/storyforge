@@ -182,26 +182,53 @@ python storyforge.py
 
 ## Rendimiento / GPU (opcional)
 
-Por defecto, `llama-cpp-python` corre en CPU. Si tu PC tiene una GPU NVIDIA,
-puedes instalar una version compilada con soporte CUDA para acelerar mucho
-la generacion; consulta la documentacion de `llama-cpp-python` para el
-comando de instalacion con CUDA correspondiente a tu version de CUDA.
+Por defecto, `llama-cpp-python` corre en CPU. Si tu PC tiene una GPU NVIDIA
+(probado con series RTX 40 y 50), puedes instalar una version compilada con
+soporte CUDA para acelerar mucho la generacion:
 
-Ya no hace falta editar codigo para esto: en la pestaña **"Modelo"**, junto
+1. **Instala la version de `llama-cpp-python` con CUDA**, desde el indice de
+   wheels precompilados del propio autor (no hace falta compilar nada a
+   mano, ni tener el CUDA Toolkit completo instalado):
+
+   ```powershell
+   pip install --index-url https://abetlen.github.io/llama-cpp-python/whl/cu130 llama-cpp-python --force-reinstall --no-deps
+   ```
+
+   Cambia `cu130` por el indice que corresponda a tu driver de NVIDIA si
+   `cu130` no esta disponible (por ejemplo `cu124`/`cu126`/`cu128`) -- revisa
+   `https://abetlen.github.io/llama-cpp-python/whl/` para ver los indices
+   publicados.
+
+2. **Instala las DLLs del runtime de CUDA** (el wheel de arriba las necesita
+   para cargar, pero no las incluye -- son ~450 MB, principalmente
+   `cublas`):
+
+   ```powershell
+   pip install nvidia-cuda-runtime nvidia-cublas
+   ```
+
+   `app/engine.py` detecta automaticamente estos paquetes (si estan
+   instalados) y agrega su carpeta de DLLs al `PATH` antes de importar
+   `llama_cpp` -- no hace falta configurar variables de entorno a mano. Si
+   no los instalas, todo sigue funcionando en CPU-only como antes.
+
+No hace falta editar codigo para el resto: en la pestaña **"Modelo"**, junto
 al selector de archivo, hay tres campos de configuracion avanzada:
 
 - **Contexto (n_ctx)**: tamaño de la ventana de contexto del modelo (por
   defecto 8192). Mas grande permite incluir mas plot/personajes/setting/
   capitulos previos por llamada, pero usa mas RAM y puede ser mas lento.
-- **Capas en GPU (n_gpu_layers)**: 0 = solo CPU (por defecto). Si instalaste
-  la version con soporte CUDA, sube este numero para descargar capas del
-  modelo a la GPU.
+- **Capas en GPU (n_gpu_layers)**: si la app detecta una version de
+  `llama-cpp-python` con soporte de GPU real (paso 1 de arriba), este campo
+  se precarga en **-1** (todas las capas) automaticamente; si no, se precarga
+  en 0 (solo CPU). Un texto junto al campo confirma cual de los dos casos
+  detecto. Podes cambiar el numero a mano en cualquier momento.
 - **Hilos CPU (n_threads)**: vacio = automatico (por defecto). Solo hace
   falta tocarlo si quieres limitar cuantos hilos de CPU usa la generacion.
 
 Se validan antes de cargar el modelo (numeros enteros, n_ctx y n_threads
-mayores a 0, n_gpu_layers mayor o igual a 0) y el mensaje de "Modelo
-cargado" confirma con que valores quedo cargado.
+mayores a 0, n_gpu_layers mayor o igual a 0 o -1 para "todas") y el mensaje
+de "Modelo cargado" confirma con que valores quedo cargado.
 
 ## Reductor de repeticion (WordNet)
 

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import glob
 import os
+import sys
 from typing import Callable, List, Optional, Tuple
 
 from .project import MAX_CHAPTERS, Project, count_words
@@ -62,6 +63,65 @@ class ContextOverflowError(RuntimeError):
     """El prompt necesario no cabe en la ventana de contexto del modelo cargado."""
 
 
+_cuda_dlls_prepared = False
+
+
+def _ensure_cuda_dlls_discoverable() -> None:
+    """A CUDA-enabled llama-cpp-python wheel (see README's "Rendimiento / GPU"
+    section) bundles ggml-cuda.dll, which needs the CUDA runtime DLLs
+    (cudart64_*.dll/cublas64_*.dll/cublasLt64_*.dll) at import time -- not
+    just when a model is actually offloaded to GPU. Those DLLs aren't bundled
+    in the wheel itself; the standalone `nvidia-cuda-runtime`/`nvidia-cublas`
+    pip packages provide them instead (no full CUDA Toolkit install needed).
+
+    llama_cpp's own loader (_ctypes_extensions.py) calls
+    `ctypes.CDLL(..., winmode=ctypes.RTLD_GLOBAL)` -- on Windows RTLD_GLOBAL
+    is 0, and passing winmode=0 makes ctypes use the legacy DLL search order,
+    which ignores directories registered via `os.add_dll_directory()` (that
+    only applies under the "safe search mode" flags). The legacy search order
+    does still consult PATH, so prepending the DLL directory there (in
+    addition to add_dll_directory, for forward compatibility if that bug gets
+    fixed upstream) is what actually makes the import succeed -- confirmed by
+    reproducing llama_cpp's exact load call directly.
+
+    A CPU-only environment (no `nvidia-*` packages installed, or the default
+    PyPI CPU-only wheel) hits none of this: the glob below just finds nothing
+    and the import proceeds exactly as it always did.
+    """
+    global _cuda_dlls_prepared
+    if _cuda_dlls_prepared or sys.platform != "win32":
+        return
+    _cuda_dlls_prepared = True
+
+    for site_packages in (p for p in sys.path if p.endswith("site-packages")):
+        for dll_dir in glob.glob(os.path.join(site_packages, "nvidia", "*", "bin", "*")):
+            if not os.path.isdir(dll_dir) or not glob.glob(os.path.join(dll_dir, "*.dll")):
+                continue
+            try:
+                os.add_dll_directory(dll_dir)
+            except OSError:
+                pass
+            os.environ["PATH"] = dll_dir + os.pathsep + os.environ.get("PATH", "")
+
+
+def supports_gpu_offload() -> bool:
+    """Whether the installed llama-cpp-python build can actually offload
+    layers to a GPU -- used by the GUI to pick a sensible default for
+    n_gpu_layers instead of always defaulting to CPU-only (0)."""
+    _ensure_cuda_dlls_discoverable()
+    try:
+        from llama_cpp import llama_cpp as _llama_cpp_lib
+    except Exception:
+        # Not just ImportError: when a CUDA build's DLLs can't be resolved, llama_cpp raises
+        # RuntimeError("Failed to load shared library ...") from its import. This runs while the
+        # GUI is being built, so it must degrade to "no GPU" rather than crash the app at startup.
+        return False
+    try:
+        return bool(_llama_cpp_lib.llama_supports_gpu_offload())
+    except Exception:
+        return False
+
+
 def find_local_models(models_dir: str) -> List[str]:
     if not os.path.isdir(models_dir):
         return []
@@ -91,6 +151,7 @@ class LocalStoryEngine:
     def load(self, model_path: str, n_ctx: int = 8192, n_threads: Optional[int] = None,
               n_gpu_layers: int = 0) -> None:
         try:
+            _ensure_cuda_dlls_discoverable()
             from llama_cpp import Llama
         except ImportError as exc:  # pragma: no cover - environment dependent
             raise RuntimeError(

@@ -18,6 +18,25 @@ for pkg in ("customtkinter", "llama_cpp", "docx"):
     binaries += pkg_binaries
     hiddenimports += pkg_hiddenimports
 
+# A CUDA-enabled llama-cpp-python wheel (README, "Rendimiento / GPU") ships
+# ggml-cuda.dll but not the CUDA runtime DLLs it needs (cublas64_*/cublasLt64_*/
+# cudart64_*) -- those come from the standalone nvidia-cuda-runtime/nvidia-cublas
+# pip packages. In dev, app/engine.py::_ensure_cuda_dlls_discoverable() finds
+# them under site-packages; in the frozen app there is no site-packages, so they
+# are bundled into llama_cpp/lib instead, next to ggml-cuda.dll -- llama_cpp's
+# own loader prepends that folder to PATH before loading, which is exactly what
+# the winmode=0 DLL search needs. With a CPU-only llama-cpp-python build (or no
+# nvidia packages installed) the glob finds nothing and this is a no-op.
+import glob
+import os
+import site
+
+_CUDA_RUNTIME_DLLS = ("cublas64_", "cublasLt64_", "cudart64_")
+for _site_packages in site.getsitepackages():
+    for _dll in glob.glob(os.path.join(_site_packages, "nvidia", "*", "bin", "*", "*.dll")):
+        if os.path.basename(_dll).startswith(_CUDA_RUNTIME_DLLS):
+            binaries.append((_dll, os.path.join("llama_cpp", "lib")))
+
 # collect_all("llama_cpp") sweeps in the whole package regardless of what
 # this app actually imports (app/engine.py only ever does
 # `from llama_cpp import Llama`). In an environment where llama_cpp's
@@ -50,6 +69,15 @@ EXCLUDED_UNUSED_HEAVY_DEPS = [
     "pandas",
     "pyarrow",
     "scipy",
+    # Also installed in the shared build interpreter (for other projects) and dragged in
+    # transitively by optional integrations, but never imported by app/ -- llama.cpp runs GGUF
+    # models with its own tokenizer, no torch/transformers involved. Without these excludes a CPU
+    # torch (~1 GB) plus sympy ends up bundled for nothing.
+    "torch",
+    "torchvision",
+    "sympy",
+    "transformers",
+    "diffusers",
 ]
 
 a = Analysis(

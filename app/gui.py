@@ -13,7 +13,13 @@ from typing import Callable, Optional
 
 import customtkinter as ctk
 
-from .engine import ContextOverflowError, LocalStoryEngine, ModelNotLoadedError, find_local_models
+from .engine import (
+    ContextOverflowError,
+    LocalStoryEngine,
+    ModelNotLoadedError,
+    find_local_models,
+    supports_gpu_offload,
+)
 from .export import export_docx, export_txt
 from .prompts import build_previous_context, find_relevant_lore_entries
 from .project import (
@@ -813,10 +819,19 @@ class StoryForgeApp(ctk.CTk):
         self.n_ctx_entry.insert(0, "8192")
         self.n_ctx_entry.pack(side="left", padx=(0, 12))
 
-        ctk.CTkLabel(advanced, text="Capas en GPU (n_gpu_layers, 0 = solo CPU):").pack(side="left", padx=(0, 4))
+        gpu_available = supports_gpu_offload()
+        gpu_layers_label = "Capas en GPU (n_gpu_layers, -1 = todas):" if gpu_available else "Capas en GPU (n_gpu_layers, 0 = solo CPU):"
+        ctk.CTkLabel(advanced, text=gpu_layers_label).pack(side="left", padx=(0, 4))
         self.n_gpu_layers_entry = ctk.CTkEntry(advanced, width=50)
-        self.n_gpu_layers_entry.insert(0, "0")
+        # -1 le pide a llama.cpp que ofrezca TODAS las capas a la GPU -- solo se
+        # precarga este valor cuando ya se confirmo soporte de GPU real (evita
+        # sugerir un valor que en CPU-only no hace nada util); el usuario
+        # siempre puede cambiarlo a mano.
+        self.n_gpu_layers_entry.insert(0, "-1" if gpu_available else "0")
         self.n_gpu_layers_entry.pack(side="left", padx=(0, 12))
+
+        gpu_status_text = "GPU detectada: se usara para acelerar la generacion." if gpu_available else "Sin soporte de GPU (CPU-only)."
+        ctk.CTkLabel(advanced, text=gpu_status_text, text_color=("#2e7d32" if gpu_available else "gray")).pack(side="left", padx=(0, 12))
 
         ctk.CTkLabel(advanced, text="Hilos CPU (vacio = automatico):").pack(side="left", padx=(0, 4))
         self.n_threads_entry = ctk.CTkEntry(advanced, width=50)
@@ -870,10 +885,14 @@ class StoryForgeApp(ctk.CTk):
             return
         try:
             n_gpu_layers = int(self.n_gpu_layers_entry.get())
-            if n_gpu_layers < 0:
+            # -1 es la convencion de llama.cpp para "todas las capas disponibles"
+            # (ver GUI/README) -- cualquier otro negativo no tiene significado.
+            if n_gpu_layers < -1:
                 raise ValueError
         except ValueError:
-            messagebox.showwarning(APP_TITLE, "Capas en GPU (n_gpu_layers) invalido: debe ser un entero >= 0.")
+            messagebox.showwarning(
+                APP_TITLE, "Capas en GPU (n_gpu_layers) invalido: debe ser un entero >= 0, o -1 para todas."
+            )
             return
         n_threads_raw = self.n_threads_entry.get().strip()
         n_threads: Optional[int] = None
