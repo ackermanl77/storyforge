@@ -234,13 +234,15 @@ oscuro" o "acorta el diálogo del final".
    anteriores"). El modelo reescribe el capítulo completo aplicando tu
    instrucción, manteniendo la trama y los personajes.
 
-**Importante**: a diferencia de generar (que se hace por secciones),
-refinar necesita que el capítulo **completo** quepa en el contexto del
-modelo de una sola vez, sin barra de progreso por secciones. Un capítulo
-muy largo (varios miles de palabras) puede fallar con un error de "contexto
-demasiado grande" si tu modelo tiene un `n_ctx` chico — en ese caso, sube
-`n_ctx` en la pestaña Modelo (si tu hardware lo permite) o acorta el
-capítulo primero.
+**Importante**: el capítulo **nunca se recorta** al refinar. Si cabe
+completo en el contexto del modelo, se revisa de una sola vez; si no (un
+capítulo largo con un `n_ctx` chico), la app lo revisa **por partes**
+(grupos de párrafos consecutivos, aplicando la misma instrucción a cada
+parte) y las vuelve a unir en orden. Una instrucción que depende de todo el
+capítulo a la vez ("cambia el final para que conecte con el inicio")
+funciona mejor si el capítulo cabe entero: sube `n_ctx` en la pestaña
+Modelo si tu hardware lo permite. Si alguna parte vuelve vacía, el capítulo
+no se modifica y se muestra un error.
 
 Cada clic en "Aplicar refinamiento" es independiente — no es una
 conversación con memoria de instrucciones anteriores más allá de su efecto
@@ -348,6 +350,18 @@ nuevo (no sobrescribe automáticamente ningún archivo). La copia se borra
 sola en cuanto guardas el proyecto de forma explícita, o si decides no
 guardar al cerrar la app.
 
+En el `.exe`, la copia de autoguardado vive en
+`%APPDATA%\StoryForge\autosave\` (y los errores se registran en
+`%APPDATA%\StoryForge\storyforge.log`); ejecutando desde el código fuente,
+en la carpeta `autosave\` del proyecto. Si el autoguardado no se puede
+escribir, la app te avisa una vez por sesión en vez de fallar en silencio.
+
+Guardar un proyecto es atómico: se escribe primero a un archivo temporal y
+solo entonces reemplaza al anterior, que queda como `<archivo>.json.bak`.
+Si el guardado falla (disco lleno, carpeta sin permisos), ves un mensaje de
+error y el archivo anterior queda intacto; si pasa al cerrar la app, la app
+no se cierra.
+
 Al cerrar la app (con la X de la ventana o "Salir" del menú), siempre se te
 pregunta si quieres guardar — con opción de cancelar el cierre.
 
@@ -367,7 +381,10 @@ pregunta si quieres guardar — con opción de cancelar el cierre.
 
 Si algo excede un límite, la app te avisa antes de generar o guardar — no
 te bloquea de escribir de más, pero sí de generar/guardar con esos
-excedentes sin antes confirmar o corregir.
+excedentes sin antes confirmar o corregir. Excepción: el **texto** de un
+capítulo que pasa de 10,000 palabras (p.ej. por editarlo a mano) es solo
+una advertencia al guardar y no bloquea generar otros capítulos ni el
+esquema; al generar, la última sección se ajusta para no pasarse del límite.
 
 ## Convenciones de formato del texto generado
 
