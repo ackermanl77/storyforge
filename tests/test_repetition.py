@@ -49,6 +49,41 @@ class TestReduceRepetitionDegradesGracefully(unittest.TestCase):
             repetition._NLTK_READY = original_ready
             repetition._STOPWORDS_CACHE = original_cache
 
+    def test_zipped_wordnet_counts_as_available(self):
+        # Regression: nltk.downloader leaves wordnet as corpora/wordnet.zip, and
+        # find("corpora/wordnet") without ".zip" fails -- synonyms never ran.
+        try:
+            import nltk
+        except ImportError:
+            self.skipTest("nltk no esta instalado")
+        from unittest import mock
+
+        def fake_find(resource, *args, **kwargs):
+            if resource in ("corpora/stopwords", "corpora/wordnet.zip"):
+                return resource
+            raise LookupError(resource)
+
+        original_ready = repetition._NLTK_READY
+        try:
+            repetition._NLTK_READY = None
+            with mock.patch.object(nltk.data, "find", side_effect=fake_find), \
+                    mock.patch.object(nltk, "download", side_effect=AssertionError("must not download")):
+                self.assertTrue(repetition._ensure_nltk_data())
+        finally:
+            repetition._NLTK_READY = original_ready
+
+    def test_synonyms_are_found_with_the_bundled_data(self):
+        local = repetition._local_nltk_data_dir()
+        if not os.path.exists(os.path.join(local, "corpora", "wordnet.zip")):
+            self.skipTest("nltk_data/ local no descargado (build.bat lo crea)")
+        original_ready = repetition._NLTK_READY
+        try:
+            repetition._NLTK_READY = None
+            self.assertTrue(repetition._ensure_nltk_data())
+            self.assertIsNotNone(repetition._best_synonym("happy", {"happy"}))
+        finally:
+            repetition._NLTK_READY = original_ready
+
     def test_repetition_report_has_readable_output(self):
         text = "mountain " * 10 + "a calm village below"
         report = repetition.repetition_report(text)
