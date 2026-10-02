@@ -31,8 +31,21 @@ def user_data_dir() -> str:
     usa %APPDATA%\\StoryForge: la carpeta del programa puede no ser
     escribible (p.ej. si se copio a Program Files). En desarrollo se sigue
     usando la carpeta del proyecto, como siempre.
+
+    La variable de entorno STORYFORGE_USER_DATA_DIR, si esta definida, tiene
+    prioridad en ambos casos: la usan las pruebas (para no tocar nunca el
+    autoguardado real del usuario) y sirve tambien para una instalacion
+    portable. Se lee en cada llamada, no una sola vez al importar.
     """
+    override = os.environ.get("STORYFORGE_USER_DATA_DIR", "").strip()
+    if override:
+        return os.path.abspath(override)
     if is_frozen():
         base = os.environ.get("APPDATA") or os.path.expanduser("~")
         return os.path.join(base, "StoryForge")
     return app_root()
+
+
+def log_file_path() -> str:
+    """Archivo de registro del .exe (en desarrollo el registro va a la consola)."""
+    return os.path.join(user_data_dir(), "storyforge.log")

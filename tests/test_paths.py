@@ -13,6 +13,24 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 class TestAppPaths(unittest.TestCase):
+    def setUp(self):
+        # tests/conftest.py (y test_gui.py) definen STORYFORGE_USER_DATA_DIR
+        # para aislar las pruebas; aqui se prueba el comportamiento sin ella.
+        self._env = mock.patch.dict(os.environ)
+        self._env.start()
+        os.environ.pop("STORYFORGE_USER_DATA_DIR", None)
+
+    def tearDown(self):
+        self._env.stop()
+
+    def test_env_override_wins_in_dev_and_frozen(self):
+        override = os.path.join("C:\\", "tmp", "sf-data")
+        os.environ["STORYFORGE_USER_DATA_DIR"] = override
+        for frozen in (False, True):
+            with mock.patch.object(sys, "frozen", frozen, create=True):
+                self.assertEqual(paths.user_data_dir(), os.path.abspath(override))
+        self.assertEqual(paths.log_file_path(), os.path.join(os.path.abspath(override), "storyforge.log"))
+
     def test_dev_root_is_the_project_folder(self):
         with mock.patch.object(sys, "frozen", False, create=True):
             self.assertEqual(paths.app_root(), PROJECT_ROOT)
