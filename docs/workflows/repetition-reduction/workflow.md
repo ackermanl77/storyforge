@@ -12,7 +12,7 @@ Flag words used more often than a natural-language baseline in a chapter, and op
 
 ## Implementation
 
-- `app/repetition.py::_ensure_nltk_data()` looks for NLTK's `stopwords`/`wordnet` corpora first in a local `nltk_data/` folder next to the app, then tries to download them (~35 MB, once) if missing and internet is available. The result is cached for the process lifetime so a missing-internet case doesn't retry on every call.
+- `app/repetition.py::_ensure_nltk_data()` looks for NLTK's `stopwords`/`wordnet` corpora first in a local `nltk_data/` folder next to the app, then tries to download them (~35 MB, once) if missing and internet is available. The result is cached for the process lifetime so a missing-internet case doesn't retry on every call. WordNet counts as present as `corpora/wordnet.zip` too: `nltk.downloader` leaves it zipped and NLTK reads it from the zip, but the check used to ask only for `corpora/wordnet`, so synonym substitution silently never ran (fixed 2026-10-02, regression test in `tests/test_repetition.py`). Only `stopwords` and `wordnet` are needed; `omw-1.4` (other languages' WordNets, 26 MB) is not downloaded or bundled.
 - If NLTK data is unavailable at all, `word_frequencies()`/`overused_words()` still work using a small built-in stopword list (`_FALLBACK_STOPWORDS`) — repetition **detection** always works offline; only synonym **substitution** (`_best_synonym()`, which needs WordNet) is unavailable without the corpora.
 - `reduce_repetition()` is a rule-based pass, not a model rewrite: it only swaps the flagged word itself via regex substitution (`_TOKEN_RE`), preserving sentence structure, and matches the replacement's capitalization to the original (`_match_case()`).
 

@@ -63,11 +63,17 @@ def _ensure_nltk_data() -> bool:
         nltk.data.path.insert(0, local_dir)
 
     def _has(resource: str) -> bool:
-        try:
-            nltk.data.find(resource)
-            return True
-        except LookupError:
-            return False
+        # nltk.downloader deja wordnet como corpora/wordnet.zip (no lo
+        # descomprime) y NLTK lo lee directo del zip; find("corpora/wordnet")
+        # sin ".zip" no lo encuentra. Antes esto hacia que la sustitucion por
+        # sinonimos nunca se activara, ni en el .exe con nltk_data incluido.
+        for candidate in (resource, resource + ".zip"):
+            try:
+                nltk.data.find(candidate)
+                return True
+            except LookupError:
+                continue
+        return False
 
     ok = _has("corpora/stopwords") and _has("corpora/wordnet")
     if not ok:
