@@ -100,6 +100,41 @@ EXCLUDED_UNUSED_HEAVY_DEPS = [
     "diffusers",
 ]
 
+# Version (K3): leida de app/__init__.py con una expresion regular (el build
+# nunca importa app/), y escrita como recurso de version de Windows para que
+# StoryForge.exe muestre version/producto en Propiedades > Detalles.
+import re
+
+with open(os.path.join("app", "__init__.py"), encoding="utf-8") as _f:
+    APP_VERSION = re.search(r'__version__\s*=\s*"([^"]+)"', _f.read()).group(1)
+_numbers = [int(x) for x in re.findall(r"\d+", APP_VERSION)[:4]]
+_numbers += [0] * (4 - len(_numbers))
+_version_tuple = tuple(_numbers)
+os.makedirs("build", exist_ok=True)
+VERSION_FILE = os.path.join("build", "version_info.txt")
+with open(VERSION_FILE, "w", encoding="utf-8") as _f:
+    _f.write(f"""VSVersionInfo(
+  ffi=FixedFileInfo(filevers={_version_tuple}, prodvers={_version_tuple}, mask=0x3f, flags=0x0,
+                    OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
+  kids=[
+    StringFileInfo([StringTable('040A04B0', [
+      StringStruct('CompanyName', 'StoryForge Local'),
+      StringStruct('FileDescription', 'StoryForge Local - escritura de historias con IA local'),
+      StringStruct('FileVersion', '{APP_VERSION}'),
+      StringStruct('InternalName', 'StoryForge'),
+      StringStruct('OriginalFilename', 'StoryForge.exe'),
+      StringStruct('ProductName', 'StoryForge Local'),
+      StringStruct('ProductVersion', '{APP_VERSION}')])]),
+    VarFileInfo([VarStruct('Translation', [0x040A, 1200])])
+  ]
+)
+""")
+
+# Datos de NLTK (K4): si el build los descargo en nltk_data/ (build.bat lo
+# hace), se incluyen siempre, en vez de depender de la cache de la maquina.
+if os.path.isdir("nltk_data"):
+    datas.append(("nltk_data", "nltk_data"))
+
 a = Analysis(
     ["storyforge.py"],
     pathex=[],
@@ -158,6 +193,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=VERSION_FILE,
 )
 
 coll = COLLECT(
