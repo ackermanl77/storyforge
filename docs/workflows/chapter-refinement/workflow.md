@@ -8,7 +8,7 @@ Revise an already-generated chapter per a specific instruction ("make it darker"
 
 1. Generate a chapter's content first — there's nothing to refine before that (the button warns instead of doing anything if `content` is empty).
 2. In that chapter's panel, at the bottom, type an instruction into "Instruccion de refinamiento" and click "Aplicar refinamiento".
-3. Confirm the prompt — refining reprocesses and replaces the whole chapter (the version you had is saved to "Versiones anteriores" first — see `docs/workflows/version-history/workflow.md` — so this is recoverable).
+3. Confirm the prompt — refining reprocesses the whole chapter and shows a side-by-side diff preview (Aceptar / Aceptar y seguir refinando / Descartar); nothing is replaced until you accept (the version you had is saved to "Versiones anteriores" first — see `docs/workflows/version-history/workflow.md` — so this is recoverable).
 4. The model rewrites the chapter applying your instruction; progress isn't streamed section-by-section the way initial generation is (see "Known limits").
 
 ## Implementation

@@ -13,7 +13,7 @@ correspondiente mas abajo.
 
 ## Que incluye
 
-- Interfaz grafica (pestanas: Modelo, Plot, Personajes, Setting, **Esquema**, Capitulos).
+- Interfaz grafica (pestanas: Modelo, Plot, Personajes, Setting, Lorebook, **Esquema**, Capitulos).
 - **Flujo "outline-first"**: en la pestana Esquema puedes generar de un jalon
   un beat sheet de todos los capitulos (titulo + eventos clave de cada uno) a
   partir del plot/personajes/setting, editarlo, y luego generar la prosa de
@@ -47,10 +47,78 @@ correspondiente mas abajo.
   persona, dialogo con comillas.
 - Reductor de repeticion de palabras (basado en WordNet, funciona offline
   una vez descargados sus datos).
-- Guardar/abrir proyecto (.json) y exportar la historia a Word (.docx) o
-  texto plano (.txt).
+- Guardar/abrir proyecto (.storyforge.json) y exportar la historia a Word
+  (.docx, con portada y un capítulo por página), EPUB, Markdown o texto plano.
 
 ## Historial de cambios
+
+**Ronda P2 del informe de mejoras (versión 0.4.0):**
+- **Muestreo por tarea y semilla**: la prosa usa presets (Creativo /
+  Equilibrado / Preciso / Personalizado, pestaña Modelo) y los resúmenes y el
+  esquema usan temperaturas más bajas. Semilla vacía = aleatoria (se muestra
+  la usada y "Usar la última" la fija para repetir un resultado).
+- **Detener cualquier tarea**: barra de estado abajo con operación, tiempo,
+  tokens/s, ETA, uso de contexto, "Ver prompt" (el texto exacto enviado) y
+  "Detener" (también Esc). Detener un refinado o un resumen no cambia nada.
+- **Modelos**: los modelos partidos en varios archivos aparecen una sola vez
+  y los incompletos se marcan y no se cargan; se muestra arquitectura,
+  contexto entrenado y cuantización; "Estimar VRAM" sugiere capas en GPU;
+  opciones avanzadas (flash attention, lote, caché KV q8_0/q4_0); la app
+  recuerda las opciones de cada modelo en esta PC y al abrir un proyecto
+  preselecciona su modelo (o avisa si ya no está).
+- **Vista previa con diferencias** antes de aplicar un refinado, "Aceptar y
+  seguir refinando", **Reintentar** con alternativas (< >), versiones
+  anteriores con origen y fecha (hasta 20).
+- **Nota del autor** (de la historia y de cada capítulo) y **clic derecho
+  sobre una selección**: Reescribir / Expandir / Describir / Acortar.
+- **Buscar y reemplazar** (Ctrl+F en el capítulo, Ctrl+Shift+F en todo el
+  proyecto), total de palabras y avance por capítulo, **modo enfoque** (F11).
+- **Lorebook**: entradas activas/siempre incluidas/prioridad, escaneo de lo
+  último escrito y de las entradas mencionadas por otras, y el motivo de
+  cada coincidencia.
+- **Proyecto**: título y autor, formato versionado, carga tolerante a
+  archivos dañados con oferta de abrir la copia `.bak`, `*` y nombre de
+  archivo en el título, solo pregunta si hay cambios sin guardar, y
+  autoguardado cada minuto también fuera de las generaciones.
+- **Interfaz en español correcto** (acentos, tuteo) y Preferencias (tema
+  claro/oscuro/sistema, escala, fuente e interlineado del editor, carpeta
+  de modelos fuera de OneDrive). Ayuda > Acerca de muestra la versión.
+- **Build reproducible**: `build.bat` usa un entorno limpio `.build-venv`
+  con versiones exactas; el .exe lleva versión; CI genera
+  `StoryForge-<versión>-cpu.zip` / `-cuda13.zip` y publica un Release al
+  subir un tag `v<versión>`.
+
+**Mejoras prioritarias (P1) del informe de mejoras:**
+- **Continuidad entre capítulos**: el contexto de capítulos anteriores ahora
+  se arma del más reciente hacia atrás e incluye siempre el resumen y las
+  últimas líneas del capítulo anterior (antes, desde el capítulo ~4, el
+  capítulo inmediatamente anterior quedaba fuera).
+- **Resúmenes visibles, editables y con aviso de desactualizado**
+  ("Mostrar resumen", "Regenerar resumen"); al generar se ofrece regenerar
+  los desactualizados; los capítulos largos se resumen por partes; un fallo
+  al resumir se registra y se avisa.
+- **Formato de chat** (pestaña Modelo): los prompts se envían con la
+  plantilla del modelo (la del GGUF, o Llama 3/ChatML/Mistral/Alpaca
+  deducida o elegida), con "Sin plantilla" para modelos base. Al continuar,
+  la respuesta del modelo arranca pre-llenada con el final del capítulo.
+- **Continuar / Continuar desde el cursor**, y un contexto de continuación
+  que usa todo lo que quepa del capítulo, no solo las últimas 400 palabras.
+- Las secciones cortadas por largo ya no parten oraciones en dos párrafos;
+  un cierre natural cerca del objetivo termina el capítulo.
+- **Esquema**: se entienden `**Chapter 1: ...**`, `### Chapter 1 - ...`,
+  números en palabras y romanos; una respuesta sin formato da un error en
+  vez de meterse entera en el capítulo 1; un esquema incompleto se avisa.
+- **Editor**: deshacer/rehacer (Ctrl+Z/Ctrl+Y), atajos (Ctrl+N/O/S,
+  Ctrl+Shift+S, Ctrl+Enter, Esc), un capítulo a la vez a pantalla completa,
+  y el capítulo que se está generando queda en solo lectura.
+- **Errores inesperados** (en callbacks de la interfaz o en hilos) se
+  registran y se muestran; menú Ayuda > "Abrir carpeta de registros".
+- **Pruebas**: ya no borran el autoguardado real (usan
+  `STORYFORGE_USER_DATA_DIR` apuntando a una carpeta temporal).
+- **CI**: dependencias fijadas (`requirements-build.txt`,
+  `requirements-cuda.txt`) y dos builds, `cpu` y `cuda13`, desde los wheels
+  precompilados de llama-cpp-python (antes CI compilaba una versión solo-CPU
+  sin fijar versión).
 
 **Correcciones de una revision de codigo:**
 - **El esquema ya no se corta despues del capitulo 1**: generar esquema (y
@@ -187,8 +255,12 @@ computadora.
 3. Descarga un modelo `.gguf` (ver `models/README.txt` para recomendaciones)
    y colocalo dentro de la carpeta `models/`.
 4. Genera el ejecutable corriendo `build.bat` (doble clic, o desde una
-   terminal `cmd`). Esto instala las dependencias con pip, usa PyInstaller
-   para producir el build, y lo copia a `StoryForge-App\StoryForge.exe` —
+   terminal `cmd`; `build.bat cpu` para la versión sin GPU). Usa Python
+   3.14 vía el `py` launcher (`py -3.14`; otra versión con
+   `set STORYFORGE_PYVER=3.12`). Crea un entorno limpio `.build-venv` con versiones
+   exactas (`requirements-build.txt` + el wheel precompilado de
+   llama-cpp-python), descarga los datos de NLTK, corre las pruebas, usa
+   PyInstaller para producir el build, y lo copia a `StoryForge-App\StoryForge.exe` —
    una carpeta fija y facil de ubicar (a diferencia de `dist\`, que es la
    carpeta de trabajo de PyInstaller y se borra/regenera en cada build).
 5. Copia la carpeta `models/` (con tu modelo adentro) junto al .exe, dentro
@@ -210,6 +282,14 @@ python storyforge.py
 ```
 
 ## Rendimiento / GPU (opcional)
+
+Opciones en la pestaña Modelo: con GPU, deja n_gpu_layers en -1 si el
+modelo cabe (usa "Estimar VRAM"), activa flash attention, usa un lote
+(n_batch) de 1024-2048 y, para contextos largos, la caché KV q8_0 (la mitad
+de memoria; requiere flash attention). n_ctx = 0 usa el contexto con el que
+se entrenó el modelo. Ver `models/README.txt` para qué modelos caben en
+16 GB de VRAM. Consejo: guarda los .gguf fuera de OneDrive y configura esa
+carpeta en Archivo > Preferencias.
 
 Por defecto, `llama-cpp-python` corre en CPU. Si tu PC tiene una GPU NVIDIA
 (probado con series RTX 40 y 50), puedes instalar una version compilada con
@@ -251,7 +331,7 @@ al selector de archivo, hay tres campos de configuracion avanzada:
   `llama-cpp-python` con soporte de GPU real (paso 1 de arriba), este campo
   se precarga en **-1** (todas las capas) automaticamente; si no, se precarga
   en 0 (solo CPU). Un texto junto al campo confirma cual de los dos casos
-  detecto. Podes cambiar el numero a mano en cualquier momento.
+  detecto. Puedes cambiar el número a mano en cualquier momento.
 - **Hilos CPU (n_threads)**: vacio = automatico (por defecto). Solo hace
   falta tocarlo si quieres limitar cuantos hilos de CPU usa la generacion.
 
@@ -303,8 +383,21 @@ storyforge/
 ## Pruebas
 
 ```
-python -m unittest discover -s tests -v
+python -m pytest -q
 ```
+
+(`python -m unittest discover -s tests -v` tambien funciona.) Las pruebas
+nunca escriben en tu carpeta de datos real: `tests/conftest.py` y
+`tests/test_gui.py` apuntan `STORYFORGE_USER_DATA_DIR` a una carpeta
+temporal. CI (`.github/workflows/build-exe.yml`) corre la suite con
+`pytest` y `ruff check app tests`, y arma dos zips:
+`StoryForge-<versión>-cpu.zip` y `StoryForge-<versión>-cuda13.zip`. Un tag
+`v<versión>` (igual a `app/__init__.py`) los publica como GitHub Release.
+
+`tests/test_real_model.py` es una prueba opcional con un modelo real
+(`set STORYFORGE_TEST_MODEL=C:\ruta\modelo-chico.gguf`); sin esa variable
+se salta. `tests/test_prompt_snapshots.py` compara cada prompt con
+`tests/snapshots/` (regenerar con `STORYFORGE_UPDATE_SNAPSHOTS=1`).
 
 Las pruebas de `project.py`, `repetition.py` (rutas sin datos de NLTK) y la
 logica del motor de generacion (con un modelo simulado) no requieren
