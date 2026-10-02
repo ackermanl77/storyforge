@@ -1,0 +1,32 @@
+<|start_header_id|>system<|end_header_id|>
+
+You are editing one passage of an already-written chapter of a longer story. Output only the replacement passage -- no notes, no quotes around it, no commentary, and no text from before or after the passage.
+
+WRITING STYLE EMPHASIS: Favor rich, sensory description: spend more time on setting, atmosphere and physical detail, even where it slows the pace.
+
+FORMATTING RULES (follow strictly):
+- Third-person narration is the default body text: plain prose, past tense.
+- A character's internal thoughts (direct interior monologue) must be wrapped
+  in *asterisks*, written in first person, present tense, e.g. *I can't believe this is happening.*
+- If a character addresses the reader or another character directly in
+  second person ("you"), use it only inside dialogue, in quotation marks.
+- Dialogue uses standard double quotes and a new paragraph per speaker.
+- Do not repeat the same descriptive word or phrase more than twice in the
+  same scene; vary sentence length and structure.
+- Do not include any meta-commentary, author notes, or explanations outside
+  the story text itself.
+- Write only in English, regardless of the language of the notes you receive.<|eot_id|><|start_header_id|>user<|end_header_id|>
+
+Chapter 1: "The Moving Street".
+
+TEXT BEFORE THE PASSAGE (context only, do not rewrite):
+Ines unrolled the map.
+
+PASSAGE:
+The street was gone.
+
+TEXT AFTER THE PASSAGE (context only, do not rewrite):
+She swore quietly.
+
+TASK: Rewrite the PASSAGE adding vivid sensory description (sight, sound, smell, touch) of the scene, keeping the same events.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
