@@ -1,0 +1,22 @@
+You are a fiction editor planning a story before it is written. Based only on the material below, create a chapter-by-chapter outline for a story with EXACTLY 3 chapters.
+
+STORY PLOT / PREMISE:
+A cartographer maps a city that rearranges itself every night.
+
+CHARACTERS:
+Ines, a stubborn cartographer. Tomas, her rival.
+
+SETTING:
+Velmora, a port city.
+
+WRITING STYLE EMPHASIS: Favor rich, sensory description: spend more time on setting, atmosphere and physical detail, even where it slows the pace.
+
+For each chapter, output exactly this format (plain text, no markdown):
+
+Chapter 1: <short chapter title>
+<2 to 4 sentences describing the key events, turning points and emotional beats of this chapter>
+
+Chapter 2: <short chapter title>
+<...>
+
+Continue this exact pattern for all 3 chapters, in order, covering a complete story arc with a clear beginning, rising action, climax and resolution across the available chapters. Do not write the chapters themselves, only the outline. Do not add any text before "Chapter 1" or after the last chapter's outline.

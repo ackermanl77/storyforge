@@ -98,6 +98,7 @@ class StopHonoringFakeLlama:
         self.max_tokens.append(max_tokens)
         self.prompts.append(prompt)
         text = self.respond(prompt)
+        finish_reason = "stop"
         cut = min((text.find(s) for s in (stop or []) if s in text), default=-1)
         if cut >= 0:
             text = text[:cut]
@@ -105,7 +106,10 @@ class StopHonoringFakeLlama:
         words = text.split(" ")
         if len(words) > max_words:
             text = " ".join(words[:max_words])
-        return {"choices": [{"text": text}]}
+            finish_reason = "length"
+        # Igual que llama.cpp: "length" si se agoto max_tokens, "stop" si el
+        # modelo termino solo o toco una secuencia de corte.
+        return {"choices": [{"text": text, "finish_reason": finish_reason}]}
 
 
 def _echo_refine_chunk(prompt):
@@ -759,7 +763,7 @@ class TestLoadDllFailure(unittest.TestCase):
                 unittest.mock.patch.object(engine_module, "_ensure_cuda_dlls_discoverable"):
             with self.assertRaises(RuntimeError) as ctx:
                 engine.load("whatever.gguf")
-        self.assertIn("no se pudo cargar su libreria nativa", str(ctx.exception))
+        self.assertIn("no se pudo cargar su librería nativa", str(ctx.exception))
         self.assertIn("Failed to load shared library", str(ctx.exception))
 
 

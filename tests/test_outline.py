@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.engine import LocalStoryEngine, ModelNotLoadedError
 from app.project import Project
-from app.prompts import build_story_outline_overview, parse_outline_response
+from app.prompts import OutlineParseError, build_story_outline_overview, parse_outline_response
 
 
 SAMPLE_OUTLINE_RESPONSE = """\
@@ -52,11 +52,45 @@ class TestParseOutlineResponse(unittest.TestCase):
         self.assertEqual(result[0][0], "Beginnings")
         self.assertEqual(result[1][0], "The End")
 
-    def test_falls_back_to_single_chapter_when_unformatted(self):
+    def test_unformatted_response_raises_instead_of_one_blob_chapter(self):
+        # Antes devolvia todo como un unico "Chapter 1", que se escribia en el
+        # esquema del capitulo 1 (y si pasaba de 800 palabras bloqueaba toda
+        # generacion posterior).
         text = "This model just wrote a paragraph without following instructions."
-        result = parse_outline_response(text, expected_chapters=5)
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0][0], "Chapter 1")
+        with self.assertRaises(OutlineParseError) as ctx:
+            parse_outline_response(text, expected_chapters=5)
+        self.assertEqual(ctx.exception.raw_text, text)
+
+    def test_markdown_bold_headers(self):
+        # Antes: todo esto se parseaba como UN solo capitulo con el texto entero.
+        text = "**Chapter 1: The Call**\nA call.\n\n**Chapter 2: The Road**\nA road.\n\n**Chapter 3: Home**\nHome."
+        result = parse_outline_response(text, expected_chapters=3)
+        self.assertEqual([t for t, _ in result], ["The Call", "The Road", "Home"])
+        self.assertEqual(result[1][1], "A road.")
+
+    def test_bold_closing_after_the_colon(self):
+        text = "**Chapter 1:** The Call\nA call.\n\n**Chapter 2:** The Road\nA road."
+        self.assertEqual([t for t, _ in parse_outline_response(text, 2)], ["The Call", "The Road"])
+
+    def test_markdown_heading_headers_with_dashes_and_rules(self):
+        text = "### Chapter 1 - The Call\nA call.\n\n---\n\n### Chapter 2 — The Road\nA road."
+        result = parse_outline_response(text, expected_chapters=2)
+        self.assertEqual([t for t, _ in result], ["The Call", "The Road"])
+        self.assertEqual(result[0][1], "A call.")
+
+    def test_spelled_out_and_roman_numerals(self):
+        text = "Chapter One: Start\nx\n\nChapter Two: Middle\ny\n\nChapter III. End\nz"
+        self.assertEqual([t for t, _ in parse_outline_response(text, 3)], ["Start", "Middle", "End"])
+
+    def test_heading_without_title_gets_a_default_one(self):
+        text = "## Chapter 1\nEvents one.\n\n## Chapter 2\nEvents two."
+        self.assertEqual([t for t, _ in parse_outline_response(text, 2)], ["Chapter 1", "Chapter 2"])
+
+    def test_prose_line_starting_with_chapter_is_not_a_header(self):
+        text = "Chapter 1: Start\nChapter 3 ends with a storm, foreshadowed here.\n\nChapter 2: Next\nMore."
+        result = parse_outline_response(text, 2)
+        self.assertEqual([t for t, _ in result], ["Start", "Next"])
+        self.assertIn("ends with a storm", result[0][1])
 
     def test_empty_response_returns_empty_list(self):
         self.assertEqual(parse_outline_response("   ", expected_chapters=5), [])

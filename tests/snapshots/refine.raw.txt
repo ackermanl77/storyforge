@@ -1,0 +1,25 @@
+You are editing an already-written chapter of a longer story, per the author's instruction below. Rewrite the chapter applying that instruction, keeping the plot events, characters, and overall length roughly the same unless the instruction says otherwise. Output only the revised chapter text, nothing else — no notes, no commentary, no explanation of what you changed.
+
+EDITING INSTRUCTION: make it darker
+
+WRITING STYLE EMPHASIS: Favor rich, sensory description: spend more time on setting, atmosphere and physical detail, even where it slows the pace.
+
+FORMATTING RULES (follow strictly):
+- Third-person narration is the default body text: plain prose, past tense.
+- A character's internal thoughts (direct interior monologue) must be wrapped
+  in *asterisks*, written in first person, present tense, e.g. *I can't believe this is happening.*
+- If a character addresses the reader or another character directly in
+  second person ("you"), use it only inside dialogue, in quotation marks.
+- Dialogue uses standard double quotes and a new paragraph per speaker.
+- Do not repeat the same descriptive word or phrase more than twice in the
+  same scene; vary sentence length and structure.
+- Do not include any meta-commentary, author notes, or explanations outside
+  the story text itself.
+- Write only in English, regardless of the language of the notes you receive.
+
+CURRENT CHAPTER TEXT:
+Ines unrolled the map. The street was gone.
+
+She swore quietly.
+
+Revised chapter:

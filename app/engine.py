@@ -5,21 +5,131 @@ internet en tiempo de generacion.
 """
 from __future__ import annotations
 
+import gc
 import glob
 import os
+import random
 import re
 import sys
-from typing import Callable, List, Optional, Tuple
+import threading
+import time
+from collections import OrderedDict
+from dataclasses import dataclass, field
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
+from .chat_format import (
+    CHAT_FORMAT_AUTO,
+    ChatFormatter,
+    RawFormatter,
+    detect_formatter,
+    preset_formatter,
+)
+from .gguf import KV_CACHE_TYPES, friendly_load_error, list_model_entries, missing_shards, model_info
 from .project import MAX_CHAPTERS, MAX_WORDS_PER_CHAPTER, Project, count_words
 from .prompts import (
-    build_chapter_system_prompt,
-    build_continuation_prompt,
-    build_expand_field_prompt,
-    build_outline_prompt,
-    build_refine_chapter_prompt,
+    FINAL_SECTION_HINT,
+    NOT_OVER_NUDGE,
+    ChatPrompt,
+    build_beat_progress_hint,
+    build_chapter_continuation_chat,
+    build_chapter_start_chat,
+    build_combine_summaries_chat,
+    build_expand_field_chat,
+    build_outline_chat,
+    build_outline_completion_chat,
+    build_partial_summary_chat,
+    build_refine_chapter_chat,
+    build_rewrite_span_chat,
+    build_summary_chat,
     parse_outline_response,
 )
+from .sampling import (
+    MAX_SEED,
+    TASK_EXPAND,
+    TASK_OUTLINE,
+    TASK_PROSE,
+    TASK_REFINE,
+    TASK_SUMMARY,
+    SamplingConfig,
+)
+
+PromptLike = Union[str, ChatPrompt]
+
+# Valores de type_k/type_v de llama.cpp (enum ggml_type) para la cache KV.
+GGML_KV_TYPES = {"f16": 1, "q8_0": 8, "q4_0": 2}
+DEFAULT_N_BATCH = 512
+
+
+class OperationCancelled(RuntimeError):
+    """El usuario detuvo la operacion (boton Detener / Cancelar / Esc). La
+    operacion no modifico nada: el llamador conserva el texto original."""
+
+
+@dataclass
+class GenerationStats:
+    """
+    Estadisticas de la operacion en curso (o la ultima), para la barra de
+    estado: tokens/s, ETA, uso de la ventana de contexto y el prompt exacto
+    enviado ("Ver prompt"). El motor las actualiza desde el hilo de trabajo;
+    la interfaz las lee cada ~250 ms desde el hilo principal (solo lectura de
+    atributos simples, seguro con el GIL).
+    """
+    operation: str = ""
+    started_at: float = 0.0
+    finished: bool = False
+    calls: int = 0
+    prompt_tokens: int = 0
+    max_tokens: int = 0
+    n_ctx: int = 0
+    budget_level: int = 1  # nivel de CONTEXT_BUDGET_LEVELS usado (1 = el mas completo)
+    prompt_text: str = ""
+    generated_tokens: int = 0
+    prompt_eval_seconds: float = 0.0  # de la ultima llamada (hasta el primer token)
+    decode_seconds: float = 0.0  # acumulado, todas las llamadas
+    seed: Optional[int] = None
+    sampling: Dict[str, float] = field(default_factory=dict)
+    words_written: int = 0
+    target_words: int = 0
+    part: int = 0
+    total_parts: int = 0
+
+    @property
+    def tokens_per_second(self) -> Optional[float]:
+        if self.decode_seconds <= 0 or self.generated_tokens <= 1:
+            return None
+        return self.generated_tokens / self.decode_seconds
+
+    @property
+    def context_fraction(self) -> Optional[float]:
+        if not self.n_ctx:
+            return None
+        return min(1.0, (self.prompt_tokens + self.max_tokens) / self.n_ctx)
+
+    @property
+    def progress_fraction(self) -> Optional[float]:
+        if self.target_words > 0:
+            return min(1.0, self.words_written / self.target_words)
+        if self.total_parts > 0:
+            return min(1.0, max(0, self.part - 1) / self.total_parts)
+        return None
+
+    def eta_seconds(self) -> Optional[float]:
+        """Segundos restantes estimados (solo capitulos: palabras que faltan x
+        1.35 tokens/palabra / tokens por segundo)."""
+        tps = self.tokens_per_second
+        if not tps or self.target_words <= 0:
+            return None
+        remaining = max(0, self.target_words - self.words_written)
+        return remaining * 1.35 / tps
+
+
+@dataclass
+class CompletionResult:
+    """Texto generado (SIN recortar espacios) y por que termino: "stop"
+    (fin natural o secuencia de corte), "length" (se agoto max_tokens),
+    "cancelled", o None si el backend no lo informa (dobles de prueba)."""
+    text: str
+    finish_reason: Optional[str] = None
 
 # Palabras por "seccion" que le pedimos al modelo en cada llamada. Pedir de
 # mas puede degradar coherencia o exceder limites de generacion del modelo,
@@ -32,6 +142,17 @@ OUTLINE_WORDS_PER_CHAPTER = 100  # presupuesto de salida por capitulo al generar
 # Margen de salida al refinar: la version revisada puede salir algo mas larga
 # que el original ("agrega mas dialogo"), asi que se reserva un 30% extra.
 REFINE_OUTPUT_HEADROOM = 1.3
+# Si el modelo termina una seccion por su cuenta (finish_reason "stop") y ya
+# hay al menos esta fraccion del objetivo escrita, el capitulo se da por
+# terminado en vez de pedir otra seccion (que tendia a escribir un segundo
+# "final"). Por debajo, se pide seguir con un aviso de que no termine aun.
+NATURAL_END_FRACTION = 0.8
+# Al cortar un texto por max_tokens se descarta la oracion incompleta del
+# final solo si es corta (esta fraccion del texto como maximo): sin un
+# limite de oracion cerca, se conserva todo.
+MAX_DANGLING_FRACTION = 0.4
+# Cuantos conteos de tokens (texto -> tokens) se recuerdan (P4).
+TOKEN_CACHE_SIZE = 64
 
 # Secuencias de corte por defecto de _complete() (prosa de un capitulo: que el
 # modelo no empiece por su cuenta el capitulo siguiente). NO sirven para el
@@ -154,9 +275,11 @@ def supports_gpu_offload() -> bool:
 
 
 def find_local_models(models_dir: str) -> List[str]:
-    if not os.path.isdir(models_dir):
-        return []
-    return sorted(glob.glob(os.path.join(models_dir, "*.gguf")))
+    """Rutas cargables de models_dir: una por modelo (la primera parte de un
+    modelo partido en varios archivos); los modelos partidos incompletos no
+    se incluyen (ver gguf.list_model_entries para la lista completa con
+    etiquetas)."""
+    return [e.path for e in list_model_entries(models_dir) if e.complete]
 
 
 class LocalStoryEngine:
@@ -166,6 +289,60 @@ class LocalStoryEngine:
         self._llm = None
         self._model_path: Optional[str] = None
         self._n_ctx: int = 8192  # valor por defecto hasta que se cargue un modelo
+        # Formato de chat elegido (ver app/chat_format.py) y el formateador
+        # resuelto para el modelo actual. Se resuelve de forma diferida, la
+        # primera vez que hace falta, para el _llm que este cargado en ese
+        # momento (las pruebas inyectan _llm directamente, sin load()).
+        self._chat_format_choice: str = CHAT_FORMAT_AUTO
+        self._formatter: Optional[ChatFormatter] = None
+        self._formatter_llm = None
+        # finish_reason de la ultima llamada al modelo (ver CompletionResult).
+        self.last_finish_reason: Optional[str] = None
+        # Muestreo por tarea + semilla (ver app/sampling.py). La interfaz lo
+        # reemplaza con el del proyecto abierto.
+        self.sampling = SamplingConfig()
+        # Semilla usada por la ultima operacion (la elegida o la aleatoria).
+        self.last_seed: Optional[int] = None
+        self._op_seed: Optional[int] = None
+        # "Detener" global: cualquier llamada en curso lo revisa en cada token.
+        self._stop_event = threading.Event()
+        self.stats = GenerationStats()
+        self.load_options: Dict[str, object] = {}
+        self.model_info = None
+        # Cache de conteo de tokens (P4): los bloques fijos de un prompt se
+        # vuelven a medir en cada seccion y en cada intento de presupuesto.
+        self._token_cache: "OrderedDict[str, int]" = OrderedDict()
+        self._token_cache_llm = None
+
+    # ---------------- detener / estadisticas ----------------
+    def request_stop(self) -> None:
+        """Pide detener la operacion en curso (se nota en el proximo token)."""
+        self._stop_event.set()
+
+    def clear_stop(self) -> None:
+        self._stop_event.clear()
+
+    @property
+    def stop_requested(self) -> bool:
+        return self._stop_event.is_set()
+
+    def begin_operation(self, name: str, target_words: int = 0) -> GenerationStats:
+        """Reinicia las estadisticas y elige la semilla de esta operacion:
+        la fija del proyecto, o una aleatoria (que queda en last_seed para
+        poder repetir el resultado)."""
+        seed = self.sampling.seed
+        if seed is None:
+            seed = random.randint(0, MAX_SEED)
+        self._op_seed = seed
+        self.last_seed = seed
+        self.stats = GenerationStats(
+            operation=name, started_at=time.monotonic(), n_ctx=self._n_ctx, seed=seed,
+            target_words=target_words,
+        )
+        return self.stats
+
+    def _end_operation(self) -> None:
+        self.stats.finished = True
 
     @property
     def is_loaded(self) -> bool:
@@ -180,13 +357,39 @@ class LocalStoryEngine:
         return self._n_ctx
 
     def load(self, model_path: str, n_ctx: int = 8192, n_threads: Optional[int] = None,
-              n_gpu_layers: int = 0) -> None:
+              n_gpu_layers: int = 0, chat_format: Optional[str] = None,
+              flash_attn: Optional[bool] = None, n_batch: Optional[int] = None,
+              n_ubatch: Optional[int] = None, kv_cache_type: str = "f16") -> None:
+        """
+        Carga un GGUF. `n_ctx=0` usa el contexto con el que se entreno el
+        modelo (leido de la cabecera). Opciones de rendimiento (pestana
+        Modelo > Avanzado): `flash_attn` (por defecto: activado si hay
+        offload a GPU), `n_batch`/`n_ubatch` (tamano de lote al procesar el
+        prompt) y `kv_cache_type` ("f16", "q8_0" o "q4_0"; las cuantizadas
+        requieren flash attention, porque llama.cpp no admite una cache V
+        cuantizada sin ella).
+        """
+        if kv_cache_type not in KV_CACHE_TYPES:
+            raise ValueError(f"Tipo de cache KV desconocido: {kv_cache_type}")
+        if flash_attn is None:
+            flash_attn = n_gpu_layers != 0
+        if kv_cache_type != "f16" and not flash_attn:
+            raise ValueError(
+                f"La cache KV {kv_cache_type} requiere flash attention: activala o usa f16."
+            )
+        for name, value in (("n_batch", n_batch), ("n_ubatch", n_ubatch)):
+            if value is not None and value <= 0:
+                raise ValueError(f"{name} debe ser un entero mayor a 0.")
+        if n_ctx < 0:
+            raise ValueError("n_ctx no puede ser negativo (0 = el contexto entrenado del modelo).")
+        if chat_format is not None:
+            self.set_chat_format(chat_format)
         try:
             _ensure_cuda_dlls_discoverable()
             from llama_cpp import Llama
         except ImportError as exc:  # pragma: no cover - environment dependent
             raise RuntimeError(
-                "El paquete 'llama-cpp-python' no esta instalado. "
+                "El paquete 'llama-cpp-python' no está instalado. "
                 "Instala las dependencias con: pip install -r requirements.txt"
             ) from exc
         except Exception as exc:
@@ -196,15 +399,25 @@ class LocalStoryEngine:
             # desde el propio import -- antes eso llegaba al usuario como un
             # mensaje crudo en ingles sin pista de como resolverlo.
             raise RuntimeError(
-                "llama-cpp-python esta instalado, pero no se pudo cargar su libreria nativa "
-                "(llama.dll o alguna de las DLLs que necesita). Si instalaste la version con "
-                "CUDA, instala tambien las DLLs de runtime (pip install nvidia-cuda-runtime "
-                "nvidia-cublas, ver README > Rendimiento / GPU) o vuelve a la version "
+                "llama-cpp-python está instalado, pero no se pudo cargar su librería nativa "
+                "(llama.dll o alguna de las DLLs que necesita). Si instalaste la versión con "
+                "CUDA, instala también las DLLs de runtime (pip install nvidia-cuda-runtime "
+                "nvidia-cublas, ver README > Rendimiento / GPU) o vuelve a la versión "
                 f"solo-CPU.\n\nDetalle: {exc}"
             ) from exc
 
         if not os.path.isfile(model_path):
-            raise FileNotFoundError(f"No se encontro el modelo en: {model_path}")
+            raise FileNotFoundError(f"No se encontró el modelo en: {model_path}")
+        missing = missing_shards(model_path)
+        if missing:
+            raise RuntimeError(
+                "Este modelo está partido en varios archivos y faltan las partes "
+                f"{', '.join(map(str, missing))} en la carpeta. Descarga todas las partes "
+                "y ponlas juntas; se carga la parte 00001."
+            )
+        info = model_info(model_path)
+        if n_ctx == 0 and not info.trained_context:
+            n_ctx = 8192
 
         # Soltamos el modelo anterior (si habia uno) antes de reservar memoria
         # para el nuevo: construir el Llama nuevo antes de liberar el viejo
@@ -212,19 +425,125 @@ class LocalStoryEngine:
         # modelos de varios GB puede agotar la memoria disponible.
         self.unload()
 
-        self._llm = Llama(
+        kwargs = dict(
             model_path=model_path,
             n_ctx=n_ctx,
             n_threads=n_threads,
             n_gpu_layers=n_gpu_layers,
             verbose=False,
         )
+        # Solo se pasan si difieren de los valores por defecto de llama.cpp,
+        # asi un doble de prueba (o una version vieja) sin esos argumentos
+        # sigue funcionando.
+        if flash_attn:
+            kwargs["flash_attn"] = True
+        if n_batch:
+            kwargs["n_batch"] = n_batch
+        if n_ubatch:
+            kwargs["n_ubatch"] = n_ubatch
+        if kv_cache_type != "f16":
+            kwargs["type_k"] = GGML_KV_TYPES[kv_cache_type]
+            kwargs["type_v"] = GGML_KV_TYPES[kv_cache_type]
+        try:
+            self._llm = Llama(**kwargs)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(friendly_load_error(exc, model_path)) from exc
         self._model_path = model_path
-        self._n_ctx = n_ctx
+        # El contexto REAL (con n_ctx=0, llama.cpp usa el del entrenamiento).
+        actual = None
+        n_ctx_getter = getattr(self._llm, "n_ctx", None)
+        if callable(n_ctx_getter):
+            try:
+                actual = int(n_ctx_getter())
+            except Exception:  # noqa: BLE001
+                actual = None
+        self._n_ctx = actual if actual and actual > 0 else (n_ctx or info.trained_context or 8192)
+        self.model_info = info
+        self.load_options = dict(
+            n_ctx=self._n_ctx, n_threads=n_threads, n_gpu_layers=n_gpu_layers,
+            flash_attn=bool(flash_attn), n_batch=n_batch, n_ubatch=n_ubatch, kv_cache_type=kv_cache_type,
+        )
 
     def unload(self) -> None:
+        llm = self._llm
         self._llm = None
         self._model_path = None
+        self._formatter = None
+        self._formatter_llm = None
+        self.model_info = None
+        self._token_cache.clear()
+        # Llama.close() (llama-cpp-python >= 0.2.8x) libera la VRAM/RAM del
+        # modelo en el momento, en vez de depender de cuando pase el
+        # recolector de basura -- load() llama a unload() justamente para no
+        # tener dos modelos residentes a la vez.
+        close = getattr(llm, "close", None)
+        if callable(close):
+            try:
+                close()
+            except Exception:  # noqa: BLE001
+                pass
+        if llm is not None:
+            del llm
+            gc.collect()
+
+    # ---------------- formato de chat ----------------
+    @property
+    def chat_format_choice(self) -> str:
+        return self._chat_format_choice
+
+    def set_chat_format(self, choice: str) -> None:
+        """Elige el formato de chat ("auto", "llama3", "raw", ... -- ver
+        app/chat_format.py). Se aplica en la proxima llamada al modelo."""
+        self._chat_format_choice = choice or CHAT_FORMAT_AUTO
+        self._formatter = None
+        self._formatter_llm = None
+
+    def _has_special_token(self, text: str) -> bool:
+        """True si `text` es UN solo token especial del vocabulario del
+        modelo cargado (p.ej. "<|start_header_id|>" en Llama 3)."""
+        try:
+            tokens = self._llm.tokenize(text.encode("utf-8"), add_bos=False, special=True)
+        except Exception:  # noqa: BLE001 - dobles de prueba sin tokenize()
+            return False
+        return len(tokens) == 1
+
+    def _special_token_text(self, token_id_getter: str) -> str:
+        try:
+            token_id = getattr(self._llm, token_id_getter)()
+            if token_id is None or token_id < 0:
+                return ""
+            return self._llm.detokenize([token_id], special=True).decode("utf-8", errors="ignore")
+        except Exception:  # noqa: BLE001
+            return ""
+
+    @property
+    def formatter(self) -> ChatFormatter:
+        """Formateador de chat para el modelo cargado ahora (resuelto una vez
+        por modelo). Sin modelo, o con un doble de prueba sin metadatos ni
+        tokenizador, "auto" resuelve a completion cruda."""
+        if self._formatter is not None and self._formatter_llm is self._llm:
+            return self._formatter
+        if self._llm is None:
+            return RawFormatter()
+        if self._chat_format_choice == CHAT_FORMAT_AUTO:
+            metadata = getattr(self._llm, "metadata", None)
+            formatter = detect_formatter(
+                metadata if isinstance(metadata, dict) else {},
+                self._has_special_token,
+                bos_token=self._special_token_text("token_bos"),
+                eos_token=self._special_token_text("token_eos"),
+            )
+        else:
+            formatter = preset_formatter(self._chat_format_choice)
+        self._formatter = formatter
+        self._formatter_llm = self._llm
+        return formatter
+
+    def render_prompt(self, prompt: PromptLike) -> str:
+        """El texto exacto que se enviaria al modelo para `prompt`."""
+        if isinstance(prompt, str):
+            return prompt
+        return self.formatter.render(prompt)
 
     # ---------------- manejo de contexto / tokens ----------------
     def _count_tokens(self, text: str) -> int:
@@ -234,10 +553,22 @@ class LocalStoryEngine:
         pruebas), cae a una estimacion por palabras.
         """
         if self._llm is not None:
+            if self._token_cache_llm is not self._llm:
+                self._token_cache.clear()
+                self._token_cache_llm = self._llm
+            cached = self._token_cache.get(text)
+            if cached is not None:
+                self._token_cache.move_to_end(text)
+                return cached
             try:
-                return len(self._llm.tokenize(text.encode("utf-8", errors="ignore")))
+                count = len(self._llm.tokenize(text.encode("utf-8", errors="ignore")))
             except Exception:
-                pass
+                count = None
+            if count is not None:
+                self._token_cache[text] = count
+                while len(self._token_cache) > TOKEN_CACHE_SIZE:
+                    self._token_cache.popitem(last=False)
+                return count
         return int(len(text.split()) * TOKENS_PER_WORD_ESTIMATE)
 
     def _available_context(self, reserved_for_output: int) -> int:
@@ -278,16 +609,57 @@ class LocalStoryEngine:
 
     def _complete(
         self,
-        prompt: str,
+        prompt: PromptLike,
         max_tokens: int,
         stop: Optional[List[str]] = None,
         on_token: Optional[Callable[[str], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
+        task: str = TASK_PROSE,
     ) -> str:
+        """Igual que _complete_ex(), pero devuelve solo el texto, recortado.
+        Si el usuario detuvo la operacion, lanza OperationCancelled (el texto
+        parcial de un resumen/refinado/esquema no sirve)."""
+        result = self._complete_ex(prompt, max_tokens, stop, on_token, cancel_check, task=task)
+        if result.finish_reason == "cancelled":
+            raise OperationCancelled("Operación detenida por el usuario.")
+        return result.text.strip()
+
+    def _is_cancelled(self, cancel_check: Optional[Callable[[], bool]]) -> bool:
+        return self._stop_event.is_set() or bool(cancel_check and cancel_check())
+
+    def _sampling_kwargs(self, task: str) -> dict:
+        kwargs = self.sampling.for_task(task).to_kwargs()
+        seed = self._op_seed if self._op_seed is not None else self.sampling.seed
+        if seed is not None:
+            kwargs["seed"] = seed
+        return kwargs
+
+    def _complete_ex(
+        self,
+        prompt: PromptLike,
+        max_tokens: int,
+        stop: Optional[List[str]] = None,
+        on_token: Optional[Callable[[str], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        task: str = TASK_PROSE,
+    ) -> CompletionResult:
+        """
+        Una llamada al modelo. `prompt` puede ser texto ya armado o un
+        ChatPrompt, que se renderiza con el formato de chat del modelo (ver
+        render_prompt). Devuelve el texto SIN recortar (al continuar desde un
+        texto pre-llenado, el espacio inicial es parte de la continuacion) y
+        el finish_reason que informa llama.cpp ("cancelled" si se detuvo).
+
+        Usa el muestreo de `task` (app/sampling.py) y la semilla de la
+        operacion (begin_operation). Se pide streaming si hay alguien
+        escuchando tokens o alguien que pueda cancelar (cancel_check), asi
+        "Detener" corta a mitad de la respuesta.
+        """
         if self._llm is None:
             raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
 
-        prompt_tokens = self._count_tokens(prompt)
+        text_prompt = self.render_prompt(prompt)
+        prompt_tokens = self._count_tokens(text_prompt)
         available = self._available_context(max_tokens)
         if prompt_tokens > available:
             raise ContextOverflowError(
@@ -295,103 +667,161 @@ class LocalStoryEngine:
                 f"contexto del modelo ({self._n_ctx:,} tokens) junto con el espacio reservado "
                 f"para la respuesta ({max_tokens:,} tokens)."
             )
+        if self._is_cancelled(cancel_check):
+            self.last_finish_reason = "cancelled"
+            return CompletionResult("", "cancelled")
 
-        call_kwargs = dict(
-            max_tokens=max_tokens,
-            temperature=0.85,
-            top_p=0.92,
-            repeat_penalty=1.15,
-            stop=stop or DEFAULT_PROSE_STOP,
-        )
+        stops = list(stop or DEFAULT_PROSE_STOP)
+        if not isinstance(prompt, str):
+            stops += [s for s in self.formatter.stop if s and s not in stops]
+        call_kwargs = dict(max_tokens=max_tokens, stop=stops)
+        call_kwargs.update(self._sampling_kwargs(task))
         # Solo pedimos streaming token a token (llama_cpp.Llama.__call__(...,
         # stream=True), que devuelve un generador en vez de un dict) cuando
-        # hay alguien escuchando -- summarize()/expand_field()/
-        # generate_outline()/refine_chapter() no pasan on_token y siguen
-        # pidiendo la respuesta completa de una sola vez, sin el overhead
-        # extra de iterar chunk por chunk para algo que no se muestra en vivo.
-        if on_token is not None:
+        # hay alguien escuchando o alguien que puede cancelar.
+        if on_token is not None or cancel_check is not None:
             call_kwargs["stream"] = True
 
-        response = self._llm(prompt, **call_kwargs)
+        stats = self.stats
+        stats.calls += 1
+        stats.prompt_tokens = prompt_tokens
+        stats.max_tokens = max_tokens
+        stats.n_ctx = self._n_ctx
+        stats.prompt_text = text_prompt
+        stats.seed = call_kwargs.get("seed")
+        stats.sampling = {k: v for k, v in call_kwargs.items() if k not in ("stop", "stream", "max_tokens", "seed")}
+        call_start = time.monotonic()
+
+        response = self._llm(text_prompt, **call_kwargs)
 
         if isinstance(response, dict):
             # Respuesta no incremental: ya sea porque no se pidio streaming,
-            # o porque _llm (p.ej. un doble de prueba, o una version de
-            # llama_cpp que ignora stream=True) devolvio el resultado
-            # completo de una. Se trata igual en ambos casos -- si hay
-            # on_token, se le entrega el texto completo de una sola vez en
-            # vez de por fragmentos, para no perder la actualizacion.
-            text = response["choices"][0]["text"]
+            # o porque _llm (p.ej. un doble de prueba) devolvio el resultado
+            # completo de una. Si hay on_token, se le entrega el texto
+            # completo de una sola vez.
+            choice = response["choices"][0]
+            text = choice.get("text", "")
+            elapsed = time.monotonic() - call_start
+            usage = response.get("usage") or {}
+            stats.generated_tokens += int(usage.get("completion_tokens") or (self._count_tokens(text) if text else 0))
+            stats.decode_seconds += elapsed
             if on_token is not None and text:
                 on_token(text)
-            return text.strip()
+            self.last_finish_reason = choice.get("finish_reason")
+            return CompletionResult(text, self.last_finish_reason)
 
         # Streaming real: `response` es un generador de fragmentos, cada uno
-        # con un delta incremental de texto (NO acumulado) en
-        # choices[0]["text"] -- el formato propio de llama_cpp en modo
-        # stream. Revisar cancel_check aqui (no solo entre secciones, como
-        # antes de este cambio) deja que Cancelar corte la generacion a
-        # mitad de una seccion en vez de tener que esperar a que termine.
+        # con un delta incremental de texto (NO acumulado; ~1 token cada
+        # uno). El ultimo trae finish_reason. La cancelacion se revisa en
+        # cada fragmento, asi que Cancelar/Detener corta a mitad de una seccion.
         pieces: List[str] = []
-        for chunk in response:
-            if cancel_check and cancel_check():
-                break
-            delta = chunk["choices"][0].get("text", "")
-            if not delta:
-                continue
-            pieces.append(delta)
-            if on_token is not None:
-                on_token(delta)
-        return "".join(pieces).strip()
+        finish_reason: Optional[str] = None
+        first_token_at: Optional[float] = None
+        try:
+            for chunk in response:
+                if self._is_cancelled(cancel_check):
+                    finish_reason = "cancelled"
+                    break
+                now = time.monotonic()
+                if first_token_at is None:
+                    first_token_at = now
+                    stats.prompt_eval_seconds = now - call_start
+                    decode_base = stats.decode_seconds
+                stats.generated_tokens += 1
+                stats.decode_seconds = decode_base + (now - first_token_at)
+                choice = chunk["choices"][0]
+                if choice.get("finish_reason"):
+                    finish_reason = choice["finish_reason"]
+                delta = choice.get("text", "")
+                if not delta:
+                    continue
+                pieces.append(delta)
+                if on_token is not None:
+                    on_token(delta)
+        finally:
+            # Cortar el generador de llama-cpp-python lo cierra limpiamente.
+            close = getattr(response, "close", None)
+            if finish_reason == "cancelled" and callable(close):
+                try:
+                    close()
+                except Exception:  # noqa: BLE001
+                    pass
+        self.last_finish_reason = finish_reason
+        return CompletionResult("".join(pieces), finish_reason)
 
     def _complete_with_shrinking_budget(
         self,
-        prompt_for_budget: Callable[[dict], str],
+        prompt_for_budget: Callable[[dict], PromptLike],
         max_tokens: int,
         on_token: Optional[Callable[[str], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
         stop: Optional[List[str]] = None,
+        task: str = TASK_PROSE,
     ) -> str:
+        result = self._complete_with_shrinking_budget_ex(
+            prompt_for_budget, max_tokens, on_token, cancel_check, stop, task=task,
+        )
+        if result.finish_reason == "cancelled":
+            raise OperationCancelled("Operación detenida por el usuario.")
+        return result.text.strip()
+
+    def _complete_with_shrinking_budget_ex(
+        self,
+        prompt_for_budget: Callable[[dict], PromptLike],
+        max_tokens: int,
+        on_token: Optional[Callable[[str], None]] = None,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        stop: Optional[List[str]] = None,
+        task: str = TASK_PROSE,
+    ) -> CompletionResult:
         """
         Intenta completar con cada nivel de CONTEXT_BUDGET_LEVELS (de mayor a
         menor contexto incluido) hasta que uno quepa en la ventana de
         contexto del modelo. `prompt_for_budget` recibe un dict de budget y
-        devuelve el prompt completo a intentar con ese nivel. `on_token`/
-        `cancel_check` se pasan tal cual a `_complete()` -- ver ahi.
+        devuelve el prompt completo a intentar con ese nivel.
         """
         last_error: Optional[Exception] = None
-        for budget in CONTEXT_BUDGET_LEVELS:
+        for level, budget in enumerate(CONTEXT_BUDGET_LEVELS, start=1):
+            self.stats.budget_level = level
             try:
-                return self._complete(
+                return self._complete_ex(
                     prompt_for_budget(budget), max_tokens=max_tokens, stop=stop,
-                    on_token=on_token, cancel_check=cancel_check,
+                    on_token=on_token, cancel_check=cancel_check, task=task,
                 )
             except ContextOverflowError as exc:
                 last_error = exc
                 continue
         raise ContextOverflowError(
-            "Incluso reduciendo al minimo el contexto (plot, personajes, setting y "
+            "Incluso reduciendo al mínimo el contexto (plot, personajes, setting y "
             "resumen previo), el prompt sigue sin caber en la ventana de contexto de "
-            "este modelo. Prueba con un plot, personajes o setting mas cortos, un "
+            "este modelo. Prueba con un plot, personajes o setting más cortos, un "
             "objetivo de palabras menor, o carga el modelo con un n_ctx mayor si tu "
             "hardware lo permite."
         ) from last_error
 
-    def generate_outline(self, project: Project, num_chapters: int) -> List[Tuple[str, str]]:
+    def generate_outline(
+        self, project: Project, num_chapters: int,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        on_token: Optional[Callable[[str], None]] = None,
+    ) -> List[Tuple[str, str]]:
         """
         Genera un esquema (beat sheet) de toda la historia antes de escribir
-        prosa: una lista de (titulo, beats) por capitulo. Hacer esto primero
-        ayuda mucho a que una historia de varios capitulos mantenga
-        coherencia narrativa de principio a fin.
+        prosa: una lista de (titulo, beats) por capitulo. Lanza
+        prompts.OutlineParseError si la respuesta no tiene ningun encabezado
+        de capitulo reconocible, y OperationCancelled si se detuvo. Despues
+        de llamar, `last_finish_reason == "length"` indica que la respuesta
+        se corto por max_tokens (el esquema puede tener menos capitulos de
+        los pedidos; ver complete_outline()).
         """
         if self._llm is None:
             raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
 
+        self.begin_operation("Esquema")
         num_chapters = max(1, min(int(num_chapters), MAX_CHAPTERS))
         max_tokens = int(num_chapters * OUTLINE_WORDS_PER_CHAPTER * TOKENS_PER_WORD_ESTIMATE) + 60
 
-        def prompt_for_budget(budget: dict) -> str:
-            return build_outline_prompt(
+        def prompt_for_budget(budget: dict) -> ChatPrompt:
+            return build_outline_chat(
                 project, num_chapters,
                 max_plot_words=budget["max_plot_words"],
                 max_characters_words=budget["max_characters_words"],
@@ -401,8 +831,100 @@ class LocalStoryEngine:
         # stop explicito: con el corte por defecto ("\n\nChapter") el modelo
         # se detenia justo al empezar "Chapter 2:" y el esquema salia con un
         # solo capitulo.
-        raw = self._complete_with_shrinking_budget(prompt_for_budget, max_tokens, stop=ONLY_END_MARKER_STOP)
+        try:
+            raw = self._complete_with_shrinking_budget(
+                prompt_for_budget, max_tokens, on_token=on_token, cancel_check=cancel_check,
+                stop=ONLY_END_MARKER_STOP, task=TASK_OUTLINE,
+            )
+        finally:
+            self._end_operation()
         return parse_outline_response(raw, num_chapters)
+
+    def complete_outline(
+        self, project: Project, num_chapters: int, existing: List[Tuple[str, str]],
+        cancel_check: Optional[Callable[[], bool]] = None,
+        on_token: Optional[Callable[[str], None]] = None,
+    ) -> List[Tuple[str, str]]:
+        """
+        "Completar capitulos faltantes": cuando el esquema salio con menos
+        capitulos de los pedidos (respuesta cortada), pide solo los que
+        faltan, con los ya planeados como contexto. Devuelve SOLO los
+        capitulos nuevos (a lo sumo num_chapters - len(existing)).
+        """
+        if self._llm is None:
+            raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
+        num_chapters = max(1, min(int(num_chapters), MAX_CHAPTERS))
+        missing = num_chapters - len(existing)
+        if missing <= 0:
+            return []
+        self.begin_operation("Completar esquema")
+        max_tokens = int(missing * OUTLINE_WORDS_PER_CHAPTER * TOKENS_PER_WORD_ESTIMATE) + 60
+
+        def prompt_for_budget(budget: dict) -> ChatPrompt:
+            return build_outline_completion_chat(
+                project, num_chapters, existing,
+                max_plot_words=budget["max_plot_words"],
+                max_characters_words=budget["max_characters_words"],
+                max_setting_words=budget["max_setting_words"],
+            )
+
+        try:
+            raw = self._complete_with_shrinking_budget(
+                prompt_for_budget, max_tokens, on_token=on_token, cancel_check=cancel_check,
+                stop=ONLY_END_MARKER_STOP, task=TASK_OUTLINE,
+            )
+        finally:
+            self._end_operation()
+        items = parse_outline_response(raw, MAX_CHAPTERS)
+        # Si el modelo repitio capitulos ya planeados al principio, se
+        # descartan los que coinciden por titulo.
+        known = {title.strip().lower() for title, _ in existing}
+        items = [item for item in items if item[0].strip().lower() not in known]
+        return items[:missing]
+
+    # ---------------- capitulos ----------------
+    def _dynamic_tail_words(
+        self, build: Callable[[int], ChatPrompt], full_text: str, min_tail: int, max_tokens: int,
+    ) -> int:
+        """
+        Cuantas palabras del capitulo en curso caben en el prompt de
+        continuacion: despues de medir los bloques fijos (biblia, esquema,
+        instrucciones), se llena el espacio libre de la ventana de contexto
+        con todo lo que quepa del texto ya escrito, medido en tokens reales.
+        Nunca menos que `min_tail` (el tamano fijo del nivel de presupuesto):
+        si ni eso cabe, el nivel de presupuesto siguiente se encarga.
+        """
+        total_words = len(full_text.split())
+        if total_words <= min_tail:
+            return min_tail
+        limit = self._available_context(max_tokens)
+        fixed = self._count_tokens(self.render_prompt(build(0)))
+        free = limit - fixed
+        words = min(total_words, MAX_WORDS_PER_CHAPTER, int(free / TOKENS_PER_WORD_ESTIMATE))
+        if words <= min_tail:
+            return min_tail
+        while words > min_tail and self._count_tokens(self.render_prompt(build(words))) > limit:
+            words = int(words * 0.85)
+        return max(words, min_tail)
+
+    @staticmethod
+    def _trim_dangling_sentence(text: str) -> Tuple[str, bool]:
+        """
+        Si `text` termina a mitad de una oracion (cortado por max_tokens),
+        descarta ese fragmento final siempre que haya un fin de oracion
+        cerca (ver MAX_DANGLING_FRACTION). Devuelve (texto, se_recorto).
+        """
+        stripped = text.rstrip()
+        if not stripped or stripped[-1] in ".!?\"”*)":
+            return stripped, False
+        last_end = max(stripped.rfind(p) for p in (". ", "! ", "? ", ".\"", "!\"", "?\"",
+                                                    ".”", "!”", "?”", ".\n", "!\n", "?\n"))
+        if last_end < 0:
+            return stripped, False
+        cut = last_end + 2 if stripped[last_end + 1] in "\"”" else last_end + 1
+        if len(stripped) - cut > len(stripped) * MAX_DANGLING_FRACTION:
+            return stripped, False
+        return stripped[:cut].rstrip(), True
 
     def generate_chapter(
         self,
@@ -410,186 +932,369 @@ class LocalStoryEngine:
         chapter_index: int,
         progress_callback: Optional[Callable[[str, int, int], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
+        resume_from: Optional[str] = None,
     ) -> str:
         """
-        Genera un capitulo completo por secciones hasta acercarse al objetivo
-        de palabras (o hasta MAX_SECTIONS_PER_CHAPTER). Cada seccion se pide
-        con streaming token a token (llama_cpp.Llama.__call__(..., stream=
-        True) via _complete()) cuando hay progress_callback: en vez de
-        esperar a que toda la seccion (~900 palabras) termine para recien
-        entonces notificar, progress_callback recibe actualizaciones mucho
-        mas frecuentes -- (texto_generado_hasta_ahora, palabras_actuales,
-        palabras_objetivo), igual firma de siempre, pero ahora incluyendo el
-        texto parcial de la seccion en curso, no solo secciones ya
-        completas. El llamador (app/gui.py) es responsable de no reaccionar
-        a cada llamada con una actualizacion de UI -- ver el throttling ahi.
+        Genera un capitulo por secciones (~SECTION_TARGET_WORDS cada una)
+        hasta acercarse al objetivo de palabras (o MAX_SECTIONS_PER_CHAPTER).
 
-        cancel_check tambien se revisa dentro de cada seccion (no solo entre
-        secciones, como antes de que existiera streaming), asi que Cancelar
-        ahora puede cortar la generacion a mitad de una seccion en vez de
-        tener que esperar a que termine.
-
-        Si el prompt de una seccion no cabe en la ventana de contexto del
-        modelo, se reintenta automaticamente con un contexto mas chico
-        (CONTEXT_BUDGET_LEVELS) antes de propagar ContextOverflowError.
+        - `resume_from`: texto ya escrito del capitulo desde el cual
+          CONTINUAR (boton "Continuar" / "Continuar desde el cursor") en vez
+          de empezar de cero. Si ya alcanza el objetivo, se agrega una
+          seccion mas.
+        - Cada seccion se transmite token a token a `progress_callback(texto
+          acumulado, palabras, objetivo)` cuando se pasa, y `cancel_check` se
+          revisa en cada fragmento.
+        - finish_reason: si una seccion se corta por max_tokens, la
+          siguiente continua la misma oracion/parrafo (en modo chat, el final
+          del texto va pre-llenado en la respuesta del modelo; en modo crudo
+          se descarta la oracion incompleta y se une con un espacio, no con
+          un salto de parrafo). Si el modelo termina solo y ya hay
+          NATURAL_END_FRACTION del objetivo, el capitulo se da por
+          terminado; si no, la siguiente seccion le pide no cerrar todavia.
+        - Si el prompt de una seccion no cabe en la ventana de contexto, se
+          reintenta con un contexto mas chico (CONTEXT_BUDGET_LEVELS).
         """
         chapter = project.chapters[chapter_index]
         target = chapter.target_words
 
-        full_text = ""
+        full_text = (resume_from or "").rstrip()
+        if full_text and count_words(full_text) >= target:
+            target = min(count_words(full_text) + SECTION_TARGET_WORDS, MAX_WORDS_PER_CHAPTER)
+        stats = self.begin_operation(f"Capítulo {chapter_index + 1}", target_words=target)
+        stats.words_written = count_words(full_text)
+        try:
+            return self._generate_chapter_sections(
+                project, chapter_index, chapter, target, full_text, progress_callback, cancel_check,
+            )
+        finally:
+            self._end_operation()
+
+    @staticmethod
+    def _is_word_char(ch: str) -> bool:
+        return ch.isalnum() or ch in "_'-"
+
+    def _generate_chapter_sections(
+        self, project: Project, chapter_index: int, chapter, target: int, full_text: str,
+        progress_callback: Optional[Callable[[str, int, int], None]],
+        cancel_check: Optional[Callable[[], bool]],
+    ) -> str:
+
+        # Como se une la proxima seccion en modo crudo: salto de parrafo
+        # salvo que la anterior se haya cortado a mitad de parrafo.
+        raw_joiner = "\n\n"
+        nudge = False
+        last_finish: Optional[str] = None
         section = 0
         while count_words(full_text) < target and section < MAX_SECTIONS_PER_CHAPTER:
-            if cancel_check and cancel_check():
+            if self._is_cancelled(cancel_check):
                 break
             written = count_words(full_text)
             remaining = max(target - written, 200)
             section_words = min(SECTION_TARGET_WORDS, remaining + 150)
             # La ultima seccion no debe empujar el capitulo por encima de
-            # MAX_WORDS_PER_CHAPTER: con el piso de 200 + 150 palabras de
-            # arriba, un objetivo de 10,000 podia terminar en ~10,300.
+            # MAX_WORDS_PER_CHAPTER.
             section_words = min(section_words, MAX_WORDS_PER_CHAPTER - written)
             if section_words <= 0:
                 break
             max_tokens = int(section_words * TOKENS_PER_WORD_ESTIMATE)
 
-            def prompt_for_budget(budget: dict, _section=section, _remaining=remaining) -> str:
-                system_prompt = build_chapter_system_prompt(
-                    project, chapter_index,
-                    max_plot_words=budget["max_plot_words"],
-                    max_characters_words=budget["max_characters_words"],
-                    max_setting_words=budget["max_setting_words"],
-                    max_previous_words=budget["max_previous_words"],
-                    max_outline_words=budget["max_outline_words"],
-                    max_lore_words=budget["max_lore_words"],
-                )
-                if _section == 0:
-                    return f"{system_prompt}\n\nBegin the chapter now:\n"
-                cont = build_continuation_prompt(full_text, _remaining, tail_words=budget["tail_words"])
-                return f"{system_prompt}\n\n{cont}\n"
+            hints: List[str] = []
+            if full_text:
+                hints.append(build_beat_progress_hint(chapter.outline, written, target))
+                if nudge:
+                    hints.append(NOT_OVER_NUDGE)
+                elif target - written <= section_words:
+                    hints.append(FINAL_SECTION_HINT)
 
-            # base_text se captura AHORA (no dentro de on_token, que se
-            # llama repetidamente mientras se generan tokens) para que cada
-            # actualizacion parcial de esta seccion se combine con el texto
-            # de las secciones YA completadas, no con lo que full_text valga
-            # en el momento en que finalmente se invoque cada callback.
+            def prompt_for_budget(budget: dict, _text=full_text, _remaining=remaining, _hints=hints) -> ChatPrompt:
+                if not _text:
+                    return build_chapter_start_chat(project, chapter_index, budget)
+
+                def build(tail_words: int) -> ChatPrompt:
+                    return build_chapter_continuation_chat(
+                        project, chapter_index, budget, _text, _remaining, tail_words, hints=_hints,
+                    )
+
+                tail = self._dynamic_tail_words(build, _text, budget["tail_words"], max_tokens)
+                return build(tail)
+
+            # En modo chat, al continuar, el final del capitulo va pre-llenado
+            # en la respuesta: el modelo sigue escribiendo desde ahi mismo,
+            # asi que su salida se pega tal cual (con su espacio inicial).
+            prefilled = bool(full_text) and self.formatter.is_chat
             base_text = full_text
-            section_piece = {"text": ""}
+            joiner = "" if prefilled or not base_text else raw_joiner
+            # B13: el conteo de palabras se mantiene INCREMENTAL (solo se
+            # cuentan las palabras del fragmento nuevo, corrigiendo la palabra
+            # que queda partida entre fragmentos) en vez de recontar todo el
+            # capitulo en cada token: eso era O(n) por token y, con un
+            # capitulo de 10k palabras, ~0.7 ms por token con el GIL tomado.
+            base_words = count_words(base_text)
+            section_piece = {"parts": [], "words": 0, "last_char": ""}
+            if base_text and prefilled:
+                section_piece["last_char"] = base_text[-1]
 
-            def on_token(delta: str, _base=base_text, _piece=section_piece) -> None:
-                _piece["text"] += delta
+            def on_token(delta: str, _base=base_text, _joiner=joiner, _piece=section_piece,
+                         _prefilled=prefilled, _base_words=base_words) -> None:
+                if not _piece["parts"] and not _prefilled:
+                    delta = delta.lstrip()
+                    if not delta:
+                        return
+                _piece["parts"].append(delta)
+                words = count_words(delta)
+                if (words and _piece["last_char"] and self._is_word_char(_piece["last_char"])
+                        and self._is_word_char(delta[0])):
+                    words -= 1  # la misma palabra continua desde el fragmento anterior
+                _piece["words"] += words
+                _piece["last_char"] = delta[-1]
+                self.stats.words_written = _base_words + _piece["words"]
                 if progress_callback:
-                    combined = f"{_base}\n\n{_piece['text']}".strip() if _base else _piece["text"]
-                    progress_callback(combined, count_words(combined), target)
+                    piece_so_far = "".join(_piece["parts"])
+                    combined = f"{_base}{_joiner}{piece_so_far}" if _base else piece_so_far
+                    progress_callback(combined, self.stats.words_written, target)
 
             try:
-                piece = self._complete_with_shrinking_budget(
+                result = self._complete_with_shrinking_budget_ex(
                     prompt_for_budget, max_tokens,
                     on_token=on_token if progress_callback else None,
                     cancel_check=cancel_check,
                 )
             except ContextOverflowError as exc:
                 raise ContextOverflowError(
-                    f"No fue posible generar esta seccion del capitulo: {exc}"
+                    f"No fue posible generar esta sección del capítulo: {exc}"
                 ) from exc
 
-            if not piece:
+            last_finish = result.finish_reason
+            piece = result.text.rstrip() if prefilled else result.text.strip()
+            if not piece.strip():
                 break
-            full_text = (full_text + "\n\n" + piece).strip() if full_text else piece
+            if last_finish == "length" and not prefilled and not self.formatter.is_chat:
+                # Modo crudo: la proxima seccion empieza texto nuevo, asi que
+                # la oracion cortada se descarta y se sigue en el mismo parrafo.
+                piece, _trimmed = self._trim_dangling_sentence(piece)
+                raw_joiner = " "
+            elif last_finish == "length":
+                raw_joiner = " "
+            else:
+                raw_joiner = "\n\n"
+            full_text = f"{base_text}{joiner}{piece}" if base_text else piece
             section += 1
+            nudge = False
+            self.stats.words_written = count_words(full_text)
             if progress_callback:
-                progress_callback(full_text, count_words(full_text), target)
+                progress_callback(full_text, self.stats.words_written, target)
 
+            if last_finish == "cancelled":
+                break
+            if last_finish == "stop" and count_words(full_text) < target:
+                if count_words(full_text) >= NATURAL_END_FRACTION * target:
+                    break  # el modelo cerro el capitulo por su cuenta
+                nudge = True
+
+        if last_finish == "length":
+            # El capitulo no deberia terminar a mitad de una oracion.
+            trimmed, was_trimmed = self._trim_dangling_sentence(full_text)
+            if was_trimmed:
+                full_text = trimmed
+                if progress_callback:
+                    progress_callback(full_text, count_words(full_text), target)
         return full_text
 
-    def summarize(self, text: str, max_words: int = 150) -> str:
+    # ---------------- resumen / expandir / refinar ----------------
+    def summarize(
+        self, text: str, max_words: int = 150,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+    ) -> str:
         """
         Genera un resumen corto de un capitulo, para dar contexto al
-        siguiente. Recorta el capitulo (conservando inicio y final) si por si
-        solo ya no cabria en la ventana de contexto del modelo.
+        siguiente. Si el capitulo entero no cabe en la ventana de contexto,
+        ya no se recorta (antes se conservaban inicio y final y los eventos
+        del medio nunca llegaban al resumen): se resume por partes
+        consecutivas y despues se resumen esos resumenes
+        (`progress_callback(parte, total)`). Lanza OperationCancelled si se
+        detiene.
+
+        Nota (B2 d): no se resume seccion por seccion DURANTE la generacion:
+        eso agregaria una llamada al modelo por seccion y pisaria el prefijo
+        reutilizable de la cache KV entre secciones; este resumen por partes
+        cubre el mismo objetivo (que cualquier capitulo quepa) al final.
         """
         if self._llm is None:
             raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
+        self.begin_operation("Resumen")
+        try:
+            return self._summarize(text, max_words, cancel_check, progress_callback)
+        finally:
+            self._end_operation()
 
-        instructions = (
-            "Summarize the following story chapter in at most "
-            f"{max_words} words, focusing on plot-relevant events only "
-            "(no stylistic commentary):\n\n"
-        )
-        suffix = "\n\nSummary:"
+    def _summarize(self, text, max_words, cancel_check, progress_callback) -> str:
         max_out_tokens = int(max_words * TOKENS_PER_WORD_ESTIMATE) + 40
-        reserved_for_scaffolding = self._count_tokens(instructions + suffix)
-        available_for_text = self._available_context(max_out_tokens) - reserved_for_scaffolding
+        limit = self._available_context(max_out_tokens)
+        prompt = build_summary_chat(text, max_words)
+        kw = dict(cancel_check=cancel_check, task=TASK_SUMMARY)
+        if self._count_tokens(self.render_prompt(prompt)) <= limit:
+            return self._complete(prompt, max_tokens=max_out_tokens, **kw)
 
-        text_to_summarize = self._fit_text_to_token_budget(text, available_for_text)
-        prompt = f"{instructions}{text_to_summarize}{suffix}"
-        return self._complete(prompt, max_tokens=max_out_tokens)
+        scaffolding = self._count_tokens(self.render_prompt(build_partial_summary_chat("", max_words, 99, 99)))
 
-    def expand_field(self, field_key: str, text: str, max_words: int = 400) -> str:
+        def fits(chunk: str) -> bool:
+            return self._count_tokens(chunk) + scaffolding <= limit
+
+        if not fits(" ".join(["word"] * 40)):
+            # Ni una parte chica cabe: comportamiento anterior (recortar).
+            instructions = self._count_tokens(self.render_prompt(build_summary_chat("", max_words)))
+            trimmed = self._fit_text_to_token_budget(text, limit - instructions)
+            return self._complete(build_summary_chat(trimmed, max_words), max_tokens=max_out_tokens, **kw)
+
+        parts = self._split_text_to_fit(text, fits)
+        total = len(parts) + 1
+        partials = []
+        for i, part in enumerate(parts, start=1):
+            self._report_part(i, total, progress_callback)
+            partials.append(self._complete(
+                build_partial_summary_chat(part, max_words, i, len(parts)), max_tokens=max_out_tokens, **kw,
+            ))
+        partials = [p for p in partials if p.strip()]
+        if len(partials) <= 1:
+            return partials[0] if partials else ""
+        combine = build_combine_summaries_chat(partials, max_words)
+        if self._count_tokens(self.render_prompt(combine)) > limit:
+            joined_budget = limit - self._count_tokens(self.render_prompt(build_combine_summaries_chat([""], max_words)))
+            combine = build_combine_summaries_chat(
+                [self._fit_text_to_token_budget("\n".join(partials), joined_budget)], max_words,
+            )
+        self._report_part(total, total, progress_callback)
+        return self._complete(combine, max_tokens=max_out_tokens, **kw)
+
+    def _report_part(self, part: int, total: int, progress_callback) -> None:
+        self.stats.part = part
+        self.stats.total_parts = total
+        if progress_callback:
+            progress_callback(part, total)
+
+    def expand_field(
+        self, field_key: str, text: str, max_words: int = 400,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        on_token: Optional[Callable[[str], None]] = None,
+    ) -> str:
         """
         Toma una nota corta (p.ej. una idea de plot en una linea) y la
         desarrolla en un texto mas completo, sin inventar una historia
         distinta. `field_key` es "plot"/"characters"/"setting" (ver
         prompts.EXPAND_FIELD_LABELS). Recorta `text` si por si solo ya no
-        cabria en la ventana de contexto, igual que summarize().
+        cabria en la ventana de contexto. Lanza OperationCancelled si se detiene.
         """
         if self._llm is None:
             raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
 
-        max_out_tokens = int(max_words * TOKENS_PER_WORD_ESTIMATE) + 60
-        scaffolding_tokens = self._count_tokens(build_expand_field_prompt(field_key, "", max_words))
-        available_for_text = self._available_context(max_out_tokens) - scaffolding_tokens
+        self.begin_operation("Expandir con IA")
+        try:
+            max_out_tokens = int(max_words * TOKENS_PER_WORD_ESTIMATE) + 60
+            scaffolding_tokens = self._count_tokens(self.render_prompt(build_expand_field_chat(field_key, "", max_words)))
+            available_for_text = self._available_context(max_out_tokens) - scaffolding_tokens
 
-        trimmed_text = self._fit_text_to_token_budget(text, available_for_text)
-        prompt = build_expand_field_prompt(field_key, trimmed_text, max_words)
-        # Notas de plot/personajes pueden organizarse en lineas tipo
-        # "Chapter 1: ..." -- el corte por defecto de prosa las cortaria.
-        return self._complete(prompt, max_tokens=max_out_tokens, stop=ONLY_END_MARKER_STOP)
+            trimmed_text = self._fit_text_to_token_budget(text, available_for_text)
+            prompt = build_expand_field_chat(field_key, trimmed_text, max_words)
+            # Notas de plot/personajes pueden organizarse en lineas tipo
+            # "Chapter 1: ..." -- el corte por defecto de prosa las cortaria.
+            return self._complete(
+                prompt, max_tokens=max_out_tokens, stop=ONLY_END_MARKER_STOP,
+                on_token=on_token, cancel_check=cancel_check, task=TASK_EXPAND,
+            )
+        finally:
+            self._end_operation()
 
-    def refine_chapter(self, project: Project, chapter_index: int, instruction: str) -> str:
+    def refine_chapter(
+        self, project: Project, chapter_index: int, instruction: str,
+        cancel_check: Optional[Callable[[], bool]] = None,
+        progress_callback: Optional[Callable[[int, int], None]] = None,
+        on_token: Optional[Callable[[str], None]] = None,
+    ) -> str:
         """
         Revisa un capitulo YA generado segun una instruccion del usuario
         (p.ej. "hazlo mas oscuro"), en vez de generar texto nuevo. No incluye
         plot/personajes/setting en el prompt (ver build_refine_chapter_prompt).
 
-        El capitulo NUNCA se recorta: el resultado reemplaza el capitulo
-        completo, asi que revisar solo un recorte perdia en silencio todo lo
-        que quedaba fuera (normalmente el final). Si el capitulo entero mas la
-        respuesta no caben en la ventana de contexto, se revisa por partes
-        (grupos de parrafos consecutivos, ver _split_for_refine) y las partes
-        revisadas se vuelven a unir en orden.
+        El capitulo NUNCA se recorta: si el capitulo entero mas la respuesta
+        no caben en la ventana de contexto, se revisa por partes (grupos de
+        parrafos consecutivos, ver _split_for_refine) y las partes revisadas
+        se vuelven a unir en orden; `progress_callback(parte, total)` informa
+        el avance. Devuelve el texto revisado SIN aplicarlo: la interfaz lo
+        muestra en una vista previa con diferencias antes de reemplazar
+        nada, asi que detener (OperationCancelled) deja el original intacto.
         """
         if self._llm is None:
             raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
+        self.begin_operation(f"Refinar capítulo {chapter_index + 1}")
+        try:
+            return self._refine_chapter(project, chapter_index, instruction, cancel_check, progress_callback, on_token)
+        finally:
+            self._end_operation()
 
+    def _refine_chapter(self, project, chapter_index, instruction, cancel_check, progress_callback, on_token) -> str:
         content = project.chapters[chapter_index].content.strip()
         max_tokens = self._refine_output_tokens(count_words(content))
-        prompt = build_refine_chapter_prompt(project, chapter_index, instruction)
-        if self._count_tokens(prompt) <= self._available_context(max_tokens):
-            return self._complete(prompt, max_tokens=max_tokens, stop=ONLY_END_MARKER_STOP)
+        prompt = build_refine_chapter_chat(project, chapter_index, instruction)
+        kw = dict(stop=ONLY_END_MARKER_STOP, cancel_check=cancel_check, on_token=on_token, task=TASK_REFINE)
+        if self._count_tokens(self.render_prompt(prompt)) <= self._available_context(max_tokens):
+            self._report_part(1, 1, progress_callback)
+            return self._complete(prompt, max_tokens=max_tokens, **kw)
 
         # El andamiaje (instruccion + guia de estilo + aviso de "parte i de n")
         # es igual para todas las partes; se mide una vez, con texto vacio.
-        scaffolding = self._count_tokens(
-            build_refine_chapter_prompt(project, chapter_index, instruction, content="", part=99, total_parts=99)
-        )
+        scaffolding = self._count_tokens(self.render_prompt(
+            build_refine_chapter_chat(project, chapter_index, instruction, content="", part=99, total_parts=99)
+        ))
         parts = self._split_for_refine(content, scaffolding)
         revised: List[str] = []
         for i, part in enumerate(parts, start=1):
-            part_prompt = build_refine_chapter_prompt(
+            self._report_part(i, len(parts), progress_callback)
+            part_prompt = build_refine_chapter_chat(
                 project, chapter_index, instruction, content=part, part=i, total_parts=len(parts),
             )
-            out = self._complete(
-                part_prompt, max_tokens=self._refine_output_tokens(count_words(part)),
-                stop=ONLY_END_MARKER_STOP,
-            )
+            if on_token is not None and revised:
+                on_token("\n\n")
+            out = self._complete(part_prompt, max_tokens=self._refine_output_tokens(count_words(part)), **kw)
             if not out.strip():
                 # Unir las demas partes sin esta perderia texto del capitulo.
                 raise RuntimeError(
-                    f"El modelo devolvio un texto vacio al refinar la parte {i} de {len(parts)} "
-                    "del capitulo. No se modifico el capitulo; intentalo de nuevo."
+                    f"El modelo devolvió un texto vacío al refinar la parte {i} de {len(parts)} "
+                    "del capítulo. No se modificó el capítulo; inténtalo de nuevo."
                 )
             revised.append(out.strip())
         return "\n\n".join(revised)
+
+    def rewrite_span(
+        self, project: Project, chapter_index: int, before: str, selection: str, after: str,
+        mode: str = "rewrite", instruction: str = "",
+        cancel_check: Optional[Callable[[], bool]] = None,
+        on_token: Optional[Callable[[str], None]] = None,
+    ) -> str:
+        """
+        Reescribe SOLO el fragmento seleccionado de un capitulo (Reescribir,
+        Expandir, Describir o Acortar -- ver prompts.REWRITE_MODES), con el
+        texto de alrededor como contexto. Devuelve el fragmento nuevo; la
+        interfaz lo muestra en una vista previa con diferencias antes de
+        reemplazar la seleccion.
+        """
+        if self._llm is None:
+            raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
+        if not selection.strip():
+            raise ValueError("No hay texto seleccionado.")
+        self.begin_operation("Reescribir selección")
+        try:
+            words = count_words(selection)
+            factor = 2.4 if mode == "expand" else REFINE_OUTPUT_HEADROOM
+            max_tokens = int(words * TOKENS_PER_WORD_ESTIMATE * factor) + 128
+            prompt = build_rewrite_span_chat(project, chapter_index, before, selection, after, mode, instruction)
+            return self._complete(
+                prompt, max_tokens=max_tokens, stop=ONLY_END_MARKER_STOP,
+                on_token=on_token, cancel_check=cancel_check, task=TASK_REFINE,
+            )
+        finally:
+            self._end_operation()
 
     @staticmethod
     def _refine_output_tokens(words: int) -> int:
@@ -598,10 +1303,7 @@ class LocalStoryEngine:
     def _split_for_refine(self, content: str, scaffolding_tokens: int) -> List[str]:
         """
         Parte `content` en trozos consecutivos que, cada uno con su prompt y
-        su respuesta, quepan en la ventana de contexto. Corta entre parrafos;
-        solo si un parrafo por si solo no cabe se corta entre oraciones, y
-        solo si una oracion no cabe, por palabras. Nunca descarta texto: los
-        trozos juntos contienen todas las palabras de `content`, en orden.
+        su respuesta, quepan en la ventana de contexto (ver _split_text_to_fit).
         """
         budget = self._n_ctx - SAFETY_MARGIN_TOKENS - scaffolding_tokens
 
@@ -610,11 +1312,21 @@ class LocalStoryEngine:
 
         if not fits(" ".join(["word"] * 20)):
             raise ContextOverflowError(
-                "El capitulo no cabe completo en la ventana de contexto del modelo "
+                "El capítulo no cabe completo en la ventana de contexto del modelo "
                 f"({self._n_ctx:,} tokens) y ni siquiera hay espacio para refinarlo por partes. "
-                "Carga el modelo con un n_ctx mayor en la pestana Modelo."
+                "Carga el modelo con un n_ctx mayor en la pestaña Modelo."
             )
+        return self._split_text_to_fit(content, fits)
 
+    @staticmethod
+    def _split_text_to_fit(content: str, fits: Callable[[str], bool]) -> List[str]:
+        """
+        Parte `content` en trozos consecutivos para los que fits(trozo) es
+        True. Corta entre parrafos; solo si un parrafo por si solo no cabe se
+        corta entre oraciones, y solo si una oracion no cabe, por palabras.
+        Nunca descarta texto: los trozos juntos contienen todas las palabras
+        de `content`, en orden.
+        """
         def split_units(text: str, level: int) -> List[str]:
             if fits(text):
                 return [text]
@@ -629,7 +1341,7 @@ class LocalStoryEngine:
             if level == 0:
                 pieces, joiner = re.split(r"\n\s*\n", text), "\n\n"
             else:
-                pieces, joiner = re.split(r"(?<=[.!?\"\u201d])\s+", text), " "
+                pieces, joiner = re.split(r"(?<=[.!?\"”])\s+", text), " "
             pieces = [p.strip() for p in pieces if p.strip()]
             if len(pieces) <= 1:
                 return split_units(text, level + 1)
