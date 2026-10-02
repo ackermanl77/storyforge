@@ -24,6 +24,7 @@ import threading
 from tkinter import messagebox
 from typing import Any, Callable, Optional
 
+from . import strings_es as S
 from .engine import ContextOverflowError, ModelNotLoadedError, OperationCancelled
 from .strings_es import APP_NAME
 
@@ -117,10 +118,10 @@ class EngineTaskRunner:
                     if isinstance(exc, ModelNotLoadedError):
                         message = str(exc)
                     elif isinstance(exc, ContextOverflowError):
-                        message = f"El contexto es demasiado grande para este modelo:\n\n{exc}"
+                        message = S.EL_CONTEXTO_ES_DEMASIADO_GRANDE.format(exc=exc)
                     else:
                         logger.exception("Error en '%s'", label)
-                        message = f"{error_prefix}{exc}" if error_prefix else f"Error: {exc}"
+                        message = f"{error_prefix}{exc}" if error_prefix else S.ERROR_GENERICO.format(exc=exc)
                 if message:
                     show_error(message)
             finally:

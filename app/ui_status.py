@@ -14,6 +14,7 @@ from typing import Optional
 
 import customtkinter as ctk
 
+from . import strings_es as S
 from .ui_dialogs import COLOR_ERROR, COLOR_MUTED, COLOR_OK, COLOR_WARN
 
 POLL_MS = 250
@@ -24,37 +25,37 @@ def format_duration(seconds: Optional[float]) -> str:
         return "--"
     seconds = int(max(0, seconds))
     if seconds >= 3600:
-        return f"{seconds // 3600}h {seconds % 3600 // 60:02d}m"
+        return S.DURACION_HORAS.format(hours=seconds // 3600, minutes=seconds % 3600 // 60)
     return f"{seconds // 60}:{seconds % 60:02d}"
 
 
 def describe_stats(stats, elapsed: float) -> str:
     """Texto de la barra para un GenerationStats (funcion pura, se prueba)."""
-    parts = [f"{stats.operation or 'Trabajando'} · {format_duration(elapsed)}"]
+    parts = [f"{stats.operation or S.TRABAJANDO} · {format_duration(elapsed)}"]
     tps = stats.tokens_per_second
     if tps:
-        parts.append(f"{tps:.1f} tok/s")
+        parts.append(S.TOK_S.format(tps=tps))
     if stats.prompt_eval_seconds:
-        parts.append(f"prompt {stats.prompt_eval_seconds:.1f} s")
+        parts.append(S.PROMPT_S.format(prompt_eval_seconds=stats.prompt_eval_seconds))
     if stats.target_words:
-        parts.append(f"{stats.words_written:,}/{stats.target_words:,} palabras")
+        parts.append(S.ESTADO_PALABRAS.format(words_written=stats.words_written, target_words=stats.target_words))
         eta = stats.eta_seconds()
         if eta is not None:
-            parts.append(f"ETA {format_duration(eta)}")
+            parts.append(S.ETA.format(eta=format_duration(eta)))
     elif stats.total_parts:
-        parts.append(f"parte {stats.part}/{stats.total_parts}")
+        parts.append(S.PARTE.format(part=stats.part, total_parts=stats.total_parts))
     if stats.seed is not None:
-        parts.append(f"semilla {stats.seed}")
+        parts.append(S.SEMILLA.format(seed=stats.seed))
     return "  |  ".join(parts)
 
 
 def describe_context(stats) -> str:
     frac = stats.context_fraction
     if frac is None or not stats.prompt_tokens:
-        return "Contexto: --"
-    level = f", nivel {stats.budget_level}/3" if stats.budget_level and stats.budget_level > 1 else ""
-    return (f"Contexto {frac * 100:.0f}% ({stats.prompt_tokens:,} + {stats.max_tokens:,} "
-            f"/ {stats.n_ctx:,}{level})")
+        return S.CONTEXTO_VACIO
+    level = S.NIVEL_3.format(budget_level=stats.budget_level) if stats.budget_level and stats.budget_level > 1 else ""
+    return (S.CONTEXTO_MEDIDOR.format(percent=frac * 100, prompt_tokens=stats.prompt_tokens,
+                                      max_tokens=stats.max_tokens, n_ctx=stats.n_ctx, level=level))
 
 
 class StatusBar(ctk.CTkFrame):
@@ -65,17 +66,17 @@ class StatusBar(ctk.CTkFrame):
         self._poll_id = None
         self.grid_columnconfigure(1, weight=1)
 
-        self.op_label = ctk.CTkLabel(self, text="Listo.", anchor="w", text_color=COLOR_MUTED)
+        self.op_label = ctk.CTkLabel(self, text=S.LISTO, anchor="w", text_color=COLOR_MUTED)
         self.op_label.grid(row=0, column=0, sticky="w", padx=(10, 6))
         self.progress = ctk.CTkProgressBar(self, width=160)
         self.progress.set(0)
         self.progress.grid(row=0, column=1, sticky="w", padx=6)
-        self.context_label = ctk.CTkLabel(self, text="Contexto: --", text_color=COLOR_MUTED)
+        self.context_label = ctk.CTkLabel(self, text=S.CONTEXTO_VACIO, text_color=COLOR_MUTED)
         self.context_label.grid(row=0, column=2, padx=6)
-        self.prompt_btn = ctk.CTkButton(self, text="Ver prompt", width=90, command=app.show_last_prompt)
+        self.prompt_btn = ctk.CTkButton(self, text=S.VER_PROMPT, width=90, command=app.show_last_prompt)
         self.prompt_btn.grid(row=0, column=3, padx=4, pady=3)
         self.stop_btn = ctk.CTkButton(
-            self, text="Detener", width=80, state="disabled", fg_color="#8a6a2f", hover_color="#6e5526",
+            self, text=S.DETENER, width=80, state="disabled", fg_color="#8a6a2f", hover_color="#6e5526",
             command=app.stop_current_task,
         )
         self.stop_btn.grid(row=0, column=4, padx=4, pady=3)
@@ -104,12 +105,12 @@ class StatusBar(ctk.CTkFrame):
         self.stop_btn.configure(state="disabled")
         elapsed = format_duration(time.monotonic() - self._started) if self._started else "--"
         text, color = {
-            "ok": (f"Listo ({elapsed}).", COLOR_OK),
-            "cancelled": (f"Detenido ({elapsed}).", COLOR_WARN),
-        }.get(outcome, (f"Terminó con error ({elapsed}).", COLOR_ERROR))
+            "ok": (S.LISTO_TIEMPO.format(elapsed=elapsed), COLOR_OK),
+            "cancelled": (S.DETENIDO.format(elapsed=elapsed), COLOR_WARN),
+        }.get(outcome, (S.TERMINO_CON_ERROR.format(elapsed=elapsed), COLOR_ERROR))
         stats = getattr(self.app.engine, "stats", None)
         if stats is not None and stats.tokens_per_second:
-            text += f"  {stats.tokens_per_second:.1f} tok/s"
+            text += S.TOK_S_FINAL.format(tokens_per_second=stats.tokens_per_second)
         self.op_label.configure(text=text, text_color=color)
         self._started = None
 
@@ -143,4 +144,4 @@ class StatusBar(ctk.CTkFrame):
             pass
 
     def set_word_total(self, words: int, chapters: int) -> None:
-        self.words_label.configure(text=f"{words:,} palabras en {chapters} capítulos")
+        self.words_label.configure(text=S.PALABRAS_EN_CAPITULOS.format(words=words, chapters=chapters))

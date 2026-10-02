@@ -21,6 +21,7 @@ from typing import Callable, List, Optional, Tuple
 
 import customtkinter as ctk
 
+from . import strings_es as S
 from .project import Project
 
 # Colores con variante clara/oscura (CustomTkinter acepta tuplas).
@@ -80,9 +81,9 @@ class DiffPreviewDialog(ctk.CTkToplevel):
 
         ops = word_diff(old, new)
         added, removed = diff_stats(ops)
-        ctk.CTkLabel(self, text="Antes", font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 0))
+        ctk.CTkLabel(self, text=S.ANTES, font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 0))
         ctk.CTkLabel(
-            self, text=f"Después  (+{added} / -{removed} palabras)", font=ctk.CTkFont(weight="bold"),
+            self, text=S.DESPUES_PALABRAS.format(added=added, removed=removed), font=ctk.CTkFont(weight="bold"),
         ).grid(row=0, column=1, sticky="w", padx=10, pady=(10, 0))
         self.old_box = ctk.CTkTextbox(self, wrap="word")
         self.new_box = ctk.CTkTextbox(self, wrap="word")
@@ -101,12 +102,12 @@ class DiffPreviewDialog(ctk.CTkToplevel):
 
         buttons = ctk.CTkFrame(self, fg_color="transparent")
         buttons.grid(row=2, column=0, columnspan=2, sticky="e", padx=10, pady=(0, 10))
-        ctk.CTkButton(buttons, text="Descartar", width=110, fg_color="#8a3b3b", hover_color="#6e2f2f",
+        ctk.CTkButton(buttons, text=S.DESCARTAR, width=110, fg_color="#8a3b3b", hover_color="#6e2f2f",
                       command=self.discard).pack(side="left", padx=4)
         if on_accept_continue is not None:
-            ctk.CTkButton(buttons, text="Aceptar y seguir refinando", width=200,
+            ctk.CTkButton(buttons, text=S.ACEPTAR_Y_SEGUIR_REFINANDO, width=200,
                           command=self.accept_and_continue).pack(side="left", padx=4)
-        ctk.CTkButton(buttons, text="Aceptar", width=110, command=self.accept).pack(side="left", padx=4)
+        ctk.CTkButton(buttons, text=S.ACEPTAR, width=110, command=self.accept).pack(side="left", padx=4)
         self.protocol("WM_DELETE_WINDOW", self.discard)
         self.bind("<Escape>", lambda _e: self.discard())
 
@@ -153,8 +154,8 @@ class TextViewerDialog(ctk.CTkToplevel):
         self.box.configure(state="disabled")
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.grid(row=2, column=0, sticky="e", padx=10, pady=(0, 10))
-        ctk.CTkButton(bar, text="Copiar", width=90, command=lambda: self._copy(text)).pack(side="left", padx=4)
-        ctk.CTkButton(bar, text="Cerrar", width=90, command=self.destroy).pack(side="left", padx=4)
+        ctk.CTkButton(bar, text=S.COPIAR, width=90, command=lambda: self._copy(text)).pack(side="left", padx=4)
+        ctk.CTkButton(bar, text=S.CERRAR, width=90, command=self.destroy).pack(side="left", padx=4)
 
     def _copy(self, text: str) -> None:
         self.clipboard_clear()
@@ -173,8 +174,8 @@ class SearchHit:
 
 
 FIELD_LABELS = {
-    "plot": "Plot", "characters": "Personajes", "setting": "Setting",
-    "chapter": "Capítulo", "outline": "Esquema", "summary": "Resumen", "lore": "Lorebook",
+    "plot": S.TAB_PLOT, "characters": S.TAB_PERSONAJES, "setting": S.TAB_SETTING,
+    "chapter": S.CAPITULO, "outline": S.TAB_ESQUEMA, "summary": S.RESUMEN, "lore": S.TAB_LOREBOOK,
 }
 
 
@@ -188,16 +189,16 @@ def _pattern(query: str, case_sensitive: bool, whole_word: bool) -> Optional[re.
 
 
 def _project_fields(project: Project):
-    yield "plot", -1, "Plot", project.plot
-    yield "characters", -1, "Personajes", project.characters
-    yield "setting", -1, "Setting", project.setting
+    yield "plot", -1, S.TAB_PLOT, project.plot
+    yield "characters", -1, S.TAB_PERSONAJES, project.characters
+    yield "setting", -1, S.TAB_SETTING, project.setting
     for i, ch in enumerate(project.chapters):
-        title = ch.title.strip() or f"Capítulo {i + 1}"
-        yield "chapter", i, f"Capítulo {i + 1}: {title}", ch.content
-        yield "outline", i, f"Esquema {i + 1}: {title}", ch.outline
-        yield "summary", i, f"Resumen {i + 1}: {title}", ch.summary
+        title = ch.title.strip() or S.CAPITULO_N.format(number=i + 1)
+        yield "chapter", i, S.CAPITULO_N_TITULO.format(number=i + 1, title=title), ch.content
+        yield "outline", i, S.ESQUEMA_N_TITULO.format(number=i + 1, title=title), ch.outline
+        yield "summary", i, S.RESUMEN_N_TITULO.format(number=i + 1, title=title), ch.summary
     for i, entry in enumerate(project.lore_entries):
-        yield "lore", i, f"Lorebook: {entry.name.strip() or f'entrada {i + 1}'}", entry.text
+        yield "lore", i, S.LOREBOOK_ENTRADA.format(name=entry.name.strip() or S.ENTRADA.format(number=i + 1)), entry.text
 
 
 def find_in_project(project: Project, query: str, case_sensitive: bool = False,
@@ -230,7 +231,7 @@ class ProjectSearchDialog(ctk.CTkToplevel):
     def __init__(self, app, initial: str = ""):
         super().__init__(app)
         self.app = app
-        self.title("Buscar en todo el proyecto")
+        self.title(S.BUSCAR_EN_PROYECTO_TITULO)
         self.geometry("820x560")
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -238,22 +239,22 @@ class ProjectSearchDialog(ctk.CTkToplevel):
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 4))
         top.grid_columnconfigure(1, weight=1)
-        ctk.CTkLabel(top, text="Buscar:").grid(row=0, column=0, padx=(0, 6))
+        ctk.CTkLabel(top, text=S.BUSCAR_ETIQUETA).grid(row=0, column=0, padx=(0, 6))
         self.query_entry = ctk.CTkEntry(top)
         self.query_entry.grid(row=0, column=1, sticky="ew")
         self.query_entry.insert(0, initial)
-        ctk.CTkButton(top, text="Buscar", width=90, command=self.search).grid(row=0, column=2, padx=6)
-        ctk.CTkLabel(top, text="Reemplazar con:").grid(row=1, column=0, padx=(0, 6), pady=(6, 0))
+        ctk.CTkButton(top, text=S.BUSCAR, width=90, command=self.search).grid(row=0, column=2, padx=6)
+        ctk.CTkLabel(top, text=S.REEMPLAZAR_CON).grid(row=1, column=0, padx=(0, 6), pady=(6, 0))
         self.replace_entry = ctk.CTkEntry(top)
         self.replace_entry.grid(row=1, column=1, sticky="ew", pady=(6, 0))
-        ctk.CTkButton(top, text="Reemplazar todo", width=130, command=self.replace_all).grid(row=1, column=2, padx=6, pady=(6, 0))
+        ctk.CTkButton(top, text=S.REEMPLAZAR_TODO, width=130, command=self.replace_all).grid(row=1, column=2, padx=6, pady=(6, 0))
 
         opts = ctk.CTkFrame(self, fg_color="transparent")
         opts.grid(row=1, column=0, sticky="ew", padx=10)
         self.case_var = ctk.BooleanVar(value=False)
         self.word_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(opts, text="Distinguir mayúsculas", variable=self.case_var).pack(side="left", padx=(0, 12))
-        ctk.CTkCheckBox(opts, text="Palabra completa", variable=self.word_var).pack(side="left")
+        ctk.CTkCheckBox(opts, text=S.DISTINGUIR_MAYUSCULAS, variable=self.case_var).pack(side="left", padx=(0, 12))
+        ctk.CTkCheckBox(opts, text=S.PALABRA_COMPLETA, variable=self.word_var).pack(side="left")
         self.summary_label = ctk.CTkLabel(opts, text="", text_color=COLOR_MUTED)
         self.summary_label.pack(side="left", padx=12)
 
@@ -280,14 +281,14 @@ class ProjectSearchDialog(ctk.CTkToplevel):
                 text_color=("#1a1a1a", "#e6e6e6"), hover_color=("#d0d0d0", "#3a3a3a"),
                 command=lambda h=hit: self.app.jump_to_search_hit(h, self.query_entry.get()),
             ).grid(row=row, column=0, sticky="ew", pady=1)
-        more = " (se muestran 300)" if len(self.hits) > 300 else ""
-        self.summary_label.configure(text=f"{len(self.hits)} resultados{more}")
+        more = S.SE_MUESTRAN_300 if len(self.hits) > 300 else ""
+        self.summary_label.configure(text=S.RESULTADOS.format(count=len(self.hits), more=more))
         return self.hits
 
     def replace_all(self) -> int:
         case, word = self._options()
         count = self.app.replace_in_project(self.query_entry.get(), self.replace_entry.get(), case, word)
-        self.summary_label.configure(text=f"{count} reemplazos")
+        self.summary_label.configure(text=S.REEMPLAZOS.format(count=count))
         self.search()
         return count
 
@@ -297,7 +298,7 @@ class PreferencesDialog(ctk.CTkToplevel):
 
     def __init__(self, app, prefs: dict, on_save: Callable[[dict], None]):
         super().__init__(app)
-        self.title("Preferencias")
+        self.title(S.PREFERENCIAS)
         self.geometry("560x380")
         self._on_save = on_save
         self.grid_columnconfigure(1, weight=1)
@@ -306,46 +307,45 @@ class PreferencesDialog(ctk.CTkToplevel):
         def label(text):
             ctk.CTkLabel(self, text=text).grid(row=row, column=0, sticky="w", padx=10, pady=6)
 
-        label("Tema:")
-        self.theme_menu = ctk.CTkOptionMenu(self, values=["Oscuro", "Claro", "Sistema"])
-        self.theme_menu.set({"dark": "Oscuro", "light": "Claro", "system": "Sistema"}.get(prefs.get("appearance"), "Oscuro"))
+        label(S.TEMA)
+        self.theme_menu = ctk.CTkOptionMenu(self, values=[S.OSCURO, S.CLARO, S.SISTEMA])
+        self.theme_menu.set({"dark": S.OSCURO, "light": S.CLARO, "system": S.SISTEMA}.get(prefs.get("appearance"), S.OSCURO))
         self.theme_menu.grid(row=row, column=1, sticky="w", padx=10)
         row += 1
-        label("Escala de la interfaz:")
+        label(S.ESCALA_DE_LA_INTERFAZ)
         self.scale_menu = ctk.CTkOptionMenu(self, values=["90%", "100%", "110%", "125%", "150%"])
         self.scale_menu.set(f"{int(round(float(prefs.get('ui_scale', 1.0)) * 100))}%")
         self.scale_menu.grid(row=row, column=1, sticky="w", padx=10)
         row += 1
-        label("Fuente del editor (vacío = por defecto):")
+        label(S.FUENTE_DEL_EDITOR_VACIO_POR)
         self.font_entry = ctk.CTkEntry(self)
         self.font_entry.insert(0, prefs.get("editor_font_family", ""))
         self.font_entry.grid(row=row, column=1, sticky="ew", padx=10)
         row += 1
-        label("Tamaño de fuente del editor:")
+        label(S.TAMANO_DE_FUENTE_DEL_EDITOR)
         self.size_entry = ctk.CTkEntry(self, width=60)
         self.size_entry.insert(0, str(prefs.get("editor_font_size", 14)))
         self.size_entry.grid(row=row, column=1, sticky="w", padx=10)
         row += 1
-        label("Interlineado (píxeles):")
+        label(S.INTERLINEADO_PIXELES)
         self.spacing_entry = ctk.CTkEntry(self, width=60)
         self.spacing_entry.insert(0, str(prefs.get("editor_line_spacing", 4)))
         self.spacing_entry.grid(row=row, column=1, sticky="w", padx=10)
         row += 1
-        label("Carpeta de modelos adicional:")
+        label(S.CARPETA_DE_MODELOS_ADICIONAL)
         self.models_entry = ctk.CTkEntry(self)
         self.models_entry.insert(0, prefs.get("models_dir", ""))
         self.models_entry.grid(row=row, column=1, sticky="ew", padx=10)
         row += 1
         ctk.CTkLabel(
-            self, text="Consejo: guarda los modelos .gguf fuera de OneDrive (p.ej. C:\\Modelos) para que "
-                       "no se sincronicen ni queden \"solo en línea\".",
+            self, text=S.CONSEJO_GUARDA_LOS_MODELOS_GGUF,
             wraplength=520, justify="left", text_color=COLOR_MUTED,
         ).grid(row=row, column=0, columnspan=2, sticky="w", padx=10, pady=(0, 6))
         row += 1
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.grid(row=row, column=0, columnspan=2, sticky="e", padx=10, pady=10)
-        ctk.CTkButton(bar, text="Cancelar", width=90, command=self.destroy).pack(side="left", padx=4)
-        ctk.CTkButton(bar, text="Guardar", width=90, command=self.save).pack(side="left", padx=4)
+        ctk.CTkButton(bar, text=S.CANCELAR, width=90, command=self.destroy).pack(side="left", padx=4)
+        ctk.CTkButton(bar, text=S.GUARDAR, width=90, command=self.save).pack(side="left", padx=4)
 
     def values(self) -> dict:
         def as_int(entry, default, lo, hi):
@@ -354,7 +354,7 @@ class PreferencesDialog(ctk.CTkToplevel):
             except ValueError:
                 return default
         return {
-            "appearance": {"Oscuro": "dark", "Claro": "light", "Sistema": "system"}[self.theme_menu.get()],
+            "appearance": {S.OSCURO: "dark", S.CLARO: "light", S.SISTEMA: "system"}[self.theme_menu.get()],
             "ui_scale": int(self.scale_menu.get().rstrip("%")) / 100,
             "editor_font_family": self.font_entry.get().strip(),
             "editor_font_size": as_int(self.size_entry, 14, 8, 40),

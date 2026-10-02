@@ -546,7 +546,7 @@ class TestChapterStreamingDisplay(unittest.TestCase):
     more often (token-level streaming -- see app/engine.py) instead of once
     per ~900-word section. ChapterPanel._on_generate()'s `progress` closure
     throttles how often it actually schedules a screen update (see
-    CHAPTER_STREAM_UI_INTERVAL_SECONDS in app/gui.py) so a fast burst of
+    CHAPTER_STREAM_UI_INTERVAL_SECONDS in app/ui_chapter_editor.py) so a fast burst of
     calls -- as happens here, since the worker runs synchronously -- doesn't
     flood the Tk event queue. This must never cause the FINAL displayed text
     to be a stale, throttled-away partial update instead of the engine's
@@ -618,7 +618,7 @@ class TestChapterStreamingAppend(unittest.TestCase):
         _clear_autosave()
         self._thread_patcher = mock.patch("app.gui.threading.Thread", _SynchronousThread)
         self._thread_patcher.start()
-        self._interval_patcher = mock.patch("app.gui.CHAPTER_STREAM_UI_INTERVAL_SECONDS", 0.0)
+        self._interval_patcher = mock.patch("app.ui_chapter_editor.CHAPTER_STREAM_UI_INTERVAL_SECONDS", 0.0)
         self._interval_patcher.start()
         self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=True)
         self._askyesno_patcher.start()
