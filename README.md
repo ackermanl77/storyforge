@@ -367,8 +367,13 @@ storyforge/
     prompts.py      Plantillas de prompt y guia de estilo
     engine.py        Motor de generacion local (llama-cpp-python)
     repetition.py    Analisis y reduccion de repeticion de palabras
-    export.py        Exportacion a .docx / .txt
-    gui.py           Interfaz grafica (CustomTkinter)
+    export.py        Exportacion a .docx / .txt / Markdown / EPUB
+    gui.py           Ventana principal (CustomTkinter): abrir/guardar, autoguardado, errores
+    ui_*.py          Menu y pestanas (ui_menu, ui_model_tab, ui_story_tabs, ui_lorebook_tab,
+                     ui_outline_tab, ui_chapters_tab, ui_chapter_editor), dialogos
+                     (ui_dialogs), barra de estado (ui_status) y piezas comunes (ui_common)
+    strings_es.py    Todos los textos visibles de la interfaz
+    task_runner.py   Tareas del modelo en segundo plano (ocupado, Detener, errores)
     main.py          Punto de entrada
   storyforge.py       Script de arranque (usado por PyInstaller)
   storyforge.spec     Especificacion de empaquetado de PyInstaller
