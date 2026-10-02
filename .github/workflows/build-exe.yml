@@ -1,25 +1,49 @@
 name: Build Windows .exe
 
-# Builds the packaged StoryForge.exe automatically on every push to master /
-# test-story (and on demand via workflow_dispatch), so the .exe never has to
-# be built by hand to stay in sync with the latest commit. See
-# docs/workflows/desktop-build/workflow.md for what the build actually does.
+# Builds the packaged StoryForge.exe on every push to master / test-story, on
+# version tags (v*), and on demand via workflow_dispatch, in two variants:
 #
-# NOTE: this repo's default branch is `master`, not `main` -- there is no
-# `main` branch here. An earlier version of this file listed `main` instead
-# of `master` by mistake, so every merge into `master` (PRs #1 and #2)
-# silently never triggered a build. Verified with `git ls-remote --heads
-# origin` before fixing.
+#   cpu    -- llama-cpp-python from the author's prebuilt CPU wheel index
+#   cuda13 -- llama-cpp-python from the prebuilt cu130 wheel index, plus the
+#             pinned nvidia-cuda-runtime / nvidia-cublas DLL packages that
+#             storyforge.spec bundles next to ggml-cuda.dll
+#
+# PyPI only publishes an sdist for llama-cpp-python, so installing it from
+# PyPI would compile a CPU-only build from source. All versions are pinned
+# (requirements-build.txt, requirements-cuda.txt, LLAMA_CPP_VERSION below) and
+# --only-binary makes the job fail instead of silently compiling.
+#
+# Each build is zipped as StoryForge-<version>-<variant>.zip (version from
+# app/__init__.py), with an empty models/ folder holding models/README.txt and
+# the NLTK stopwords/wordnet data bundled. A pushed tag vX.Y.Z (which must
+# match app/__init__.py) also publishes both zips as a GitHub Release.
+#
+# NOTE: this repo's default branch is `master`, not `main`.
 on:
   push:
     branches:
       - master
       - test-story
+    tags:
+      - "v*"
   workflow_dispatch: {}
+
+env:
+  LLAMA_CPP_VERSION: "0.3.35"
 
 jobs:
   build:
     runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: cpu
+            wheel_index: https://abetlen.github.io/llama-cpp-python/whl/cpu
+            extra_requirements: ""
+          - variant: cuda13
+            wheel_index: https://abetlen.github.io/llama-cpp-python/whl/cu130
+            extra_requirements: requirements-cuda.txt
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -27,30 +51,71 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          # Pinned to 3.12 (not the newest available) so llama-cpp-python can
-          # install from a prebuilt wheel instead of compiling from source on
-          # every run -- much faster and more reliable on a CI runner.
           python-version: "3.12"
           cache: "pip"
           cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
+            requirements-build.txt
+            requirements-cuda.txt
 
-      - name: Install dependencies
+      - name: Install pinned dependencies
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
+          pip install -r requirements-build.txt
+          pip install --only-binary=:all: --no-deps --index-url "${{ matrix.wheel_index }}" "llama-cpp-python==${{ env.LLAMA_CPP_VERSION }}"
+          if ("${{ matrix.extra_requirements }}") { pip install -r "${{ matrix.extra_requirements }}" }
+          pip freeze
+
+      - name: Read app version
+        id: version
+        shell: pwsh
+        run: |
+          $v = (Select-String -Path app/__init__.py -Pattern '__version__\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          "version=$v" >> $env:GITHUB_OUTPUT
+          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}" -ne "v$v") {
+            Write-Error "Tag ${{ github.ref_name }} does not match app/__init__.py version $v"; exit 1
+          }
+
+      - name: Lint (ruff)
+        run: ruff check app tests
 
       - name: Run tests
-        run: python -m unittest discover -s tests -v
+        run: python -m pytest -q
+
+      - name: Download NLTK data to bundle
+        run: python -m nltk.downloader -d nltk_data stopwords wordnet omw-1.4
 
       - name: Build with PyInstaller
         run: pyinstaller --noconfirm --clean storyforge.spec
 
+      - name: Package zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/StoryForge/models | Out-Null
+          Copy-Item models/README.txt dist/StoryForge/models/README.txt
+          Compress-Archive -Path dist/StoryForge -DestinationPath "StoryForge-${{ steps.version.outputs.version }}-${{ matrix.variant }}.zip"
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
-          name: StoryForge-${{ github.sha }}
-          path: dist/StoryForge/
+          name: StoryForge-${{ steps.version.outputs.version }}-${{ matrix.variant }}
+          path: StoryForge-${{ steps.version.outputs.version }}-${{ matrix.variant }}.zip
           if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" artifacts/*.zip --repo "${{ github.repository }}" --title "StoryForge ${{ github.ref_name }}" --generate-notes
