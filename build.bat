@@ -48,7 +48,7 @@ if /i not "%VARIANT%"=="cpu" (
 
 echo.
 echo [3/6] Descargando los datos de NLTK (stopwords, wordnet) para incluirlos...
-%PY% -m nltk.downloader -d nltk_data stopwords wordnet omw-1.4
+%PY% -m nltk.downloader -d nltk_data stopwords wordnet
 if errorlevel 1 goto :fail
 
 echo.

@@ -31,5 +31,5 @@ It does **not** publish a GitHub Release or otherwise version the `.exe` — eve
 
 ## Known limits
 
-- NLTK data is now explicit: `build.bat` and CI run `python -m nltk.downloader -d nltk_data stopwords wordnet omw-1.4` and `storyforge.spec` bundles `nltk_data/` when present, so every build works offline for "Reducir repetición".
+- NLTK data is now explicit: `build.bat` and CI run `python -m nltk.downloader -d nltk_data stopwords wordnet` and `storyforge.spec` bundles `nltk_data/` when present, so every build works offline for "Reducir repetición".
 - CI (see "Automated builds" above) rebuilds and test-gates the `.exe` on every push, but doesn't re-verify the exclusion list's savings or launch the built `.exe` to confirm it actually runs — the 137 MB figure and the "still launches correctly" check under "Implementation" are from one manual build/run, not something CI re-checks itself.
