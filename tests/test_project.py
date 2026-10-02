@@ -78,7 +78,7 @@ class TestProjectValidation(unittest.TestCase):
         chapter.content = "word " * (MAX_WORDS_PER_CHAPTER + 1)
         self.assertEqual(p.validate_inputs(), [])
         warnings = p.validate_warnings()
-        self.assertTrue(any("Capitulo 1" in w and "10,000" in w for w in warnings))
+        self.assertTrue(any("Capítulo 1" in w and "10,000" in w for w in warnings))
 
     def test_chapter_content_within_limit_has_no_warning(self):
         p = Project()
@@ -91,7 +91,7 @@ class TestProjectValidation(unittest.TestCase):
         chapter = p.add_chapter("Cap", target_words=100)
         chapter.outline = "word " * (MAX_OUTLINE_WORDS_PER_CHAPTER + 1)
         errors = p.validate_inputs()
-        self.assertTrue(any("Capitulo 1" in e and "esquema" in e for e in errors))
+        self.assertTrue(any("Capítulo 1" in e and "esquema" in e for e in errors))
 
     def test_chapter_outline_within_limit_not_flagged(self):
         p = Project(plot="a story " * 10, characters="a hero", setting="a castle")
@@ -212,7 +212,7 @@ class TestPersistence(unittest.TestCase):
             path = os.path.join(tmp, "project.json")
             p.save(path)
             p.plot = "never written"
-            with unittest.mock.patch("app.project.os.replace", side_effect=OSError("disk full")):
+            with unittest.mock.patch("app.fileutil.os.replace", side_effect=OSError("disk full")):
                 with self.assertRaises(OSError):
                     p.save(path)
             self.assertEqual(Project.load(path).plot, "good version")
