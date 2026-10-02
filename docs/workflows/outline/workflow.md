@@ -18,7 +18,7 @@ Generate a chapter-by-chapter beat sheet from the plot/characters/setting before
 - `app/prompts.py::parse_outline_response()` extracts `(title, beats)` pairs, tolerating markdown (`**Chapter 1: X**`, `**Chapter 1:** X`, `### Chapter 1 - X`), spelled-out and roman numbers, and horizontal rules; a line like "Chapter 3 ends with..." (no separator, no markdown) is treated as prose. If no header is found it raises `OutlineParseError`; the GUI shows the model's raw answer and changes nothing.
 - If fewer chapters than requested come back, or `finish_reason == "length"`, the Esquema status says "Esquema incompleto".
 - `app/engine.py::LocalStoryEngine.generate_outline()` runs this through the same shrinking context-budget retry as chapter generation (see `docs/workflows/chapter-generation/workflow.md`) before giving up with `ContextOverflowError`.
-- `app/gui.py::StoryForgeApp._apply_outline()` writes the parsed titles/outlines back into existing `Chapter` objects by index, and creates new ones (up to `MAX_CHAPTERS`) for any beyond the current chapter count.
+- `app/ui_outline_tab.py::OutlineTabMixin._apply_outline()` writes the parsed titles/outlines back into existing `Chapter` objects by index, and creates new ones (up to `MAX_CHAPTERS`) for any beyond the current chapter count.
 - Once a chapter has an outline, `app/prompts.py::build_chapter_system_prompt()` includes it as a mandatory `THIS CHAPTER'S OUTLINE` block, plus a compact list of every chapter's title (`build_story_outline_overview()`) so the model has awareness of the full story arc without spending much context budget on it.
 
 ## Known limits

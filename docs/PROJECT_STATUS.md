@@ -3,7 +3,7 @@
 ## Architecture
 
 ```text
-CustomTkinter desktop GUI (app/gui.py)
+CustomTkinter desktop GUI (app/gui.py + app/ui_*.py)
         |  llama-cpp-python calls, run on a background thread
         v
 LocalStoryEngine (app/engine.py)
@@ -18,6 +18,8 @@ llama_cpp.Llama over a user-supplied GGUF model (models/*.gguf)
 
 `app/repetition.py` is a separate, optional post-processing step: it flags and can replace overused words using NLTK's stopwords/WordNet corpora, falling back to a small built-in stopword list and no synonym substitution if NLTK's data isn't available (offline-first by design — see `docs/workflows/repetition-reduction/workflow.md`). `app/export.py` turns a finished `Project` into a `.docx` (via `python-docx`, converting `*italic*` markers into real italic runs) or a plain `.txt`.
 
+`StoryForgeApp` itself (`app/gui.py`) keeps only what belongs to the whole window: preferences, unexpected-error reporting, the engine busy lock (`_set_engine_busy()`), dirty tracking, autosave, open/save/export and `run()`. Each tab and the menu are mixin classes in their own module that `StoryForgeApp` inherits from (`MenuMixin` in `app/ui_menu.py`, `ModelTabMixin` in `app/ui_model_tab.py`, `StoryTabsMixin` in `app/ui_story_tabs.py`, `LorebookTabMixin` in `app/ui_lorebook_tab.py`, `OutlineTabMixin` in `app/ui_outline_tab.py`, `ChaptersTabMixin` in `app/ui_chapters_tab.py`); `ChapterPanel` and `VersionHistoryDialog` live in `app/ui_chapter_editor.py` and the shared constants/helpers/`LimitedTextBox` in `app/ui_common.py`. Every user-visible UI text comes from `app/strings_es.py` (imported as `S`; texts with `{fields}` are used with `S.NAME.format(...)`), and `tests/test_strings_es.py` fails if a UI module grows an inline user-facing literal or references a missing text.
+
 A single `Llama` instance is not safe for concurrent inference calls. `StoryForgeApp.busy` (set/read through `_set_engine_busy()`) is the app-wide mutual-exclusion flag that prevents two generations (or a generation and a model load, or a generation and a project switch / chapter add-remove) from running at once — see `docs/workflows/reliability/workflow.md`.
 
 ## Primary Entry Points
@@ -26,7 +28,15 @@ A single `Llama` instance is not safe for concurrent inference calls. `StoryForg
 |---|---|
 | Run from source | `python storyforge.py` (imports `app.main.main()`) |
 | PyInstaller entry script | `storyforge.py` |
-| GUI construction and app logic | `app/gui.py` (`StoryForgeApp`, `run()`) |
+| Main window: preferences, errors, busy lock, dirty tracking, autosave, open/save/export | `app/gui.py` (`StoryForgeApp`, `run()`) |
+| Menu and global shortcuts | `app/ui_menu.py` (`MenuMixin`) |
+| Modelo tab (load options, VRAM estimate, chat format, sampling) | `app/ui_model_tab.py` (`ModelTabMixin`) |
+| Plot / Personajes / Setting tabs, import and expand a field | `app/ui_story_tabs.py` (`StoryTabsMixin`) |
+| Lorebook tab | `app/ui_lorebook_tab.py` (`LoreEntryPanel`, `LorebookTabMixin`) |
+| Esquema tab | `app/ui_outline_tab.py` (`OutlinePanel`, `OutlineTabMixin`) |
+| Capítulos tab (sidebar, focus mode, project search/replace) | `app/ui_chapters_tab.py` (`ChaptersTabMixin`) |
+| One chapter's editor, version history | `app/ui_chapter_editor.py` (`ChapterPanel`, `VersionHistoryDialog`) |
+| Shared GUI constants, text-box helpers, `LimitedTextBox` | `app/ui_common.py` |
 | Generation engine (outline, chapter, summary) | `app/engine.py` (`LocalStoryEngine`) |
 | Prompt templates and context trimming | `app/prompts.py` |
 | Project data model, word-count limits, JSON persistence | `app/project.py` |
@@ -35,7 +45,7 @@ A single `Llama` instance is not safe for concurrent inference calls. `StoryForg
 | Background task runner (busy lock, Stop, errors, autosave) | `app/task_runner.py` (`EngineTaskRunner`) |
 | Status bar (tokens/s, ETA, context meter, "Ver prompt", Detener) | `app/ui_status.py` |
 | Diff preview, project search, preferences, text viewer | `app/ui_dialogs.py` |
-| Spanish display labels for stored keys, glossary | `app/strings_es.py` |
+| Every user-visible UI text, Spanish display labels for stored keys, glossary | `app/strings_es.py` |
 | Per-task sampling presets and seed | `app/sampling.py` |
 | GGUF header reader, split-model grouping, VRAM estimate, load-error hints | `app/gguf.py` |
 | Per-PC settings (per-model load options, last model, UI prefs) | `app/settings.py` |
@@ -60,7 +70,7 @@ python -m pytest -q
 ruff check app tests
 ```
 
-322 passed, 2 skipped as of the P2 round (2026-10-01; up from 246; re-run during the build checks with both the global interpreter and the clean `.build-venv`), run with the global Python 3.14 interpreter (llama-cpp-python CUDA 13 build installed but no model loaded) and `QT_QPA_PLATFORM=offscreen`. The 2 skips are `tests/test_real_model.py`, an opt-in smoke test against a real GGUF (`STORYFORGE_TEST_MODEL=<small .gguf>`, optional `STORYFORGE_TEST_GPU_LAYERS=-1`). Engine tests use fake `Llama` doubles; `tests/test_prompt_snapshots.py` compares every prompt (raw, Llama 3, ChatML) with golden files in `tests/snapshots/` (regenerate with `STORYFORGE_UPDATE_SNAPSHOTS=1`). `tests/test_gui.py` and `tests/test_gui_p2.py` drive a real `StoryForgeApp` (no mainloop, no simulated input: handlers called directly, `after()` callbacks flushed with `update()`), skipping themselves when Tk/customtkinter are missing. `tests/test_strings_es.py` fails if a user-visible string uses unaccented Spanish or voseo. User data isolation: `STORYFORGE_USER_DATA_DIR` (read on every call) points at a temp dir in `tests/conftest.py` and the GUI test modules. Run this yourself before relying on a pass count.
+326 passed, 2 skipped, 21 subtests as of the F8/F12 round (2026-10-02; up from 324; the P2 round ended at 322, re-run then during the build checks with both the global interpreter and the clean `.build-venv`), run with the global Python 3.14 interpreter (llama-cpp-python CUDA 13 build installed but no model loaded) and `QT_QPA_PLATFORM=offscreen`. The 2 skips are `tests/test_real_model.py`, an opt-in smoke test against a real GGUF (`STORYFORGE_TEST_MODEL=<small .gguf>`, optional `STORYFORGE_TEST_GPU_LAYERS=-1`). Engine tests use fake `Llama` doubles; `tests/test_prompt_snapshots.py` compares every prompt (raw, Llama 3, ChatML) with golden files in `tests/snapshots/` (regenerate with `STORYFORGE_UPDATE_SNAPSHOTS=1`). `tests/test_gui.py` and `tests/test_gui_p2.py` drive a real `StoryForgeApp` (no mainloop, no simulated input: handlers called directly, `after()` callbacks flushed with `update()`), skipping themselves when Tk/customtkinter are missing. `tests/test_strings_es.py` fails if a user-visible string uses unaccented Spanish or voseo. User data isolation: `STORYFORGE_USER_DATA_DIR` (read on every call) points at a temp dir in `tests/conftest.py` and the GUI test modules. Run this yourself before relying on a pass count.
 
 ## Known Limitations
 
@@ -68,13 +78,18 @@ See the README's "Limitaciones reales que debes conocer" section for the user-fa
 
 - **Nothing here was run against a real GGUF in this round.** Chat templates, sampling parameters (`min_p`, `seed`, presence/frequency penalties), `flash_attn`/`n_batch`/`type_k`/`type_v` and the tokens/s numbers are exercised with fakes only; run `tests/test_real_model.py` with a small model, and check output quality and VRAM use by hand.
 - **The GUI was not opened in a real window.** Layout, the diff preview, the find bar highlight, the right-click selection menu, focus mode, the status bar and the light theme were only built headlessly; check them visually. `apply_editor_preferences()` touches CustomTkinter's private `_textbox` for line spacing.
-- **`gui.py` is still one large module (~2,900 lines).** The worker pattern is now a single `EngineTaskRunner` and the dialogs/status bar/strings live in their own modules, but the panels and the main window were not split further (F12, partial).
+- **The GUI split is by file, not by encapsulation.** The tab mixins share one `StoryForgeApp` instance and call each other's methods and attributes through `self` (for example the chapters tab reads `self.busy` and the lorebook's match ids); the modules make the code navigable but are not independent components. Moved code keeps logging under the `app.gui` logger name.
+- **Backend texts are not in `app/strings_es.py`.** Error and warning messages raised by `app/engine.py`, `app/project.py`, `app/gguf.py` and `app/export.py`, and `LoreMatch.reason_es()` in `app/prompts.py`, are still written where they are raised and reach the UI as-is; only the UI modules are covered by `tests/test_strings_es.py`'s inline-text check (the accent/tú check does cover those backend files). The inline-text check is a heuristic (letters plus a space, an accent or a leading capital), so a lone lowercase word added inline would slip through.
 - **Retry ("Reintentar") repeats the whole last Generar/Continuar run**, not just its last section, and alternatives are kept in memory only (not saved with the project).
 - **VRAM estimate is approximate** (file size + KV-cache formula + a fixed 700 MB overhead) and needs `nvidia-smi`; without it the app cannot suggest `n_gpu_layers`.
 - **No app icon**: the exe has a version resource but uses PyInstaller's default icon (no icon asset exists).
 - **The `cpu`/`cuda13` CI matrix, ruff step, version-named zips and the tag-triggered release job have not run on GitHub Actions yet.**
 
 ## Recently Fixed
+
+- **F8/F12 round from `improvement_reports/storyforge.md`** (2026-10-02, pure refactor, no behaviour change):
+  - **F12** `app/gui.py` (3,160 lines) split into `app/gui.py` (main window, ~690 lines) plus `app/ui_common.py`, `app/ui_menu.py`, `app/ui_model_tab.py`, `app/ui_story_tabs.py`, `app/ui_lorebook_tab.py`, `app/ui_outline_tab.py`, `app/ui_chapters_tab.py` and `app/ui_chapter_editor.py` (see Architecture). Code was moved verbatim; `app.gui` still exports every name the tests import. The flat `app/ui_*.py` naming follows the existing `ui_dialogs.py`/`ui_status.py` instead of the report's `app/ui/` package. One test patch target changed with the move (`CHAPTER_STREAM_UI_INTERVAL_SECONDS` now lives in `app.ui_chapter_editor`).
+  - **F8** every user-visible text in `app/gui.py`, `app/ui_*.py` and `app/task_runner.py` (about 350 texts, f-strings turned into `S.NAME.format(...)` templates with named fields) moved into `app/strings_es.py`, grouped by the module that uses it first; values unchanged. `tests/test_strings_es.py` now also fails on an inline user-facing literal in a UI module (small allowlist of Tk names, the stored heading key and history source keys) and on an `S.NAME` that does not exist or is formatted with the wrong fields. `requirements-dev.txt` pins `ruff==0.6.9`, the version CI installs from `requirements-build.txt`.
 
 - **P2 round from `improvement_reports/storyforge.md`** (plus the remaining P1 work and several P3 items):
   - **B6** `app/sampling.py`: per-task samplers (prose/outline/summary/refine/expand), prose presets Creativo/Equilibrado/Preciso/Personalizado, `min_p`/`top_k`/presence/frequency, optional fixed seed (random seed otherwise, recorded in `engine.last_seed`/stats and shown in the UI); saved in `Project.sampling`.
