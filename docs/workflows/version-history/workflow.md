@@ -13,7 +13,7 @@ Let a destructive edit to a chapter's content (regenerate, refine, reduce repeti
 
 ## Implementation
 
-- `app/project.py::Chapter.history: List[str]` holds previous `content` snapshots, oldest first, capped at `MAX_CHAPTER_HISTORY` (5) — `push_history()` appends the current content (no-op if it's empty; nothing meaningful to preserve) and trims from the front once over the cap. Persisted with the rest of the chapter; an old project file with no `"history"` key loads as `[]`.
+- `app/project.py::Chapter.history: List[str]` holds previous `content` snapshots, oldest first, capped at `Project.history_limit` (default `MAX_CHAPTER_HISTORY` = 20), with a parallel `history_meta` list (`source`, `at`) saved as `{"text","source","at"}` in format v2 — `push_history()` appends the current content (no-op if it's empty; nothing meaningful to preserve) and trims from the front once over the cap. Persisted with the rest of the chapter; an old project file with no `"history"` key loads as `[]`.
 - Three call sites push history right before overwriting content: `ChapterPanel._on_generate()` (only when there's existing content to confirm-overwrite in the first place), `_on_refine()`, and `_on_reduce()` (word-repetition reduction — previously documented as an irreversible action with no undo at all; this closes that gap as a side effect).
 - `app/gui.py::VersionHistoryDialog` (a `CTkToplevel`) lists `chapter.history` newest-first in a dropdown (`Version N of len(history) (word count)`), with a read-only preview box kept in sync via the dropdown's `command` callback, and a restore button. `_selected_history_index()` maps the newest-first display order back to `history`'s real (oldest-first) list index.
 

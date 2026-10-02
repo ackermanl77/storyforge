@@ -59,15 +59,40 @@ modelo cargado, ninguna función de generación funciona (el resto de la app
   archivo.
 - **Configuración avanzada** (no hace falta tocarla si no sabes qué son):
   - **Contexto (n_ctx)**: cuánta "memoria" de una sola vez tiene el modelo
-    para leer tu plot/personajes/setting/capítulos anteriores. Por defecto
-    8192. Súbelo si te encuentras con errores de "el contexto es demasiado
-    grande" — pero ocupa más RAM y puede ser más lento.
-  - **Capas en GPU (n_gpu_layers)**: 0 = solo CPU (por defecto). Solo sirve
-    si instalaste una versión de `llama-cpp-python` con soporte de GPU (ver
-    sección "Rendimiento / GPU" en el README).
+    para leer tu plot/personajes/setting/capítulos anteriores. La primera
+    vez que eliges un modelo se propone su contexto de entrenamiento (como
+    mucho 16k); `0` usa exactamente ese. Si pides más de lo que el modelo
+    aprendió, la app avisa antes de cargar.
+  - **Capas en GPU (n_gpu_layers)**: si la app detecta soporte de GPU se
+    propone `-1` (todas las capas); sin GPU, `0`. **Estimar VRAM** calcula si
+    el modelo cabe en la VRAM libre con ese contexto y completa el número de
+    capas sugerido.
+  - **Flash attention, lote (n_batch / n_ubatch) y caché KV**: con GPU,
+    flash attention y un lote de 1024-2048 aceleran la lectura del prompt; la
+    caché KV `q8_0` ocupa la mitad de memoria (requiere flash attention).
+  - Debajo del selector se ve la información del modelo (arquitectura,
+    cuantización, tamaño, contexto entrenado, si trae plantilla de chat). Un
+    modelo partido en varios archivos aparece una sola vez; si le faltan
+    partes se marca "incompleto" y no se puede cargar.
+  - La app recuerda estas opciones **por modelo y por PC**, y al abrir un
+    proyecto preselecciona el modelo con el que se escribió (o avisa si ese
+    archivo ya no está).
   - **Hilos CPU (n_threads)**: vacío = automático (recomendado para la
     mayoría). Solo tócalo si quieres limitar cuántos núcleos de tu CPU usa
     la generación.
+- **Formato de chat**: cómo se le "habla" al modelo. Los modelos *instruct*
+  (Llama 3 Instruct, Mistral, Qwen y sus derivados) siguen mucho mejor las
+  instrucciones cuando las reciben en el formato de turnos con el que fueron
+  entrenados.
+  - **Auto (desde el GGUF)** (por defecto): usa la plantilla que trae el
+    archivo `.gguf`; si no trae ninguna, la deduce del vocabulario del modelo
+    (por ejemplo, detecta Llama 3 aunque el GGUF no traiga plantilla).
+  - **Llama 3 / ChatML / Mistral / Alpaca**: fuerza una plantilla concreta,
+    por si "Auto" elige mal.
+  - **Sin plantilla (modelo base)**: el modo de antes (texto corrido), para
+    modelos *base* que no son instruct.
+  - Se recuerda por modelo, y se puede cambiar sin volver a cargar el modelo.
+    El estatus muestra qué formato quedó en uso.
 - El estatus abajo confirma qué modelo quedó cargado y con qué
   configuración, o muestra el error si algo falló (archivo corrupto,
   incompatible, etc.).
@@ -104,11 +129,66 @@ toda la historia** antes de escribir prosa — ver
 ["Flujo outline-first"](#flujo-outline-first-generar-el-esquema-completo)
 más abajo.
 
+### Muestreo (pestaña "Modelo", abajo)
+
+Cómo de creativo o preciso escribe el modelo. **Preset** de la prosa:
+Creativo, Equilibrado (por defecto), Preciso, o Personalizado (editas
+temperatura, min_p, top_p, top_k y penalizaciones). Los resúmenes, el
+esquema y los refinados usan sus propios valores, más conservadores.
+**Semilla**: vacía = aleatoria (la barra de estado y el mensaje de "Listo"
+muestran la que se usó); "Usar la última" la copia para repetir exactamente
+un resultado. Se guarda con el proyecto.
+
+### Pestaña "Lorebook"
+
+Personajes secundarios, lugares u objetos que no hace falta repetir en
+Personajes/Setting. Cada entrada tiene nombre, **palabras clave**
+(separadas por coma) y texto, y solo entra en el prompt cuando alguna
+palabra clave aparece en el esquema del capítulo, en el resumen de los
+capítulos anteriores o en lo último que se escribió (también si la menciona
+el texto de otra entrada que sí coincidió). Opciones: **Activa** (desmarcada
+nunca se usa), **Incluir siempre** y **Prioridad** (con muchas
+coincidencias entran primero las de mayor prioridad). Después de generar,
+cada entrada usada muestra "✓ usada en la última generación" y por qué. El
+buscador filtra por nombre o palabra clave.
+
 ### 6. Pestaña "Capítulos"
 
-Donde generas y editas la prosa de cada capítulo, uno por uno. Cada
-capítulo tiene su propio panel con título, palabras objetivo, propósito
-narrativo, botones de generación/edición, y el texto en sí.
+Donde generas y editas la prosa de cada capítulo. Se edita **un capítulo a
+la vez**, con el cuadro de texto ocupando todo el alto de la ventana: la
+columna de la izquierda lista los capítulos y un click muestra ese capítulo
+(el resaltado indica cuál estás viendo). Cada capítulo tiene título,
+palabras objetivo, propósito narrativo, botones de generación/edición, el
+texto en sí y su resumen.
+
+**Atajos de teclado:** Ctrl+N (nuevo proyecto), Ctrl+O (abrir), Ctrl+S
+(guardar), Ctrl+Shift+S (guardar como), Ctrl+Z / Ctrl+Y (deshacer/rehacer en
+cualquier cuadro de texto), Ctrl+Enter dentro del texto de un capítulo
+(Generar si está vacío, Continuar si ya tiene texto), Esc (cancelar la tarea
+en curso), Ctrl+F (buscar y reemplazar en el capítulo), Ctrl+Shift+F (buscar
+en todo el proyecto) y F11 (modo enfoque: oculta la lista de capítulos, el
+refinamiento y el resumen).
+
+**Más funciones del capítulo:**
+- **Nota del autor**: una instrucción corta ("Elena oculta que está
+  herida") que el modelo lee justo antes de escribir cada sección; hay otra
+  para toda la historia en la pestaña Plot.
+- **Reintentar** repite la última ejecución de Generar/Continuar desde el
+  mismo punto (con otra semilla) y guarda cada resultado como alternativa;
+  `<` y `>` las recorren. Editar el texto a mano descarta las alternativas.
+- **Clic derecho sobre texto seleccionado**: Reescribir, Expandir,
+  Describir o Acortar solo ese fragmento (o con una instrucción propia). Ves
+  una vista previa con diferencias antes de aceptar.
+- **Más herramientas**: Reducir repetición, Reporte de repetición, Buscar y
+  reemplazar y Eliminar capítulo.
+- La lista de la izquierda muestra palabras escritas / objetivo de cada
+  capítulo, y la barra de estado el total del proyecto.
+
+**Barra de estado (abajo):** operación en curso y tiempo, tokens por
+segundo, palabras y tiempo restante estimado, uso de la ventana de contexto
+(en ámbar/rojo cuando se acerca al límite), **Ver prompt** (el texto exacto
+que recibió el modelo) y **Detener** (para cualquier tarea: capítulo,
+esquema, resumen, refinado, expandir).
 
 ---
 
@@ -151,6 +231,14 @@ En la pestaña Esquema:
 4. El modelo genera, de un jalón, un título + 2 a 4 eventos clave por cada
    capítulo. Si ya tenías capítulos, se te pide confirmar — se reemplaza el
    título y esquema de cada uno, pero **la prosa ya generada se conserva**.
+   Se aceptan los formatos que los modelos suelen usar aunque se les pida
+   texto plano (`**Chapter 1: ...**`, `### Chapter 1 - ...`,
+   `Chapter One: ...`, números romanos). Si la respuesta no tiene ningún
+   encabezado de capítulo reconocible, se muestra un error con la respuesta
+   del modelo y **no se modifica nada** (antes se metía todo el texto en el
+   esquema del capítulo 1). Si salen menos capítulos de los pedidos, o la
+   respuesta se cortó por largo, el estado lo avisa como "Esquema
+   incompleto".
 5. Puedes editar el resultado libremente antes de pasar a "Capítulos" a
    generar la prosa. Cada esquema individual tiene un límite de 800
    palabras.
@@ -182,17 +270,50 @@ convenciones de formato normales (ver más abajo).
 En la pestaña Capítulos, cada panel tiene:
 
 - **Título** y **Palabras objetivo** (máximo 10,000).
-- **Generar**: dispara la generación. Si el capítulo ya tenía contenido, se
-  te pide confirmar (la versión anterior se guarda automáticamente, ver
-  ["Versiones anteriores"](#versiones-anteriores)).
+- **Generar**: escribe el capítulo desde cero. Si el capítulo ya tenía
+  contenido, se te pide confirmar (la versión anterior se guarda
+  automáticamente, ver ["Versiones anteriores"](#versiones-anteriores)).
+- **Continuar**: sigue escribiendo desde el final del texto actual, sin
+  borrar nada (si el capítulo ya llegó a su objetivo, agrega una sección
+  más, ~900 palabras). Úsalo después de cancelar, de editar a mano, o
+  cuando quieras más texto.
+- **Continuar desde el cursor**: igual, pero desde donde está el cursor en
+  el texto; lo que haya después del cursor se reemplaza (se te pide
+  confirmar y la versión anterior queda en "Versiones anteriores").
+- Al continuar, el modelo recibe **todo lo que quepa** del capítulo ya
+  escrito (no solo las últimas 400 palabras), y una pista de por qué evento
+  del esquema debería ir.
 - El capítulo se escribe **por secciones** (de a ~900 palabras),
   mostrando el progreso en vivo, hasta acercarse al objetivo. Esto existe
   para poder llegar a objetivos largos sin exceder lo que un modelo local
   puede escribir de un jalón.
-- **Cancelar**: se detiene al terminar la sección actual (no a la mitad de
-  una), conservando lo generado hasta ese punto.
+- **Cancelar** (o Esc): se detiene en segundos, a mitad de la sección si
+  hace falta, conservando lo generado hasta ese punto. Después puedes seguir
+  con "Continuar".
+- **Mientras el modelo escribe, el texto de ese capítulo queda en solo
+  lectura** (borde amarillo): antes, lo que tecleabas ahí se perdía al
+  terminar la generación. Puedes seguir editando los demás capítulos.
+- Si una sección se corta por largo a mitad de una oración, la siguiente
+  sigue esa misma oración (ya no se parte en dos párrafos). Si el modelo
+  cierra el capítulo por su cuenta cerca del objetivo (80% o más), el
+  capítulo se da por terminado; si lo cierra mucho antes, se le pide que
+  siga sin concluir todavía.
 - Al terminar, la app le pide al modelo un **resumen** del capítulo, que se
-  usa como contexto de continuidad para el siguiente capítulo.
+  usa como contexto de continuidad para los capítulos siguientes. Los
+  capítulos siguientes reciben siempre el resumen del capítulo
+  inmediatamente anterior y sus últimas líneas, más los resúmenes de los
+  capítulos previos que quepan (del más reciente al más antiguo).
+
+**El resumen de cada capítulo** está debajo de su texto ("Mostrar
+resumen"): puedes leerlo y corregirlo a mano (se guarda con el proyecto).
+Al lado del conteo de palabras verás "Resumen al día", "Resumen
+desactualizado" (cambiaste el texto después de resumirlo: al refinar,
+restaurar una versión, reducir repetición, continuar, cancelar o editar a
+mano) o "Sin resumen". "Regenerar resumen" lo vuelve a pedir al modelo. Al
+generar o continuar un capítulo, si algún capítulo anterior tiene el resumen
+desactualizado o sin hacer, la app ofrece regenerarlo primero. Los capítulos
+muy largos se resumen por partes, así que los eventos del medio ya no se
+pierden.
 
 **Cuánto tarda**: en una CPU normal, una sección de ~900 palabras puede
 tardar entre 1 y 4 minutos; un capítulo completo de 10,000 palabras puede
@@ -229,10 +350,14 @@ oscuro" o "acorta el diálogo del final".
 1. El capítulo debe tener contenido ya generado.
 2. Escribe la instrucción en el campo "Instrucción de refinamiento" (abajo
    del todo del panel del capítulo).
-3. Click en **"Aplicar refinamiento"** y confirma.
-4. La versión anterior se guarda automáticamente (ver "Versiones
-   anteriores"). El modelo reescribe el capítulo completo aplicando tu
-   instrucción, manteniendo la trama y los personajes.
+3. Click en **"Aplicar refinamiento"**. El modelo reescribe el capítulo
+   aplicando tu instrucción (la barra de estado muestra "parte i de n" si es
+   largo; "Detener" lo cancela sin tocar nada).
+4. Se abre una **vista previa lado a lado** con lo quitado en rojo y lo
+   agregado en verde. Nada cambia hasta que eliges **Aceptar**, **Aceptar y
+   seguir refinando** (aplica y deja el campo listo para otra instrucción) o
+   **Descartar**. Al aceptar, la versión anterior se guarda en "Versiones
+   anteriores" con la instrucción usada.
 
 **Importante**: el capítulo **nunca se recorta** al refinar. Si cabe
 completo en el contexto del modelo, se revisa de una sola vez; si no (un
@@ -256,8 +381,11 @@ Cada capítulo guarda automáticamente su versión previa cuando:
 - Lo **refinas**.
 - Le aplicas **"Reducir repetición"**.
 
-Se guardan hasta **5 versiones** por capítulo (la más vieja se descarta al
-llegar al límite, sin aviso).
+Se guardan hasta **20 versiones** por capítulo (la más vieja se descarta
+al llegar al límite). Cada versión indica de dónde viene (generar,
+continuar, refinar con qué instrucción, reescribir selección, reemplazar,
+restaurar...) y la fecha, y "Comparar con la actual" muestra las
+diferencias.
 
 Para recuperar una versión anterior:
 1. Click en **"Versiones anteriores (N)"** en el panel del capítulo (el
@@ -323,26 +451,37 @@ Todo desde el menú **Archivo**:
 
 - **Nuevo proyecto**: empieza de cero (pide confirmar si hay cambios sin
   guardar).
-- **Abrir proyecto...**: carga un archivo `.json` de proyecto guardado
-  antes.
+- **Abrir proyecto...**: carga un proyecto guardado antes (`.storyforge.json`
+  o `.json`). Si el archivo está dañado y existe la copia `.bak` de la
+  versión anterior, la app ofrece abrirla.
 - **Guardar proyecto** / **Guardar proyecto como...**: guarda todo
-  (plot, personajes, setting, esquema, capítulos, tipo de escritura,
-  configuración) en un archivo `.json`.
-- **Exportar a Word (.docx)**: genera un documento Word con un
-  encabezado por capítulo; los pensamientos internos marcados con
-  `*asteriscos*` en el texto se convierten en cursiva real.
-- **Exportar a TXT**: exporta la historia completa como texto plano.
+  (plot, personajes, setting, esquema, capítulos, lorebook, muestreo, nota
+  del autor, título y autor) en un archivo `.storyforge.json`. El título de
+  la ventana muestra el nombre del archivo y un `•` si hay cambios sin
+  guardar; nuevo/abrir/salir solo preguntan si los hay.
+- **Exportar a Word (.docx)**: portada con título y autor, un capítulo por
+  página; `*cursiva*` y `**negrita**` se convierten en formato real.
+- **Exportar a EPUB** (para lectores de libros electrónicos) y **a
+  Markdown**.
+- **Exportar a TXT**: la historia completa como texto plano.
+- El título, el autor y el encabezado de capítulo al exportar ("Chapter N:
+  título", "Capítulo N: título" o solo el título) se eligen arriba en la
+  pestaña Plot.
+- **Preferencias...**: tema (oscuro, claro, sistema), escala, fuente e
+  interlineado del editor y una carpeta de modelos adicional (útil para
+  guardarlos fuera de OneDrive).
 
-Ninguna de las dos exportaciones incluye el esquema ni las versiones
+Ninguna exportación incluye el esquema ni las versiones
 anteriores — solo el título y contenido final de cada capítulo.
 
 ## Autoguardado y recuperación
 
-Mientras hay una generación en curso (capítulo, esquema, refinamiento), la
-app guarda tu progreso automáticamente cada 20 segundos en una copia
-separada de tu guardado manual — pensado para que un cierre inesperado
-(crash, corte de luz) durante una generación larga (que puede tomar 15-40
-minutos) no te haga perder todo.
+La app guarda tu progreso automáticamente en una copia separada de tu
+guardado manual: cada 20 segundos mientras hay una generación en curso
+(capítulo, esquema, refinamiento) y cada minuto si escribiste algo sin
+guardar — así un cierre inesperado (crash, corte de luz) no te hace perder
+ni una generación larga ni lo que escribiste a mano. La escritura se hace en
+segundo plano, sin congelar la ventana.
 
 Si la app detecta esa copia al arrancar, te pregunta si quieres
 recuperarla. Al recuperar, tienes que elegir dónde guardar el proyecto de
@@ -355,6 +494,15 @@ En el `.exe`, la copia de autoguardado vive en
 `%APPDATA%\StoryForge\storyforge.log`); ejecutando desde el código fuente,
 en la carpeta `autosave\` del proyecto. Si el autoguardado no se puede
 escribir, la app te avisa una vez por sesión en vez de fallar en silencio.
+Si defines la variable de entorno `STORYFORGE_USER_DATA_DIR`, el
+autoguardado, el registro y `settings.json` (el formato de chat recordado
+por modelo) van a esa carpeta (útil para una instalación portable; las
+pruebas automáticas la usan para no tocar nunca tu autoguardado real).
+
+Si ocurre un error inesperado (un fallo interno de la app), ahora se
+muestra un aviso con el mensaje y se registra con todo el detalle en
+`storyforge.log`; **Ayuda > Abrir carpeta de registros** abre esa carpeta.
+Antes, en el `.exe`, esos errores no dejaban ningún rastro.
 
 Guardar un proyecto es atómico: se escribe primero a un archivo temporal y
 solo entonces reemplaza al anterior, que queda como `<archivo>.json.bak`.
@@ -437,9 +585,8 @@ pestaña Modelo una vez instalada la versión de `llama-cpp-python` con
 soporte CUDA.
 
 **Perdí una versión anterior de un capítulo**
-Solo se guardan las últimas 5 versiones por capítulo; una sexta
-regeneración/refinamiento/reducción de repetición descarta la más vieja sin
-aviso.
+Se guardan las últimas 20 versiones por capítulo; a partir de ahí cada
+cambio nuevo descarta la más vieja.
 
 **¿Por qué el modelo se niega a escribir cierto contenido?**
 Depende del modelo que elijas, no de esta app — StoryForge Local no impone

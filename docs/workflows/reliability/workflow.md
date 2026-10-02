@@ -26,16 +26,20 @@ A `ChapterPanel` created while `self.busy` is already true (e.g. via `_apply_out
 
 ## Autosave
 
-A generation this long deserved its own safety net independent of the user remembering to save. `AUTOSAVE_PATH` (`autosave/autosave.json`, next to the app, gitignored) is separate from the project file the user explicitly saves:
+A generation this long deserved its own safety net independent of the user remembering to save. `StoryForgeApp.autosave_path` (`<user_data_dir()>/autosave/autosave.json`: the repo in development, `%APPDATA%\StoryForge` in the .exe, or `STORYFORGE_USER_DATA_DIR` when set) is separate from the project file the user explicitly saves:
 
 - `StoryForgeApp._autosave_tick()` re-schedules itself every `AUTOSAVE_INTERVAL_MS` (20s) for the life of the app, and only actually writes when `self.busy` is true.
 - Because `ChapterPanel.sync_to_model()` reads straight from the live `content_box` widget (which the generation's `progress_callback` keeps updating section by section), `_autosave()`'s call to `_sync_all()` picks up in-progress prose, not just already-completed chapters.
 - One more autosave fires immediately when a chapter or outline generation finishes, so the just-completed result (including its summary) is captured without waiting up to 20s for the next tick.
 - On startup, `_offer_autosave_recovery()` checks for `autosave/autosave.json` and, if present, asks whether to load it (`current_path` stays unset — recovered content still needs an explicit "Guardar como" to pick a real destination).
-- Any error writing the autosave is swallowed — it is a safety net and must never interrupt a real generation in progress.
+- An error writing the autosave is logged and reported once per session; it never interrupts a generation.
+
+## Unexpected errors
+
+`StoryForgeApp.report_callback_exception` (Tk callbacks), `threading.excepthook` (installed by `gui.run()`, marshalled to the Tk thread with `after()`) and `sys.excepthook` (`main()`) log the traceback and show a message with the log location; Ayuda > "Abrir carpeta de registros" opens `user_data_dir()`.
 - The autosave file is deleted after an explicit "Guardar proyecto" succeeds (it would otherwise be a stale, confusing "recover?" prompt next launch), and after the "Don't Save" choice on exit.
 
 ## Known limits
 
-- None of this is covered by the `unittest` suite under `tests/` (which doesn't touch `app/gui.py` — see `docs/PROJECT_STATUS.md`). It has been verified with ad hoc headless smoke scripts (instantiating `StoryForgeApp` directly and calling its methods) during development, not with a committed regression test.
-- The autosave write is a blocking `Project.save()` call on the Tk main thread every 20 seconds during a generation — acceptable on local disk, could stutter the UI briefly on a slow one.
+- Partially covered by `tests/test_gui.py` (autosave failure reporting, save errors, user-data isolation, unexpected-error reporting); the busy-lock and exit confirmation are still only smoke-tested.
+- Autosave (every 20 s while the engine is busy, every 60 s when the project is dirty) serializes on the Tk thread and writes on a short-lived worker thread; a generation counter makes sure a late, older write never replaces a newer one, and `_discard_autosave()` cancels pending writes. Errors are collected and shown once from the Tk thread. Every engine task goes through `app/task_runner.py::EngineTaskRunner` (busy lock, Stop, error dialogs, autosave).
