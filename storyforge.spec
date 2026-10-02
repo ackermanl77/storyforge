@@ -100,6 +100,15 @@ EXCLUDED_UNUSED_HEAVY_DEPS = [
     "diffusers",
 ]
 
+# collect_all("llama_cpp") also lists every llama_cpp.server.* submodule as a
+# hidden import; with llama_cpp.server excluded above, PyInstaller then prints
+# "ERROR: Hidden import 'llama_cpp.server...' not found" for each one (harmless
+# but alarming in the build log). Drop hidden imports of excluded packages.
+hiddenimports = [
+    h for h in hiddenimports
+    if not any(h == x or h.startswith(x + ".") for x in EXCLUDED_UNUSED_HEAVY_DEPS)
+]
+
 # Version (K3): leida de app/__init__.py con una expresion regular (el build
 # nunca importa app/), y escrita como recurso de version de Windows para que
 # StoryForge.exe muestre version/producto en Propiedades > Detalles.
