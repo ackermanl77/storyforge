@@ -31,3 +31,21 @@ que tarde, no es un error de la app.
 
 Nota: descargar el modelo requiere internet una sola vez. Una vez descargado,
 la generacion de historias funciona completamente sin conexion.
+
+CON GPU NVIDIA DE 16 GB (p.ej. RTX 5080, todo el modelo en la GPU):
+  En la pestana Modelo usa n_gpu_layers = -1, flash attention activado,
+  lote (n_batch) 1024-2048 y, para contextos largos, cache KV q8_0. El boton
+  "Estimar VRAM" calcula si el modelo cabe con ese contexto y sugiere capas.
+  - 7-9B en Q8_0 con 16k-32k de contexto (Llama-3.1-8B-Instruct se entreno
+    con 128k; ojo: daredevil-8b-abliterated solo con 8,192 -- no le pidas mas).
+  - 12-14B en Q5_K_M / Q6_K con 16k de contexto y cache KV q8_0.
+  - 22-24B en Q4_K_M con contexto chico (justo: la app avisa si no cabe).
+  - 70B (incluso en Q4/Q5) NO cabe en 16 GB: corre casi todo en la CPU y es
+    muy lento. Ademas, un modelo partido en varios archivos (...-00001-of-
+    00002.gguf) necesita TODAS sus partes en la misma carpeta; la lista de
+    modelos marca los incompletos y no los deja cargar.
+
+Consejo: si esta carpeta esta dentro de OneDrive, guarda los .gguf en otra
+carpeta (p.ej. C:\Modelos) y configurala en Archivo > Preferencias >
+"Carpeta de modelos adicional": asi no se sincronizan varios GB ni quedan
+"solo en linea" (lo que haria que la primera carga los descargue entera).
