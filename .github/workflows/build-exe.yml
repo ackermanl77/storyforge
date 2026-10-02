@@ -83,7 +83,7 @@ jobs:
         run: python -m pytest -q
 
       - name: Download NLTK data to bundle
-        run: python -m nltk.downloader -d nltk_data stopwords wordnet omw-1.4
+        run: python -m nltk.downloader -d nltk_data stopwords wordnet
 
       - name: Build with PyInstaller
         run: pyinstaller --noconfirm --clean storyforge.spec
