@@ -13,6 +13,15 @@ from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# Antes de construir cualquier StoryForgeApp: todo lo que la app escribe en
+# user_data_dir() (autoguardado, settings.json) va a una carpeta temporal.
+# Antes estas pruebas borraban el autosave.json REAL del usuario (en
+# desarrollo, <repo>/autosave/) -- justo el archivo de recuperacion tras un
+# crash. app/paths.py lee STORYFORGE_USER_DATA_DIR en cada llamada.
+_TEST_USER_DATA = tempfile.TemporaryDirectory(prefix="storyforge-test-")
+_PREVIOUS_USER_DATA_ENV = os.environ.get("STORYFORGE_USER_DATA_DIR")
+os.environ["STORYFORGE_USER_DATA_DIR"] = _TEST_USER_DATA.name
+
 GUI_AVAILABLE = True
 _SKIP_REASON = ""
 try:
@@ -24,11 +33,11 @@ try:
 
     from app.engine import ContextOverflowError, ModelNotLoadedError
     from app.gui import (
-        AUTOSAVE_PATH,
         CHAPTER_PURPOSE_DEFAULT_LABEL,
         StoryForgeApp,
         VersionHistoryDialog,
         _lore_entry_matches_search,
+        default_autosave_path,
     )
     from app.project import LoreEntry, MAX_LORE_ENTRIES
 except Exception as _import_exc:  # pragma: no cover - environment dependent
@@ -38,32 +47,30 @@ except Exception as _import_exc:  # pragma: no cover - environment dependent
 
 def _clear_autosave() -> None:
     """
-    Several actions that call the engine (generate/refine/generate outline)
-    autosave in their `finally` block regardless of success or failure (see
-    app/gui.py::StoryForgeApp._autosave, always writing the real
-    AUTOSAVE_PATH on disk -- there is no test-only override). Without
-    clearing it before each test, StoryForgeApp() -- constructed fresh in
-    every test's setUp -- would find a leftover autosave.json from a
-    PREVIOUS test/class and, depending on how that test mocked askyesno(),
-    either silently recover it (corrupting this test's supposedly-fresh
-    project/chapter indices) or discard it as a side effect of an unrelated
-    test. Called at the very start of every setUp() in this module, before
-    StoryForgeApp() is constructed, so every test starts from a guaranteed
-    clean slate regardless of execution order or what an earlier test left
-    behind.
+    Several actions that call the engine autosave in their `finally` block
+    regardless of success or failure. Without clearing it before each test,
+    StoryForgeApp() -- constructed fresh in every test's setUp -- would find
+    a leftover autosave.json from a PREVIOUS test and either recover it or
+    discard it depending on how that test mocked askyesno(). This only ever
+    touches the temporary STORYFORGE_USER_DATA_DIR set at the top of this
+    module, never the user's real autosave.
     """
-    try:
-        os.remove(AUTOSAVE_PATH)
-    except OSError:
-        pass
+    path = default_autosave_path()
+    assert path.startswith(_TEST_USER_DATA.name), path  # nunca el autoguardado real
+    for p in (path, path + ".bak"):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
 
 
 def tearDownModule():
-    # Ultima limpieza para no dejar un autosave.json real tirado en el
-    # working tree del proyecto despues de correr esta suite (autosave/ esta
-    # en .gitignore, pero no hay razon para ensuciar el checkout de todas
-    # formas).
     _clear_autosave()
+    if _PREVIOUS_USER_DATA_ENV is None:
+        os.environ.pop("STORYFORGE_USER_DATA_DIR", None)
+    else:
+        os.environ["STORYFORGE_USER_DATA_DIR"] = _PREVIOUS_USER_DATA_ENV
+    _TEST_USER_DATA.cleanup()
 
 
 class _SynchronousThread:
@@ -378,6 +385,9 @@ class TestExpandAndRefineHappyPath(unittest.TestCase):
 
         panel._on_refine()
         self.app.update()
+        # F4: nothing changes until the diff preview is accepted.
+        self.assertEqual(panel.chapter.content, "Original text.")
+        self.app.last_preview.accept()
 
         self.assertEqual(panel.chapter.content, "REFINED per 'make it darker'")
         self.assertEqual(panel.content_box.get("1.0", "end-1c"), panel.chapter.content)
@@ -420,7 +430,7 @@ class TestVersionHistoryDialog(unittest.TestCase):
     def test_most_recent_version_is_shown_first_and_previewed_by_default(self):
         dialog = VersionHistoryDialog(self.app, self.panel)
         try:
-            self.assertIn("Version 2", dialog._labels[0])
+            self.assertIn("Versión 2", dialog._labels[0])
             self.assertEqual(dialog.preview_box.get("1.0", "end-1c"), "second draft")
         finally:
             dialog.destroy()
@@ -790,7 +800,7 @@ class TestLorebookMatchedLastGeneration(unittest.TestCase):
 
     def test_badge_shown_only_for_entries_in_last_lore_match_ids(self):
         matched_entry = self.app.project.add_lore_entry(name="Elena", keywords="Elena")
-        other_entry = self.app.project.add_lore_entry(name="Marco", keywords="Marco")
+        self.app.project.add_lore_entry(name="Marco", keywords="Marco")
         self.app.last_lore_match_ids = {id(matched_entry)}
         self.app._render_lore_entries()
 
@@ -972,6 +982,7 @@ class TestSaveErrors(unittest.TestCase):
 
     def test_close_is_aborted_when_save_fails(self):
         self.app.current_path = os.path.join(tempfile.gettempdir(), "storyforge-test.json")
+        self.app.plot_box.set("unsaved change")  # F10: only a dirty project asks to save
         with mock.patch("app.gui.messagebox.askyesnocancel", return_value=True), \
                 mock.patch.object(self.app.project, "save", side_effect=OSError("disk full")), \
                 mock.patch.object(self.app, "destroy") as mock_destroy:
@@ -986,7 +997,10 @@ class TestSaveErrors(unittest.TestCase):
             self.assertTrue(os.path.isfile(path))
 
     def test_autosave_failure_is_reported_once_not_swallowed(self):
-        with mock.patch.object(self.app.project, "save", side_effect=OSError("denied")), \
+        # The autosave is serialized on the Tk thread and written on a worker
+        # (run synchronously here).
+        with mock.patch("app.gui.save_json_text", side_effect=OSError("denied")), \
+                mock.patch("app.gui.threading.Thread", _SynchronousThread), \
                 self.assertLogs("app.gui", level="ERROR"):
             self.app._autosave()
             self.app._autosave()
@@ -1030,6 +1044,416 @@ class TestOverLengthChapterDoesNotBlockGeneration(unittest.TestCase):
         self.app.update()
         mock_warning.assert_not_called()
         self.assertEqual(calls, [1])
+
+
+class _RecordingEngine:
+    """GUI-level engine double: records calls, and lets a test inspect the
+    UI state at the moment the engine is running (see `during`)."""
+
+    is_loaded = True
+
+    def __init__(self, result="Generated chapter text.", summary="A summary.", during=None):
+        self.result = result
+        self.summary = summary
+        self.during = during
+        self.generate_calls = []
+        self.summarize_calls = []
+        self.model_path = None
+
+    def generate_chapter(self, project, chapter_index, progress_callback=None, cancel_check=None, resume_from=None):
+        self.generate_calls.append({"index": chapter_index, "resume_from": resume_from})
+        if self.during:
+            self.during()
+        base = resume_from or ""
+        return base + self.result if base else self.result
+
+    def summarize(self, text, max_words=150):
+        self.summarize_calls.append(text)
+        if isinstance(self.summary, Exception):
+            raise self.summary
+        return self.summary
+
+    def refine_chapter(self, project, chapter_index, instruction):
+        if self.during:
+            self.during()
+        return "REFINED TEXT"
+
+
+class _GuiTestCase(unittest.TestCase):
+    ASKYESNO = True
+
+    def setUp(self):
+        _clear_autosave()
+        self._patchers = [
+            mock.patch("app.gui.messagebox.askyesno", return_value=self.ASKYESNO),
+            mock.patch("app.gui.threading.Thread", _SynchronousThread),
+        ]
+        for p in self._patchers:
+            p.start()
+        self.app = StoryForgeApp()
+
+    def tearDown(self):
+        self.app.destroy()
+        for p in reversed(self._patchers):
+            p.stop()
+
+    def _chapter(self, title="Cap 1", content=""):
+        ch = self.app.project.add_chapter(title, target_words=100)
+        ch.content = content
+        self.app._render_chapters()
+        return self.app.chapter_panels[len(self.app.project.chapters) - 1]
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestUserDataIsolation(_GuiTestCase):
+    """T1: the tests must never touch the user's real autosave."""
+
+    def test_autosave_path_is_the_temporary_test_dir(self):
+        self.assertTrue(self.app.autosave_path.startswith(_TEST_USER_DATA.name))
+        repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.assertFalse(self.app.autosave_path.startswith(os.path.join(repo_root, "autosave")))
+
+    def test_autosave_writes_only_inside_the_override_dir(self):
+        self.app._autosave()
+        self.assertTrue(os.path.isfile(self.app.autosave_path))
+        _clear_autosave()
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestUnexpectedErrorReporting(_GuiTestCase):
+    """R1: Tk callback and worker-thread exceptions are logged and shown."""
+
+    def test_tk_callback_exception_is_logged_and_shown(self):
+        # A fresh app (the base fixture doesn't override report_callback_exception).
+        with mock.patch("app.gui.messagebox.showerror") as mock_error, \
+                self.assertLogs("app.gui", level="ERROR") as logs:
+            try:
+                raise ValueError("boom in a callback")
+            except ValueError:
+                self.app.report_callback_exception(*sys.exc_info())
+        mock_error.assert_called_once()
+        self.assertIn("boom in a callback", mock_error.call_args[0][1])
+        self.assertIn("boom in a callback", "\n".join(logs.output))
+
+    def test_errors_raised_by_a_real_after_callback_reach_the_handler(self):
+        with mock.patch("app.gui.messagebox.showerror") as mock_error, \
+                self.assertLogs("app.gui", level="ERROR"):
+            self.app.after(0, lambda: 1 / 0)
+            self.app.update()
+        mock_error.assert_called_once()
+        self.assertIn("ZeroDivisionError", mock_error.call_args[0][1])
+
+    def test_thread_exceptions_are_marshalled_to_the_main_thread(self):
+        import types as _types
+        try:
+            raise RuntimeError("worker died")
+        except RuntimeError:
+            exc_type, exc, tb = sys.exc_info()
+        args = _types.SimpleNamespace(exc_type=exc_type, exc_value=exc, exc_traceback=tb, thread=None)
+        with mock.patch("app.gui.messagebox.showerror") as mock_error, \
+                self.assertLogs("app.gui", level="ERROR"):
+            self.app._thread_excepthook(args)  # what threading.excepthook calls (see gui.run())
+            mock_error.assert_not_called()  # shown later, from the Tk main thread
+            self.app.update()
+        mock_error.assert_called_once()
+        self.assertIn("worker died", mock_error.call_args[0][1])
+
+    def test_main_excepthook_logs(self):
+        from app.main import _log_uncaught_exception
+        with self.assertLogs("storyforge", level="CRITICAL"):
+            try:
+                raise KeyError("startup")
+            except KeyError:
+                _log_uncaught_exception(*sys.exc_info())
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestUndoShortcutsAndSingleEditor(_GuiTestCase):
+    """F1: undo, keyboard shortcuts, one chapter editor at a time."""
+
+    def test_all_text_boxes_have_undo(self):
+        panel = self._chapter()
+        self.app._render_outline_panels()
+        for box in (panel.content_box, panel.summary_box, self.app.plot_box.textbox,
+                    self.app.outline_panels[0].outline_box):
+            self.assertTrue(int(str(box.cget("undo"))))
+
+    def test_undo_restores_edited_text_but_not_into_the_loaded_content(self):
+        panel = self._chapter(content="Loaded text.")
+        panel.content_box.insert("end", " typed")
+        panel.content_box.edit_separator()
+        panel.content_box.edit_undo()
+        self.assertEqual(panel.content_box.get("1.0", "end-1c"), "Loaded text.")
+        try:
+            panel.content_box.edit_undo()  # nothing left: loading isn't undoable
+        except Exception:  # noqa: BLE001 - Tk raises "nothing to undo"
+            pass
+        self.assertEqual(panel.content_box.get("1.0", "end-1c"), "Loaded text.")
+
+    def test_expand_with_ai_is_undoable(self):
+        class FakeEngine:
+            is_loaded = True
+
+            def expand_field(self, field_key, text, max_words=400):
+                return "EXPANDED"
+
+        self.app.engine = FakeEngine()
+        self.app.plot_box.set("a short idea")
+        self.app._expand_field(self.app.plot_box, "plot", "Plot", 50_000)
+        self.app.update()
+        self.assertEqual(self.app.plot_box.get(), "EXPANDED")
+        self.app.plot_box.textbox.edit_undo()
+        self.assertEqual(self.app.plot_box.get(), "a short idea")
+
+    def test_shortcuts_are_bound_and_menu_shows_accelerators(self):
+        for sequence in ("<Control-n>", "<Control-o>", "<Control-s>", "<Control-S>", "<Escape>"):
+            self.assertTrue(self.app.bind(sequence), sequence)
+        self.assertEqual(self.app.bind_class("Text", "<Control-o>"), "")  # no stray newline on Ctrl+O
+        panel = self._chapter()
+        self.assertTrue(panel.content_box._textbox.bind("<Control-Return>"))
+
+    def test_ctrl_enter_generates_an_empty_chapter_and_continues_a_written_one(self):
+        engine = _RecordingEngine()
+        self.app.engine = engine
+        panel = self._chapter()
+        panel._on_ctrl_enter()
+        self.app.update()
+        self.assertIsNone(engine.generate_calls[-1]["resume_from"])
+        panel._on_ctrl_enter()
+        self.app.update()
+        self.assertEqual(engine.generate_calls[-1]["resume_from"], "Generated chapter text.")
+
+    def test_escape_cancels_the_running_generation(self):
+        panel = self._chapter()
+        panel._cancel_flag = {"cancel": False}
+        self.app.cancel_running_generation()
+        self.assertTrue(panel._cancel_flag["cancel"])
+
+    def test_only_the_selected_chapter_is_shown(self):
+        self._chapter("A")
+        self._chapter("B")
+        self._chapter("C")
+        self.app.update()
+        shown = [p for p in self.app.chapter_panels if p.winfo_manager()]
+        self.assertEqual(shown, [self.app.chapter_panels[self.app.selected_chapter_index]])
+        self.app.select_chapter(0)
+        self.assertEqual([p.index for p in self.app.chapter_panels if p.winfo_manager()], [0])
+
+    def test_adding_a_chapter_selects_it(self):
+        self._chapter("A")
+        self.app.add_chapter()
+        self.assertEqual(self.app.selected_chapter_index, 1)
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestChapterReadOnlyWhileGenerating(_GuiTestCase):
+    """F3: typing into a chapter while the model writes into it was lost."""
+
+    def test_content_box_is_read_only_during_generation_and_editable_after(self):
+        panel = self._chapter()
+        seen = {}
+        self.app.engine = _RecordingEngine(during=lambda: seen.update(
+            content=panel.content_box.cget("state"), title=panel.title_entry.cget("state"),
+        ))
+        panel._on_generate()
+        self.app.update()
+        self.assertEqual(seen, {"content": "disabled", "title": "disabled"})
+        self.assertEqual(panel.content_box.cget("state"), "normal")
+        self.assertEqual(panel.content_box.get("1.0", "end-1c"), "Generated chapter text.")
+
+    def test_read_only_during_refine_too(self):
+        panel = self._chapter(content="Original.")
+        panel.refine_entry.insert(0, "darker")
+        seen = {}
+        self.app.engine = _RecordingEngine(during=lambda: seen.update(content=panel.content_box.cget("state")))
+        panel._on_refine()
+        self.app.update()
+        self.assertEqual(seen["content"], "disabled")
+        self.app.last_preview.accept()
+        self.assertEqual(panel.content_box.get("1.0", "end-1c"), "REFINED TEXT")
+        self.assertEqual(panel.content_box.cget("state"), "normal")
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestSummaryVisibilityAndStaleness(_GuiTestCase):
+    """B2: summaries are visible, editable, marked stale, and regenerated."""
+
+    def test_generated_summary_is_shown_and_fresh(self):
+        panel = self._chapter()
+        self.app.engine = _RecordingEngine(summary="The hero left.")
+        panel._on_generate()
+        self.app.update()
+        self.assertEqual(panel.summary_box.get("1.0", "end-1c"), "The hero left.")
+        self.assertFalse(panel.chapter.summary_is_stale())
+        self.assertEqual(panel.summary_state(), "ok")
+
+    def test_editing_the_chapter_marks_the_summary_stale(self):
+        panel = self._chapter(content="Text.")
+        panel.chapter.set_summary("S")
+        self.app._render_chapters()
+        panel = self.app.chapter_panels[0]
+        panel.content_box.insert("end", " More text typed by hand.")
+        panel._on_content_edited()
+        self.assertEqual(panel.summary_state(), "stale")
+        self.assertIn("desactualizado", panel.summary_status_label.cget("text"))
+
+    def test_refine_and_restore_leave_the_summary_stale(self):
+        panel = self._chapter(content="Original.")
+        panel.chapter.set_summary("S")
+        self.app._render_chapters()
+        panel = self.app.chapter_panels[0]
+        panel.refine_entry.insert(0, "darker")
+        self.app.engine = _RecordingEngine()
+        panel._on_refine()
+        self.app.update()
+        self.app.last_preview.accept()
+        self.assertTrue(panel.chapter.summary_is_stale())
+
+    def test_hand_edited_summary_is_saved_as_fresh(self):
+        panel = self._chapter(content="Text.")
+        panel.summary_box.insert("1.0", "My own summary.")
+        self.app._sync_all()
+        self.assertEqual(panel.chapter.summary, "My own summary.")
+        self.assertFalse(panel.chapter.summary_is_stale())
+
+    def test_summary_failure_is_logged_and_reported_not_swallowed(self):
+        panel = self._chapter()
+        self.app.engine = _RecordingEngine(summary=RuntimeError("summary exploded"))
+        with self.assertLogs("app.gui", level="ERROR") as logs:
+            panel._on_generate()
+            self.app.update()
+        self.assertIn("summary exploded", "\n".join(logs.output))
+        self.assertIn("Regenerar resumen", panel.status_label.cget("text"))
+        self.assertEqual(panel.chapter.content, "Generated chapter text.")
+
+    def test_regenerate_summary_button(self):
+        panel = self._chapter(content="Some text.")
+        engine = _RecordingEngine(summary="Fresh summary.")
+        self.app.engine = engine
+        panel._on_regenerate_summary()
+        self.app.update()
+        self.assertEqual(engine.summarize_calls, ["Some text."])
+        self.assertEqual(panel.chapter.summary, "Fresh summary.")
+        self.assertFalse(panel.chapter.summary_is_stale())
+
+    def test_stale_previous_summaries_are_regenerated_before_generating(self):
+        first = self._chapter("A", content="Chapter one text.")
+        first.chapter.set_summary("old")
+        first.chapter.content = "Chapter one text, refined."
+        self.app._render_chapters()
+        second = self._chapter("B")
+        engine = _RecordingEngine(summary="new summary")
+        self.app.engine = engine
+        second._on_generate()
+        self.app.update()
+        self.assertEqual(engine.summarize_calls[0], "Chapter one text, refined.")
+        self.assertEqual(self.app.project.chapters[0].summary, "new summary")
+        self.assertFalse(self.app.project.chapters[0].summary_is_stale())
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestContinueButtons(_GuiTestCase):
+    """B5: Continuar / Continuar desde el cursor."""
+
+    def test_continue_resumes_from_the_current_text(self):
+        panel = self._chapter(content="Existing prose.")
+        engine = _RecordingEngine(result=" And more.")
+        self.app.engine = engine
+        panel._on_continue()
+        self.app.update()
+        self.assertEqual(engine.generate_calls[0]["resume_from"], "Existing prose.")
+        self.assertEqual(panel.content_box.get("1.0", "end-1c"), "Existing prose. And more.")
+        self.assertEqual(panel.chapter.history, ["Existing prose."])
+
+    def test_continue_from_cursor_drops_the_text_after_it(self):
+        panel = self._chapter(content="Keep this. Drop this.")
+        panel.content_box.mark_set("insert", "1.10")
+        engine = _RecordingEngine(result=" New ending.")
+        self.app.engine = engine
+        panel._on_continue(from_cursor=True)
+        self.app.update()
+        self.assertEqual(engine.generate_calls[0]["resume_from"], "Keep this.")
+        self.assertEqual(panel.chapter.content, "Keep this. New ending.")
+        self.assertIn("Keep this. Drop this.", panel.chapter.history)
+
+    def test_continue_on_an_empty_chapter_generates(self):
+        panel = self._chapter()
+        engine = _RecordingEngine()
+        self.app.engine = engine
+        panel._on_continue()
+        self.app.update()
+        self.assertIsNone(engine.generate_calls[0]["resume_from"])
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestChatFormatSetting(_GuiTestCase):
+    """B3: the Modelo tab's chat-format choice reaches the engine and is remembered per model."""
+
+    def test_load_passes_the_choice_and_remembers_it(self):
+        loads = []
+
+        class FakeEngine:
+            is_loaded = False
+            model_path = None
+
+            def load(self, path, **kwargs):
+                loads.append((path, kwargs))
+
+        self.app.engine = FakeEngine()
+        self.app.model_combo.set("some-model.gguf")
+        self.app.chat_format_menu.set("ChatML (Qwen, etc.)")
+        self.app._load_model()
+        self.app.update()
+        self.assertEqual(loads[0][1]["chat_format"], "chatml")
+
+        self.app.chat_format_menu.set("Auto (desde el GGUF)")
+        self.app._on_model_selected("some-model.gguf")
+        self.assertEqual(self.app.chat_format_menu.get(), "ChatML (Qwen, etc.)")
+        from app.settings import settings_path
+        self.assertTrue(settings_path().startswith(_TEST_USER_DATA.name))
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestOutlineWarnings(_GuiTestCase):
+    """B4/B7: truncated or unparseable outlines are reported, not applied silently."""
+
+    def _prepare(self, engine):
+        self.app.engine = engine
+        self.app.plot_box.set("a story")
+        self.app.outline_count_entry.delete(0, "end")
+        self.app.outline_count_entry.insert(0, "3")
+
+    def test_fewer_chapters_than_requested_is_flagged(self):
+        class FakeEngine:
+            is_loaded = True
+            last_finish_reason = "length"
+
+            def generate_outline(self, project, n):
+                return [("A", "a"), ("B", "b")]
+
+        self._prepare(FakeEngine())
+        self.app._on_generate_outline()
+        self.app.update()
+        status = self.app.outline_status.cget("text")
+        self.assertIn("incompleto", status)
+        self.assertIn("2 de 3", status)
+
+    def test_unparseable_outline_shows_an_error_and_changes_nothing(self):
+        from app.prompts import OutlineParseError
+
+        class FakeEngine:
+            is_loaded = True
+
+            def generate_outline(self, project, n):
+                raise OutlineParseError("bad format", raw_text="Just a paragraph.")
+
+        self._prepare(FakeEngine())
+        with mock.patch("app.gui.messagebox.showerror") as mock_error:
+            self.app._on_generate_outline()
+            self.app.update()
+        mock_error.assert_called_once()
+        self.assertIn("Just a paragraph.", mock_error.call_args[0][1])
+        self.assertEqual(self.app.project.chapters, [])
 
 
 if __name__ == "__main__":
