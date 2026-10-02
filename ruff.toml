@@ -1,0 +1,8 @@
+# Lint de CI (T5/F12): errores de sintaxis y pyflakes (nombres sin definir,
+# imports sin usar...). Esa clase de error ya causo un bug real (NameError en
+# los mensajes de error de los hilos de trabajo, ver docs/PROJECT_STATUS.md).
+line-length = 120
+target-version = "py312"
+
+[lint]
+select = ["E9", "F"]
