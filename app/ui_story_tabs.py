@@ -25,6 +25,7 @@ from .ui_common import (
     APP_TITLE,
     LimitedTextBox,
 )
+from .ui_focus import apply_tab_order
 
 
 class StoryTabsMixin:
@@ -63,6 +64,11 @@ class StoryTabsMixin:
             on_import=lambda: self._import_field(self.plot_box),
         )
         self.plot_box.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
+        apply_tab_order(
+            tab,
+            self.story_title_entry, self.author_entry, self.heading_menu, self.project_note_entry,
+            self.plot_box.focus_order_widgets(),
+        )
         self._load_project_meta_into_ui()
 
     def _load_project_meta_into_ui(self) -> None:
@@ -84,6 +90,7 @@ class StoryTabsMixin:
             on_import=lambda: self._import_field(self.characters_box),
         )
         self.characters_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        apply_tab_order(self.tab_characters, self.characters_box.focus_order_widgets())
 
     def _build_setting_tab(self) -> None:
         self.tab_setting.grid_columnconfigure(0, weight=1)
@@ -95,6 +102,7 @@ class StoryTabsMixin:
             on_import=lambda: self._import_field(self.setting_box),
         )
         self.setting_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
+        apply_tab_order(self.tab_setting, self.setting_box.focus_order_widgets())
 
     def _import_field(self, box: LimitedTextBox) -> None:
         """Reemplaza el contenido de `box` con el texto de un archivo elegido

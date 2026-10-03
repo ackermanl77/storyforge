@@ -31,6 +31,7 @@ from .ui_dialogs import (
     COLOR_OK,
     COLOR_WARN,
 )
+from .ui_focus import apply_tab_order
 
 
 class OutlinePanel(ctk.CTkFrame):
@@ -62,6 +63,7 @@ class OutlinePanel(ctk.CTkFrame):
         self.outline_box.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
         self.outline_box.bind("<KeyRelease>", self._on_change)
         self._on_change()
+        apply_tab_order(self, self.focus_order_widgets())
 
     def _on_change(self, _event=None) -> None:
         words = count_words(self.outline_box.get("1.0", "end-1c"))
@@ -74,6 +76,9 @@ class OutlinePanel(ctk.CTkFrame):
 
     def sync_to_model(self) -> None:
         self.chapter.outline = self.outline_box.get("1.0", "end-1c")
+
+    def focus_order_widgets(self):
+        return [self.outline_box]
 
 
 class OutlineTabMixin:
@@ -260,8 +265,19 @@ class OutlineTabMixin:
                 text=S.AUN_NO_HAY_CAPITULOS_GENERA,
                 text_color=COLOR_MUTED, wraplength=800, justify="left",
             ).grid(row=0, column=0, sticky="w", padx=8, pady=8)
+            apply_tab_order(
+                self.tab_outline,
+                self.outline_count_entry, self.writing_style_menu,
+                self.generate_outline_btn, self.complete_outline_btn,
+            )
             return
         for i, chapter in enumerate(self.project.chapters):
             panel = OutlinePanel(self.outline_scroll, i, chapter)
             panel.grid(row=i, column=0, sticky="ew", pady=6)
             self.outline_panels.append(panel)
+        apply_tab_order(
+            self.tab_outline,
+            self.outline_count_entry, self.writing_style_menu,
+            self.generate_outline_btn, self.complete_outline_btn,
+            [panel.focus_order_widgets() for panel in self.outline_panels],
+        )

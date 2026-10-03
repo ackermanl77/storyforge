@@ -59,6 +59,7 @@ from .ui_dialogs import (
     COLOR_OK,
     COLOR_WARN,
 )
+from .ui_focus import apply_tab_order
 
 # Un solo registrador para toda la ventana principal ("app.gui"), como
 # antes de dividir gui.py en modulos.
@@ -90,8 +91,10 @@ class ModelTabMixin:
             row, values=self._list_models() or [NO_MODELS_LABEL], command=self._on_model_selected,
         )
         self.model_combo.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        ctk.CTkButton(row, text=S.ACTUALIZAR_LISTA, command=self._refresh_models).grid(row=0, column=1, padx=4)
-        ctk.CTkButton(row, text=S.ELEGIR_ARCHIVO, command=self._browse_model).grid(row=0, column=2, padx=4)
+        self.refresh_models_btn = ctk.CTkButton(row, text=S.ACTUALIZAR_LISTA, command=self._refresh_models)
+        self.refresh_models_btn.grid(row=0, column=1, padx=4)
+        self.browse_model_btn = ctk.CTkButton(row, text=S.ELEGIR_ARCHIVO, command=self._browse_model)
+        self.browse_model_btn.grid(row=0, column=2, padx=4)
         self.load_model_btn = ctk.CTkButton(row, text=S.CARGAR_MODELO, command=self._load_model)
         self.load_model_btn.grid(row=0, column=3, padx=4)
 
@@ -126,7 +129,8 @@ class ModelTabMixin:
         adv = ctk.CTkFrame(tab, fg_color="transparent")
         adv.grid(row=5, column=0, sticky="w", padx=10, pady=(6, 0))
         self.flash_attn_var = ctk.BooleanVar(value=self._gpu_available)
-        ctk.CTkCheckBox(adv, text=S.FLASH_ATTENTION, variable=self.flash_attn_var).pack(side="left", padx=(0, 12))
+        self.flash_attn_check = ctk.CTkCheckBox(adv, text=S.FLASH_ATTENTION, variable=self.flash_attn_var)
+        self.flash_attn_check.pack(side="left", padx=(0, 12))
         ctk.CTkLabel(adv, text=S.LOTE_N_BATCH).pack(side="left", padx=(0, 4))
         self.n_batch_entry = ctk.CTkEntry(adv, width=60)
         self.n_batch_entry.insert(0, "1024" if self._gpu_available else "512")
@@ -194,11 +198,20 @@ class ModelTabMixin:
         ctk.CTkLabel(frame, text=S.SEMILLA_VACIO_ALEATORIA).grid(row=4, column=0, columnspan=2, sticky="w", padx=8, pady=(4, 8))
         self.seed_entry = ctk.CTkEntry(frame, width=110)
         self.seed_entry.grid(row=4, column=2, sticky="w", pady=(4, 8))
-        ctk.CTkButton(frame, text=S.USAR_LA_ULTIMA, width=110, command=self._use_last_seed).grid(
+        self.use_last_seed_btn = ctk.CTkButton(frame, text=S.USAR_LA_ULTIMA, width=110, command=self._use_last_seed)
+        self.use_last_seed_btn.grid(
             row=4, column=3, sticky="w", padx=6, pady=(4, 8))
         self.last_seed_label = ctk.CTkLabel(frame, text="", text_color=COLOR_MUTED)
         self.last_seed_label.grid(row=4, column=4, columnspan=4, sticky="w", padx=6, pady=(4, 8))
         self._load_sampling_into_ui()
+        apply_tab_order(
+            self.tab_model,
+            self.model_combo, self.refresh_models_btn, self.browse_model_btn, self.load_model_btn,
+            self.n_ctx_entry, self.n_gpu_layers_entry, self.suggest_layers_btn, self.n_threads_entry,
+            self.flash_attn_check, self.n_batch_entry, self.n_ubatch_entry, self.kv_cache_menu,
+            self.chat_format_menu, self.sampling_preset_menu, list(self.sampling_entries.values()),
+            self.seed_entry, self.use_last_seed_btn,
+        )
 
     def _load_sampling_into_ui(self) -> None:
         cfg = self.project.sampling

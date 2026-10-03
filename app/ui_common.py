@@ -17,6 +17,7 @@ from .strings_es import (
     PURPOSE_OPTIONS,
     STYLE_OPTIONS,
 )
+from .ui_focus import apply_tab_order
 from .ui_dialogs import (
     COLOR_ERROR,
     COLOR_MUTED,
@@ -89,6 +90,8 @@ class LimitedTextBox(ctk.CTkFrame):
         self.counter_label = ctk.CTkLabel(header, text=S.CONTADOR_PALABRAS_VACIO.format(max_words=max_words))
         self.counter_label.grid(row=0, column=1, sticky="e")
 
+        self.import_btn = None
+        self.expand_btn = None
         text_row = 1
         if on_expand or on_import:
             btn_bar = ctk.CTkFrame(self, fg_color="transparent")
@@ -107,6 +110,7 @@ class LimitedTextBox(ctk.CTkFrame):
         self.textbox.grid(row=text_row, column=0, sticky="nsew", padx=4, pady=4)
         self.grid_rowconfigure(text_row, weight=1)
         self.textbox.bind("<KeyRelease>", self._on_change)
+        self._bind_tab_order()
 
     def _on_change(self, _event=None) -> None:
         words = count_words(self.get())
@@ -132,3 +136,9 @@ class LimitedTextBox(ctk.CTkFrame):
         else:
             self.textbox.edit_reset()
         self._on_change()
+
+    def focus_order_widgets(self):
+        return [btn for btn in (self.import_btn, self.expand_btn, self.textbox) if btn is not None]
+
+    def _bind_tab_order(self) -> None:
+        apply_tab_order(self, self.focus_order_widgets())

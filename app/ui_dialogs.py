@@ -23,6 +23,7 @@ import customtkinter as ctk
 
 from . import strings_es as S
 from .project import Project
+from .ui_focus import apply_tab_order
 
 # Colores con variante clara/oscura (CustomTkinter acepta tuplas).
 COLOR_INSERT_BG = ("#c8efc8", "#1f4d2a")
@@ -102,14 +103,22 @@ class DiffPreviewDialog(ctk.CTkToplevel):
 
         buttons = ctk.CTkFrame(self, fg_color="transparent")
         buttons.grid(row=2, column=0, columnspan=2, sticky="e", padx=10, pady=(0, 10))
-        ctk.CTkButton(buttons, text=S.DESCARTAR, width=110, fg_color="#8a3b3b", hover_color="#6e2f2f",
-                      command=self.discard).pack(side="left", padx=4)
+        self.discard_btn = ctk.CTkButton(
+            buttons, text=S.DESCARTAR, width=110, fg_color="#8a3b3b", hover_color="#6e2f2f",
+            command=self.discard,
+        )
+        self.discard_btn.pack(side="left", padx=4)
+        self.accept_continue_btn = None
         if on_accept_continue is not None:
-            ctk.CTkButton(buttons, text=S.ACEPTAR_Y_SEGUIR_REFINANDO, width=200,
-                          command=self.accept_and_continue).pack(side="left", padx=4)
-        ctk.CTkButton(buttons, text=S.ACEPTAR, width=110, command=self.accept).pack(side="left", padx=4)
+            self.accept_continue_btn = ctk.CTkButton(
+                buttons, text=S.ACEPTAR_Y_SEGUIR_REFINANDO, width=200, command=self.accept_and_continue,
+            )
+            self.accept_continue_btn.pack(side="left", padx=4)
+        self.accept_btn = ctk.CTkButton(buttons, text=S.ACEPTAR, width=110, command=self.accept)
+        self.accept_btn.pack(side="left", padx=4)
         self.protocol("WM_DELETE_WINDOW", self.discard)
         self.bind("<Escape>", lambda _e: self.discard())
+        apply_tab_order(self, self.old_box, self.new_box, self.discard_btn, self.accept_continue_btn, self.accept_btn)
 
     def _close(self) -> None:
         self.decided = True
@@ -154,8 +163,11 @@ class TextViewerDialog(ctk.CTkToplevel):
         self.box.configure(state="disabled")
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.grid(row=2, column=0, sticky="e", padx=10, pady=(0, 10))
-        ctk.CTkButton(bar, text=S.COPIAR, width=90, command=lambda: self._copy(text)).pack(side="left", padx=4)
-        ctk.CTkButton(bar, text=S.CERRAR, width=90, command=self.destroy).pack(side="left", padx=4)
+        self.copy_btn = ctk.CTkButton(bar, text=S.COPIAR, width=90, command=lambda: self._copy(text))
+        self.copy_btn.pack(side="left", padx=4)
+        self.close_btn = ctk.CTkButton(bar, text=S.CERRAR, width=90, command=self.destroy)
+        self.close_btn.pack(side="left", padx=4)
+        apply_tab_order(self, self.box, self.copy_btn, self.close_btn)
 
     def _copy(self, text: str) -> None:
         self.clipboard_clear()
@@ -243,18 +255,22 @@ class ProjectSearchDialog(ctk.CTkToplevel):
         self.query_entry = ctk.CTkEntry(top)
         self.query_entry.grid(row=0, column=1, sticky="ew")
         self.query_entry.insert(0, initial)
-        ctk.CTkButton(top, text=S.BUSCAR, width=90, command=self.search).grid(row=0, column=2, padx=6)
+        self.search_btn = ctk.CTkButton(top, text=S.BUSCAR, width=90, command=self.search)
+        self.search_btn.grid(row=0, column=2, padx=6)
         ctk.CTkLabel(top, text=S.REEMPLAZAR_CON).grid(row=1, column=0, padx=(0, 6), pady=(6, 0))
         self.replace_entry = ctk.CTkEntry(top)
         self.replace_entry.grid(row=1, column=1, sticky="ew", pady=(6, 0))
-        ctk.CTkButton(top, text=S.REEMPLAZAR_TODO, width=130, command=self.replace_all).grid(row=1, column=2, padx=6, pady=(6, 0))
+        self.replace_all_btn = ctk.CTkButton(top, text=S.REEMPLAZAR_TODO, width=130, command=self.replace_all)
+        self.replace_all_btn.grid(row=1, column=2, padx=6, pady=(6, 0))
 
         opts = ctk.CTkFrame(self, fg_color="transparent")
         opts.grid(row=1, column=0, sticky="ew", padx=10)
         self.case_var = ctk.BooleanVar(value=False)
         self.word_var = ctk.BooleanVar(value=False)
-        ctk.CTkCheckBox(opts, text=S.DISTINGUIR_MAYUSCULAS, variable=self.case_var).pack(side="left", padx=(0, 12))
-        ctk.CTkCheckBox(opts, text=S.PALABRA_COMPLETA, variable=self.word_var).pack(side="left")
+        self.case_check = ctk.CTkCheckBox(opts, text=S.DISTINGUIR_MAYUSCULAS, variable=self.case_var)
+        self.case_check.pack(side="left", padx=(0, 12))
+        self.word_check = ctk.CTkCheckBox(opts, text=S.PALABRA_COMPLETA, variable=self.word_var)
+        self.word_check.pack(side="left")
         self.summary_label = ctk.CTkLabel(opts, text="", text_color=COLOR_MUTED)
         self.summary_label.pack(side="left", padx=12)
 
@@ -262,9 +278,12 @@ class ProjectSearchDialog(ctk.CTkToplevel):
         self.results.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
         self.results.grid_columnconfigure(0, weight=1)
         self.hits: List[SearchHit] = []
+        self.result_buttons: List[ctk.CTkButton] = []
         self.query_entry.bind("<Return>", lambda _e: self.search())
         if initial:
             self.search()
+        else:
+            self._bind_tab_order()
 
     def _options(self):
         return self.case_var.get(), self.word_var.get()
@@ -275,14 +294,18 @@ class ProjectSearchDialog(ctk.CTkToplevel):
         self.hits = find_in_project(self.app.project, self.query_entry.get(), case, word)
         for child in self.results.winfo_children():
             child.destroy()
+        self.result_buttons = []
         for row, hit in enumerate(self.hits[:300]):
-            ctk.CTkButton(
+            btn = ctk.CTkButton(
                 self.results, text=f"{hit.label}\n{hit.snippet}", anchor="w", fg_color="transparent",
                 text_color=("#1a1a1a", "#e6e6e6"), hover_color=("#d0d0d0", "#3a3a3a"),
                 command=lambda h=hit: self.app.jump_to_search_hit(h, self.query_entry.get()),
-            ).grid(row=row, column=0, sticky="ew", pady=1)
+            )
+            btn.grid(row=row, column=0, sticky="ew", pady=1)
+            self.result_buttons.append(btn)
         more = S.SE_MUESTRAN_300 if len(self.hits) > 300 else ""
         self.summary_label.configure(text=S.RESULTADOS.format(count=len(self.hits), more=more))
+        self._bind_tab_order()
         return self.hits
 
     def replace_all(self) -> int:
@@ -291,6 +314,13 @@ class ProjectSearchDialog(ctk.CTkToplevel):
         self.summary_label.configure(text=S.REEMPLAZOS.format(count=count))
         self.search()
         return count
+
+    def _bind_tab_order(self) -> None:
+        apply_tab_order(
+            self,
+            self.query_entry, self.search_btn, self.replace_entry, self.replace_all_btn,
+            self.case_check, self.word_check, self.result_buttons,
+        )
 
 
 class PreferencesDialog(ctk.CTkToplevel):
@@ -344,8 +374,16 @@ class PreferencesDialog(ctk.CTkToplevel):
         row += 1
         bar = ctk.CTkFrame(self, fg_color="transparent")
         bar.grid(row=row, column=0, columnspan=2, sticky="e", padx=10, pady=10)
-        ctk.CTkButton(bar, text=S.CANCELAR, width=90, command=self.destroy).pack(side="left", padx=4)
-        ctk.CTkButton(bar, text=S.GUARDAR, width=90, command=self.save).pack(side="left", padx=4)
+        self.cancel_btn = ctk.CTkButton(bar, text=S.CANCELAR, width=90, command=self.destroy)
+        self.cancel_btn.pack(side="left", padx=4)
+        self.save_btn = ctk.CTkButton(bar, text=S.GUARDAR, width=90, command=self.save)
+        self.save_btn.pack(side="left", padx=4)
+        apply_tab_order(
+            self,
+            self.theme_menu, self.scale_menu, self.font_entry,
+            self.size_entry, self.spacing_entry, self.models_entry,
+            self.cancel_btn, self.save_btn,
+        )
 
     def values(self) -> dict:
         def as_int(entry, default, lo, hi):

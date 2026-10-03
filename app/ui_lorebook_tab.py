@@ -29,6 +29,7 @@ from .ui_dialogs import (
     COLOR_MUTED,
     COLOR_OK,
 )
+from .ui_focus import apply_tab_order
 
 if TYPE_CHECKING:
     from .gui import StoryForgeApp
@@ -79,8 +80,10 @@ class LoreEntryPanel(ctk.CTkFrame):
         options.grid(row=2, column=1, columnspan=3, sticky="w", padx=8, pady=2)
         self.enabled_var = ctk.BooleanVar(value=entry.enabled)
         self.constant_var = ctk.BooleanVar(value=entry.constant)
-        ctk.CTkCheckBox(options, text=S.ACTIVA, variable=self.enabled_var).pack(side="left", padx=(0, 12))
-        ctk.CTkCheckBox(options, text=S.INCLUIR_SIEMPRE, variable=self.constant_var).pack(side="left", padx=(0, 12))
+        self.enabled_check = ctk.CTkCheckBox(options, text=S.ACTIVA, variable=self.enabled_var)
+        self.enabled_check.pack(side="left", padx=(0, 12))
+        self.constant_check = ctk.CTkCheckBox(options, text=S.INCLUIR_SIEMPRE, variable=self.constant_var)
+        self.constant_check.pack(side="left", padx=(0, 12))
         ctk.CTkLabel(options, text=S.PRIORIDAD).pack(side="left", padx=(0, 4))
         self.priority_entry = ctk.CTkEntry(options, width=50)
         self.priority_entry.insert(0, str(entry.priority))
@@ -91,6 +94,7 @@ class LoreEntryPanel(ctk.CTkFrame):
         self.text_box.insert("1.0", entry.text)
         self.text_box.edit_reset()
         self.text_box.grid(row=3, column=1, columnspan=2, padx=8, pady=(2, 8), sticky="ew")
+        apply_tab_order(self, self.focus_order_widgets())
 
     def set_match(self, matched: bool, reason: str = "") -> None:
         self.matched_last_generation = matched
@@ -114,6 +118,12 @@ class LoreEntryPanel(ctk.CTkFrame):
         label = self.entry.name.strip() or S.ENTRADA.format(number=self.index + 1)
         if messagebox.askyesno(APP_TITLE, S.ELIMINAR_LA_ENTRADA_DE_LOREBOOK.format(label=label)):
             self.app.remove_lore_entry(self.index)
+
+    def focus_order_widgets(self):
+        return [
+            self.name_entry, self.remove_btn, self.keywords_entry,
+            self.enabled_check, self.constant_check, self.priority_entry, self.text_box,
+        ]
 
 
 def _lore_entry_matches_search(entry: LoreEntry, query: str) -> bool:
@@ -241,6 +251,11 @@ class LorebookTabMixin:
         self.add_lore_btn.configure(state="normal" if self.project.can_add_lore_entry() else "disabled")
         if self.busy:
             self._set_engine_busy(True)
+        apply_tab_order(
+            self.tab_lorebook,
+            self.add_lore_btn, self.lore_search_entry,
+            [panel.focus_order_widgets() for panel in self.lore_panels],
+        )
 
     def _record_lore_matches(self, chapter_index: int) -> None:
         """

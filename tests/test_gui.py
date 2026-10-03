@@ -261,6 +261,51 @@ class TestBackgroundErrorReporting(unittest.TestCase):
 
 
 @unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestKeyboardTabOrderF9(unittest.TestCase):
+    """F9: each panel installs an explicit Tab order that follows the layout."""
+
+    def setUp(self):
+        _clear_autosave()
+        self._askyesno_patcher = mock.patch("app.gui.messagebox.askyesno", return_value=False)
+        self._askyesno_patcher.start()
+        self.app = StoryForgeApp()
+        self.app.project.add_chapter("Cap 1")
+        self.app._render_chapters()
+
+    def tearDown(self):
+        self.app.destroy()
+        self._askyesno_patcher.stop()
+
+    def test_chapter_panel_order_follows_the_layout(self):
+        panel = self.app.chapter_panels[0]
+        order = panel._storyforge_tab_order
+        self.assertEqual(order[:4], [panel.title_entry, panel.target_entry, panel.purpose_menu, panel.author_note_entry])
+        self.assertLess(order.index(panel.generate_btn), order.index(panel.content_box))
+        self.assertLess(order.index(panel.content_box), order.index(panel.refine_btn))
+        from app.ui_focus import focus_target
+
+        # Tk reports bindings in normalized form (<Key-Tab>, <Shift-Key-Tab>).
+        self.assertIn("<Key-Tab>", focus_target(panel.title_entry).bind())
+        self.assertIn("<Shift-Key-Tab>", focus_target(panel.content_box).bind())
+
+    def test_window_uses_the_app_icon(self):
+        from app.gui import window_icon_path
+
+        path = window_icon_path()
+        self.assertIsNotNone(path)
+        self.assertTrue(path.endswith(os.path.join("assets", "icon.ico")))
+        spec = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "storyforge.spec"),
+                    encoding="utf-8").read()
+        self.assertIn('datas.append(("assets/icon.ico", "assets"))', spec)
+        self.assertIn('icon="assets/icon.ico"', spec)
+
+    def test_model_tab_starts_with_the_model_picker(self):
+        order = self.app.tab_model._storyforge_tab_order
+        self.assertIs(order[0], self.app.model_combo)
+        self.assertIn(self.app.seed_entry, order)
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
 class TestChapterPurposeSync(unittest.TestCase):
     def setUp(self):
         _clear_autosave()
