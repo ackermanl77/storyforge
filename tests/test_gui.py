@@ -378,6 +378,21 @@ class TestImportField(unittest.TestCase):
         finally:
             os.remove(path)
 
+    def test_import_can_be_undone(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False, encoding="utf-8") as f:
+            f.write("Imported text content.")
+            path = f.name
+        try:
+            self.app.plot_box.set("")
+            self.app.plot_box.textbox.insert("1.0", "my own notes")
+            with mock.patch("app.gui.filedialog.askopenfilename", return_value=path),                  mock.patch("app.gui.messagebox.askyesno", return_value=True):
+                self.app._import_field(self.app.plot_box)
+            self.assertEqual(self.app.plot_box.get(), "Imported text content.")
+            self.app.plot_box.textbox.edit_undo()
+            self.assertEqual(self.app.plot_box.get(), "my own notes")
+        finally:
+            os.remove(path)
+
     def test_cancelling_the_file_dialog_does_nothing(self):
         self.app.plot_box.set("existing content")
         with mock.patch("app.gui.filedialog.askopenfilename", return_value=""):
