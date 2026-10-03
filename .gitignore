@@ -39,3 +39,12 @@ env/
 photoeditor_instructions.txt
 storyforge_instructions.txt
 videoeditor_instructor.txt
+
+# Cobertura (scripts/run_coverage.ps1, build.bat)
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Ajustes locales del editor
+.vscode/

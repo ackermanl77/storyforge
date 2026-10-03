@@ -87,6 +87,15 @@ def log_location() -> str:
     return S.LOG_EN_CONSOLA
 
 
+def window_icon_path() -> Optional[str]:
+    """assets/icon.ico: dentro del build (sys._MEIPASS) o en el arbol del codigo."""
+    import sys
+
+    base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(base, "assets", "icon.ico")
+    return path if os.path.isfile(path) else None
+
+
 def default_autosave_path() -> str:
     return os.path.join(user_data_dir(), "autosave", "autosave.json")
 
@@ -137,6 +146,7 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         self.prefs = get_ui_preferences()
         self._apply_global_preferences()
         self.geometry("1100x800")
+        self._set_window_icon()
 
         self.project = Project()
         self.engine = LocalStoryEngine()
@@ -192,6 +202,18 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         self.after(AUTOSAVE_INTERVAL_MS, self._autosave_tick)
 
     # ---------------- preferencias (F9) ----------------
+    def _set_window_icon(self) -> None:
+        """Icono de la ventana (barra de titulo y Alt+Tab): el mismo
+        assets/icon.ico del .exe, incluido en el build (storyforge.spec). Si
+        falta o Tk no lo acepta, queda el de CustomTkinter."""
+        path = window_icon_path()
+        if path is None:
+            return
+        try:
+            self.iconbitmap(path)
+        except Exception:  # noqa: BLE001 -- un icono nunca debe impedir abrir la app
+            logger.debug("could not set the window icon from %s", path, exc_info=True)
+
     def _apply_global_preferences(self) -> None:
         ctk.set_appearance_mode(self.prefs.get("appearance", "dark"))
         ctk.set_default_color_theme("blue")
