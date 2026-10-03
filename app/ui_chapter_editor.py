@@ -38,6 +38,7 @@ from .ui_common import (
     _append_text,
     _set_text_readonly_content,
 )
+from .ui_focus import apply_tab_order
 from .ui_dialogs import (
     COLOR_ERROR,
     COLOR_MUTED,
@@ -160,12 +161,16 @@ class ChapterPanel(ctk.CTkFrame):
         ctk.CTkLabel(self.find_bar, text=S.REEMPLAZAR_ETIQUETA).grid(row=0, column=2, padx=(8, 4))
         self.replace_entry = ctk.CTkEntry(self.find_bar)
         self.replace_entry.grid(row=0, column=3, sticky="ew")
-        for col, (text, cmd) in enumerate((
-            ("<", lambda: self.find_next(backwards=True)), (">", self.find_next),
-            (S.REEMPLAZAR, self.replace_current), (S.REEMPLAZAR_TODO, self.replace_all),
-            (S.CERRAR, self.hide_find_bar),
-        ), start=4):
-            ctk.CTkButton(self.find_bar, text=text, width=28 if len(text) == 1 else 90, command=cmd).grid(row=0, column=col, padx=2)
+        self.find_prev_btn = ctk.CTkButton(self.find_bar, text="<", width=28, command=lambda: self.find_next(backwards=True))
+        self.find_prev_btn.grid(row=0, column=4, padx=2)
+        self.find_next_btn = ctk.CTkButton(self.find_bar, text=">", width=28, command=self.find_next)
+        self.find_next_btn.grid(row=0, column=5, padx=2)
+        self.replace_current_btn = ctk.CTkButton(self.find_bar, text=S.REEMPLAZAR, width=90, command=self.replace_current)
+        self.replace_current_btn.grid(row=0, column=6, padx=2)
+        self.replace_all_btn = ctk.CTkButton(self.find_bar, text=S.REEMPLAZAR_TODO, width=90, command=self.replace_all)
+        self.replace_all_btn.grid(row=0, column=7, padx=2)
+        self.find_close_btn = ctk.CTkButton(self.find_bar, text=S.CERRAR, width=90, command=self.hide_find_bar)
+        self.find_close_btn.grid(row=0, column=8, padx=2)
         self.find_count_label = ctk.CTkLabel(self.find_bar, text="", text_color=COLOR_MUTED)
         self.find_count_label.grid(row=0, column=9, padx=6)
         self.find_entry.bind("<Return>", lambda _e: (self.find_next(), "break")[1])
@@ -234,6 +239,7 @@ class ChapterPanel(ctk.CTkFrame):
         self._refresh_word_count()
         self._refresh_summary_status()
         self._refresh_history_btn()
+        apply_tab_order(self, self.focus_order_widgets())
 
     # ---- sincronizacion con el modelo de datos ----
     def sync_to_model(self) -> None:
@@ -289,6 +295,18 @@ class ChapterPanel(ctk.CTkFrame):
             self.summary_header.grid()
             if self.summary_visible:
                 self.summary_frame.grid()
+
+    def focus_order_widgets(self):
+        return [
+            self.title_entry, self.target_entry, self.purpose_menu, self.author_note_entry,
+            self.generate_btn, self.continue_btn, self.continue_cursor_btn, self.retry_btn,
+            self.prev_alt_btn, self.next_alt_btn, self.cancel_btn, self.history_btn, self.more_btn,
+            self.reduce_btn, self.report_btn, self.find_btn, self.remove_btn,
+            self.find_entry, self.replace_entry, self.find_prev_btn, self.find_next_btn,
+            self.replace_current_btn, self.replace_all_btn, self.find_close_btn,
+            self.content_box, self.refine_entry, self.refine_btn,
+            self.summary_toggle_btn, self.regen_summary_btn, self.summary_box,
+        ]
 
     def summary_state(self) -> str:
         """"ok", "stale" (el texto cambio desde el resumen), "missing" (hay
@@ -966,6 +984,7 @@ class VersionHistoryDialog(ctk.CTkToplevel):
         self.preview_box.configure(state="disabled")
 
         self._on_select(self._labels[0])
+        apply_tab_order(self, self.version_menu, self.restore_btn, self.diff_btn, self.preview_box)
 
     def _selected_history_index(self) -> int:
         display_index = self._labels.index(self.version_menu.get())

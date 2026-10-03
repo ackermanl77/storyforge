@@ -25,6 +25,7 @@ from .ui_dialogs import (
     SearchHit,
     replace_in_text,
 )
+from .ui_focus import apply_tab_order
 
 
 class ChaptersTabMixin:
@@ -126,10 +127,12 @@ class ChaptersTabMixin:
     def _render_chapter_sidebar(self) -> None:
         for child in self.chapter_sidebar.winfo_children():
             child.destroy()
+        self.chapter_sidebar_buttons = []
         if not self.project.chapters:
             ctk.CTkLabel(self.chapter_sidebar, text=S.SIN_CAPITULOS, text_color=COLOR_MUTED).grid(
                 row=0, column=0, sticky="w", padx=6, pady=6)
             self._refresh_word_totals()
+            self._refresh_chapters_tab_focus_order()
             return
         for i, chapter in enumerate(self.project.chapters):
             title = chapter.title.strip() or S.CAPITULO_N.format(number=i + 1)
@@ -144,7 +147,9 @@ class ChaptersTabMixin:
                 hover_color=("#d0d0d0", "#2b2b2b"), command=lambda idx=i: self._jump_to_chapter(idx),
             )
             btn.grid(row=i, column=0, sticky="ew", padx=4, pady=2)
+            self.chapter_sidebar_buttons.append(btn)
         self._refresh_word_totals()
+        self._refresh_chapters_tab_focus_order()
 
     def _refresh_word_totals(self) -> None:
         if hasattr(self, "status_bar"):
@@ -173,6 +178,13 @@ class ChaptersTabMixin:
         if 0 <= self.selected_chapter_index < len(self.chapter_panels):
             return self.chapter_panels[self.selected_chapter_index]
         return None
+
+    def _refresh_chapters_tab_focus_order(self) -> None:
+        apply_tab_order(
+            self.tab_chapters,
+            self.add_chapter_btn, self.focus_btn, getattr(self, "chapter_sidebar_buttons", []),
+            [panel.focus_order_widgets() for panel in self.chapter_panels],
+        )
 
     def _refresh_summary_views(self) -> None:
         for panel in self.chapter_panels:
