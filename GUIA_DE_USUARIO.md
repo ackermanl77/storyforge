@@ -9,6 +9,7 @@ rendimiento/GPU, limitaciones) y [docs/](docs/PROJECT_STATUS.md)
 ## Índice
 
 1. [Qué es StoryForge Local](#qué-es-storyforge-local)
+   - [Instalar y abrir la app](#instalar-y-abrir-la-app)
 2. [Recorrido por cada pestaña](#recorrido-por-cada-pestaña)
 3. [Flujo de trabajo recomendado](#flujo-de-trabajo-recomendado)
 4. [Guía de cada función en detalle](#guía-de-cada-función-en-detalle)
@@ -37,9 +38,30 @@ genera **en inglés**, usando un modelo de IA que corre **localmente en tu
 PC** — sin depender de internet ni de una API externa una vez que tienes el
 modelo descargado.
 
-La interfaz tiene seis pestañas: **Modelo, Plot, Personajes, Setting,
-Esquema, Capítulos**. Las primeras cuatro son donde defines tu historia; las
-últimas dos son donde la generas y editas.
+La interfaz tiene siete pestañas: **Modelo, Plot, Personajes, Setting,
+Lorebook, Esquema, Capítulos**. En Modelo cargas la IA; en Plot,
+Personajes, Setting y Lorebook defines tu historia; en Esquema y Capítulos
+la generas y editas.
+
+### Instalar y abrir la app
+
+- **Con el instalador** (`StoryForge-<versión>-<variante>-setup.exe`): se
+  instala solo para tu usuario, sin permisos de administrador, en
+  `%LOCALAPPDATA%\Programs\StoryForge`, con acceso directo en el menú
+  Inicio (y en el escritorio si lo marcas). Al actualizar, reemplaza el
+  programa pero no toca los modelos que copiaste; desinstalar tampoco los
+  borra.
+- **Con el zip** (`StoryForge-<versión>-cpu.zip` o `-cuda13.zip`):
+  descomprímelo donde quieras y ejecuta `StoryForge.exe`. La variante
+  `cuda13` usa una GPU NVIDIA; `cpu` funciona en cualquier PC.
+- En ambos casos copia tu modelo `.gguf` a la carpeta `models\` que está
+  junto a `StoryForge.exe` (ver `models\README.txt` para recomendaciones), o
+  guárdalo en otra carpeta —mejor fuera de OneDrive— y configúrala en
+  **Archivo > Preferencias**.
+- La app no está firmada: Windows SmartScreen puede advertir la primera vez
+  ("Más información" > "Ejecutar de todas formas").
+- Para ejecutarla desde el código fuente o compilarla tú, ver el
+  [README](README.md).
 
 ---
 
@@ -167,7 +189,9 @@ cualquier cuadro de texto), Ctrl+Enter dentro del texto de un capítulo
 (Generar si está vacío, Continuar si ya tiene texto), Esc (cancelar la tarea
 en curso), Ctrl+F (buscar y reemplazar en el capítulo), Ctrl+Shift+F (buscar
 en todo el proyecto) y F11 (modo enfoque: oculta la lista de capítulos, el
-refinamiento y el resumen).
+refinamiento y el resumen). **Tab / Shift+Tab** recorren los campos y
+botones de cada panel y diálogo en el orden en que se ven (los ocultos o
+deshabilitados se saltan).
 
 **Más funciones del capítulo:**
 - **Nota del autor**: una instrucción corta ("Elena oculta que está
@@ -208,8 +232,8 @@ esquema, resumen, refinado, expandir).
    o **regenéralo** desde cero (la versión anterior queda guardada, ver
    ["Versiones anteriores"](#versiones-anteriores)).
 6. **Reduce repetición** si el texto abusa de ciertas palabras.
-7. **Guarda tu proyecto** regularmente, y **exporta** a Word o TXT cuando
-   la historia esté lista.
+7. **Guarda tu proyecto** regularmente, y **exporta** a Word, EPUB,
+   Markdown o TXT cuando la historia esté lista.
 
 No es obligatorio seguir este orden al pie de la letra (puedes escribir
 capítulos sin esquema, por ejemplo), pero generar el esquema primero mejora
@@ -277,7 +301,7 @@ En la pestaña Capítulos, cada panel tiene:
   borrar nada (si el capítulo ya llegó a su objetivo, agrega una sección
   más, ~900 palabras). Úsalo después de cancelar, de editar a mano, o
   cuando quieras más texto.
-- **Continuar desde el cursor**: igual, pero desde donde está el cursor en
+- **Desde el cursor** (continuar desde el cursor): igual, pero desde donde está el cursor en
   el texto; lo que haya después del cursor se reemplaza (se te pide
   confirmar y la versión anterior queda en "Versiones anteriores").
 - Al continuar, el modelo recibe **todo lo que quepa** del capítulo ya
@@ -377,9 +401,13 @@ anteriores" en vez de pedirle al modelo que "deshaga lo último".
 ### Versiones anteriores
 
 Cada capítulo guarda automáticamente su versión previa cuando:
-- Lo **regeneras** (y ya tenía contenido).
-- Lo **refinas**.
+- Lo **regeneras** o **continúas** (y ya tenía contenido), incluido
+  **Reintentar**.
+- Lo **refinas** o **reescribes una selección** (clic derecho).
+- **Reemplazas** texto con Buscar y reemplazar (en el capítulo o en todo el
+  proyecto).
 - Le aplicas **"Reducir repetición"**.
+- **Restauras** otra versión.
 
 Se guardan hasta **20 versiones** por capítulo (la más vieja se descarta
 al llegar al límite). Cada versión indica de dónde viene (generar,
@@ -398,7 +426,8 @@ Para recuperar una versión anterior:
    deshacer.
 
 Esto no cubre ediciones manuales que hagas escribiendo directamente en la
-caja de texto del capítulo — solo se activa con los tres botones de arriba.
+caja de texto del capítulo (para esas está Ctrl+Z) — solo se activa con
+las acciones de arriba.
 
 ### Expandir con IA / Importar desde archivo
 
@@ -423,8 +452,8 @@ cada uno.
 
 ### Reducir repetición / Reporte de repetición
 
-En cada capítulo, dos botones basados en análisis de palabras (WordNet, no
-IA generativa):
+En cada capítulo, dentro de **Más herramientas**, dos acciones basadas en
+análisis de palabras (WordNet, no IA generativa):
 
 - **Reporte de repetición**: muestra qué palabras se usan con más
   frecuencia de la recomendada, sin cambiar nada.
@@ -433,8 +462,9 @@ IA generativa):
   adelante; la primera aparición se deja intacta como "ancla"). Guarda la
   versión anterior antes de aplicar el cambio (ver "Versiones anteriores").
 
-**Nota**: la primera vez que uses cualquiera de los dos, la app intenta
-descargar datos de NLTK (~35 MB) si no los tiene — requiere internet una
+**Nota**: el `.exe` ya trae los datos de NLTK que necesita. Ejecutando
+desde el código fuente, la primera vez que uses cualquiera de los dos la
+app intenta descargarlos (~11 MB) si no los tiene — requiere internet una
 sola vez; después funciona offline. Sin esos datos, el reporte igual
 funciona, pero "Reducir repetición" no tiene sinónimos para sustituir.
 
@@ -525,7 +555,9 @@ pregunta si quieres guardar — con opción de cancelar el cierre.
 | Capítulos por historia | 10 |
 | Palabras por capítulo | 10,000 |
 | Esquema por capítulo | 800 palabras |
-| Versiones anteriores por capítulo | 5 |
+| Versiones anteriores por capítulo | 20 |
+| Nota del autor | 150 palabras |
+| Entradas del Lorebook | 200 (de hasta 500 palabras cada una) |
 
 Si algo excede un límite, la app te avisa antes de generar o guardar — no
 te bloquea de escribir de más, pero sí de generar/guardar con esos

@@ -31,9 +31,16 @@ correspondiente mas abajo.
 - **Refinar un capitulo ya generado**: en vez de regenerarlo desde cero,
   puedes pedirle al modelo que lo reescriba segun una instruccion puntual
   ("hazlo mas oscuro", "acorta el dialogo del final").
-- **Versiones anteriores por capitulo**: regenerar, refinar, o reducir
-  repeticion guarda la version previa (hasta 5 por capitulo), recuperable
-  desde un boton en cada capitulo.
+- **Versiones anteriores por capitulo**: generar, continuar, refinar,
+  reescribir una seleccion, reemplazar, reducir repeticion o restaurar
+  guarda la version previa (hasta 20 por capitulo, con origen y fecha),
+  recuperable desde un boton en cada capitulo.
+- **Lorebook** (entradas que solo entran al prompt cuando se mencionan),
+  **Nota del autor**, reescritura de una seleccion con clic derecho,
+  **buscar y reemplazar** (en el capitulo y en todo el proyecto), modo
+  enfoque, barra de estado con tokens/s, ETA, uso de contexto y "Detener".
+- **Formato de chat** del modelo (plantilla del GGUF o Llama 3/ChatML/
+  Mistral/Alpaca) y muestreo por tarea con semilla.
 - **Expandir con IA / Importar desde archivo**: en Plot, Personajes y
   Setting, puedes pedirle al modelo que desarrolle una nota corta en un
   texto mas completo, o importar el contenido directo desde un archivo
@@ -51,6 +58,23 @@ correspondiente mas abajo.
   (.docx, con portada y un capítulo por página), EPUB, Markdown o texto plano.
 
 ## Historial de cambios
+
+**Ronda B12/F9/K3/K4/T5 y CI (2026-10-02/03, versión 0.4.0):**
+- **Reutilización del prefijo del prompt**: lo estable de la historia va
+  primero y lo que cambia en cada sección (lorebook, largo restante, pistas,
+  Nota del autor) al final, así llama.cpp reutiliza su caché KV entre
+  secciones.
+- **Orden de Tab explícito** (Tab / Shift+Tab) en cada panel y diálogo.
+- **Ícono de la app** (exe, ventana e instalador) e **instalador por
+  usuario** de Inno Setup (`installer/StoryForge.iss`, lo compila
+  `build.bat` si encuentra Inno Setup 6).
+- **Cobertura** de pruebas en CI, `build.bat` y `scripts/run_coverage.ps1`.
+- La interfaz se dividió en módulos `app/ui_*.py` y todos sus textos están
+  en `app/strings_es.py`.
+- "Reducir repetición" ahora sí sustituye sinónimos (no encontraba WordNet
+  cuando NLTK lo deja comprimido en `wordnet.zip`).
+- CI más robusto en los runners de Windows (reintento del arranque de
+  Tcl/Tk, límite de tiempo por prueba y por job).
 
 **Ronda P2 del informe de mejoras (versión 0.4.0):**
 - **Muestreo por tarea y semilla**: la prosa usa presets (Creativo /
@@ -249,8 +273,16 @@ computadora.
 
 ## Instalacion (en tu PC con Windows)
 
+Si tienes un zip de release (`StoryForge-<versión>-cpu.zip` o
+`-cuda13.zip`, generados por CI) o el instalador
+(`StoryForge-<versión>-<variante>-setup.exe`, instalación por usuario en
+`%LOCALAPPDATA%\Programs\StoryForge`, sin permisos de administrador), no
+necesitas Python: descomprime o instala, copia tu modelo `.gguf` a la
+carpeta `models\` junto a `StoryForge.exe` (o configura otra carpeta en
+Archivo > Preferencias) y ejecuta `StoryForge.exe`. Para compilarlo tú:
+
 1. Instala Python 3.10 o mas nuevo (marca "Add python.exe to PATH" en el
-   instalador de python.org).
+   instalador de python.org); `build.bat` usa 3.14 por defecto.
 2. Descarga/copia esta carpeta completa a tu PC.
 3. Descarga un modelo `.gguf` (ver `models/README.txt` para recomendaciones)
    y colocalo dentro de la carpeta `models/`.
@@ -259,8 +291,10 @@ computadora.
    3.14 vía el `py` launcher (`py -3.14`; otra versión con
    `set STORYFORGE_PYVER=3.12`). Crea un entorno limpio `.build-venv` con versiones
    exactas (`requirements-build.txt` + el wheel precompilado de
-   llama-cpp-python), descarga los datos de NLTK, corre las pruebas, usa
-   PyInstaller para producir el build, y lo copia a `StoryForge-App\StoryForge.exe` —
+   llama-cpp-python), descarga los datos de NLTK, corre las pruebas con
+   cobertura, usa PyInstaller para producir el build, compila el instalador
+   en `dist\installer\` si encuentra Inno Setup 6 (si no, avisa y sigue), y
+   copia el programa a `StoryForge-App\StoryForge.exe` —
    una carpeta fija y facil de ubicar (a diferencia de `dist\`, que es la
    carpeta de trabajo de PyInstaller y se borra/regenera en cada build).
 5. Copia la carpeta `models/` (con tu modelo adentro) junto al .exe, dentro
@@ -268,9 +302,9 @@ computadora.
    `StoryForge-App\StoryForge.exe`. `build.bat` conserva
    `StoryForge-App\models\` entre builds (reemplaza todo lo demas).
 
-Por que no viene ya compilado: el .exe tiene que compilarse en Windows (no
-puedo generar un ejecutable nativo de Windows desde el entorno Linux donde
-yo corro). El paso 4 es una sola linea de comando y tarda 1-3 minutos.
+El .exe tiene que compilarse en Windows (no hay compilacion cruzada desde
+otro sistema). El paso 4 es una sola linea de comando y tarda unos minutos
+(crea el entorno, instala, prueba y empaqueta).
 
 ### Uso sin compilar un .exe (para probar mas rapido)
 
@@ -324,8 +358,9 @@ soporte CUDA para acelerar mucho la generacion:
 No hace falta editar codigo para el resto: en la pestaña **"Modelo"**, junto
 al selector de archivo, hay tres campos de configuracion avanzada:
 
-- **Contexto (n_ctx)**: tamaño de la ventana de contexto del modelo (por
-  defecto 8192). Mas grande permite incluir mas plot/personajes/setting/
+- **Contexto (n_ctx)**: tamaño de la ventana de contexto del modelo (al
+  elegir un modelo se propone su contexto de entrenamiento, como mucho
+  16,384; sin esa informacion, 8192; `0` usa el de entrenamiento). Mas grande permite incluir mas plot/personajes/setting/
   capitulos previos por llamada, pero usa mas RAM y puede ser mas lento.
 - **Capas en GPU (n_gpu_layers)**: si la app detecta una version de
   `llama-cpp-python` con soporte de GPU real (paso 1 de arriba), este campo
@@ -341,9 +376,10 @@ de "Modelo cargado" confirma con que valores quedo cargado.
 
 ## Reductor de repeticion (WordNet)
 
-La primera vez que uses "Reducir repeticion" o "Reporte de repeticion", la
-app intenta descargar los datos de NLTK (stopwords y WordNet, ~35 MB en
-total) si no los tiene. Esto requiere internet **una sola vez**; despues
+El `.exe` ya trae los datos de NLTK (stopwords y WordNet), asi que funciona
+sin internet. Ejecutando desde el codigo fuente, la primera vez que uses
+"Reducir repeticion" o "Reporte de repeticion" la app intenta descargarlos
+(~11 MB) si no los tiene. Esto requiere internet **una sola vez**; despues
 funciona sin conexion. Si nunca tienes internet disponible, esta funcion
 simplemente no sustituira sinonimos (el resto de la app sigue funcionando
 igual).
@@ -363,24 +399,35 @@ del modelo local que elijas y de tus prompts. Ten en cuenta que:
 ```
 storyforge/
   app/
-    project.py     Modelo de datos (plot/personajes/setting/capitulos) y limites
-    prompts.py      Plantillas de prompt y guia de estilo
+    project.py       Modelo de datos (plot/personajes/setting/lorebook/capitulos), limites,
+                     formato versionado (format_version 2) y guardado atomico
+    prompts.py       Plantillas de prompt, guia de estilo, lorebook y recorte de contexto
+    chat_format.py   Plantillas de chat (GGUF Jinja, Llama 3, ChatML, Mistral, Alpaca, sin plantilla)
+    sampling.py      Muestreo por tarea, presets y semilla
     engine.py        Motor de generacion local (llama-cpp-python)
+    gguf.py          Lectura de la cabecera GGUF, modelos partidos, estimacion de VRAM
+    settings.py      Opciones por PC (por modelo, ultimo modelo, preferencias)
+    paths.py         Donde viven modelos, nltk_data, autoguardado, registro y settings
+    fileutil.py      Escritura atomica con reintentos
     repetition.py    Analisis y reduccion de repeticion de palabras
     export.py        Exportacion a .docx / .txt / Markdown / EPUB
     gui.py           Ventana principal (CustomTkinter): abrir/guardar, autoguardado, errores
     ui_*.py          Menu y pestanas (ui_menu, ui_model_tab, ui_story_tabs, ui_lorebook_tab,
                      ui_outline_tab, ui_chapters_tab, ui_chapter_editor), dialogos
-                     (ui_dialogs), barra de estado (ui_status) y piezas comunes (ui_common)
+                     (ui_dialogs), barra de estado (ui_status), orden de Tab (ui_focus)
+                     y piezas comunes (ui_common)
     strings_es.py    Todos los textos visibles de la interfaz
     task_runner.py   Tareas del modelo en segundo plano (ocupado, Detener, errores)
     main.py          Punto de entrada
+  assets/             Icono de la app (icon.ico, icon.png)
+  installer/          Instalador de Inno Setup (StoryForge.iss)
+  scripts/            run_coverage.ps1 (reporte de cobertura)
   storyforge.py       Script de arranque (usado por PyInstaller)
   storyforge.spec     Especificacion de empaquetado de PyInstaller
   build.bat           Script de una linea para generar el .exe en Windows
-  requirements.txt    Dependencias de la app
+  requirements*.txt   Dependencias: app, desarrollo, build fijado, DLLs de CUDA
   models/             Coloca aqui tu modelo .gguf
-  tests/              Pruebas automatizadas (unittest, sin dependencias extra)
+  tests/              Pruebas automatizadas (pytest)
   docs/               Documentacion tecnica (arquitectura, workflows, historial de fixes)
   GUIA_DE_USUARIO.md  Guia de uso de cada pestana y funcion, para quien usa la app
 ```
@@ -388,16 +435,22 @@ storyforge/
 ## Pruebas
 
 ```
+pip install -r requirements-dev.txt
 python -m pytest -q
+ruff check app tests
 ```
 
-(`python -m unittest discover -s tests -v` tambien funciona.) Las pruebas
+Resultado el 2026-10-03: **339 passed, 2 skipped, 21 subtests** (los 2
+saltados son la prueba opcional con un modelo real); corre la suite tú
+mismo antes de confiar en este número. `scripts\run_coverage.ps1` genera el
+reporte de cobertura (usa `.venv`). Las pruebas
 nunca escriben en tu carpeta de datos real: `tests/conftest.py` y
 `tests/test_gui.py` apuntan `STORYFORGE_USER_DATA_DIR` a una carpeta
-temporal. CI (`.github/workflows/build-exe.yml`) corre la suite con
-`pytest` y `ruff check app tests`, y arma dos zips:
-`StoryForge-<versión>-cpu.zip` y `StoryForge-<versión>-cuda13.zip`. Un tag
-`v<versión>` (igual a `app/__init__.py`) los publica como GitHub Release.
+temporal. CI (`.github/workflows/build-exe.yml`) corre en cada push a
+`master`/`test-story` `ruff check app tests` y la suite con cobertura, y
+arma dos zips: `StoryForge-<versión>-cpu.zip` y
+`StoryForge-<versión>-cuda13.zip`. Un tag `v<versión>` (igual a
+`app/__init__.py`) los publica como GitHub Release.
 
 `tests/test_real_model.py` es una prueba opcional con un modelo real
 (`set STORYFORGE_TEST_MODEL=C:\ruta\modelo-chico.gguf`); sin esa variable

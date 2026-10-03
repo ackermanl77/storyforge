@@ -24,4 +24,4 @@ Generate a chapter-by-chapter beat sheet from the plot/characters/setting before
 ## Known limits
 
 - The outline generation call is a single, un-sectioned completion (unlike chapter prose, which is generated in sections) — very large chapter counts combined with a small model context window can hit `ContextOverflowError` even at the smallest context budget level. Reduce plot/characters/setting length or the number of chapters requested.
-- No constrained decoding (GBNF grammar) yet, and no automatic "complete the missing chapters" action.
+- No constrained decoding (GBNF grammar) yet. A short or truncated outline is completed with "Completar capítulos faltantes" (`LocalStoryEngine.complete_outline()`), which asks only for the missing chapters.

@@ -18,7 +18,9 @@ These guides document current application behavior: what each feature does, wher
 ## Post-Processing and Output
 
 - [Word-repetition reduction](repetition-reduction/workflow.md)
-- [Export to Word / TXT](export/workflow.md)
+- [Export to Word / EPUB / Markdown / TXT](export/workflow.md)
+
+Features without their own workflow page (the lorebook, find/replace, Author's Note, selection rewrite, sampling, chat format, status bar, Tab order) are described in `docs/PROJECT_STATUS.md` and, for users, in [`GUIA_DE_USUARIO.md`](../../GUIA_DE_USUARIO.md).
 
 ## Reliability and Release
 

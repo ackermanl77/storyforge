@@ -28,7 +28,7 @@ A `ChapterPanel` created while `self.busy` is already true (e.g. via `_apply_out
 
 A generation this long deserved its own safety net independent of the user remembering to save. `StoryForgeApp.autosave_path` (`<user_data_dir()>/autosave/autosave.json`: the repo in development, `%APPDATA%\StoryForge` in the .exe, or `STORYFORGE_USER_DATA_DIR` when set) is separate from the project file the user explicitly saves:
 
-- `StoryForgeApp._autosave_tick()` re-schedules itself every `AUTOSAVE_INTERVAL_MS` (20s) for the life of the app, and only actually writes when `self.busy` is true.
+- `StoryForgeApp._autosave_tick()` re-schedules itself every `AUTOSAVE_INTERVAL_MS` (20s) for the life of the app; it writes on every tick while `self.busy` is true, and otherwise when the project has unsaved changes and the last autosave is at least `AUTOSAVE_IDLE_SECONDS` (60 s) old.
 - Because `ChapterPanel.sync_to_model()` reads straight from the live `content_box` widget (which the generation's `progress_callback` keeps updating section by section), `_autosave()`'s call to `_sync_all()` picks up in-progress prose, not just already-completed chapters.
 - One more autosave fires immediately when a chapter or outline generation finishes, so the just-completed result (including its summary) is captured without waiting up to 20s for the next tick.
 - On startup, `_offer_autosave_recovery()` checks for `autosave/autosave.json` and, if present, asks whether to load it (`current_path` stays unset — recovered content still needs an explicit "Guardar como" to pick a real destination).
