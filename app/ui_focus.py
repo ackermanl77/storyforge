@@ -89,5 +89,7 @@ def apply_tab_order(container, *widgets) -> List[object]:
             except Exception:  # noqa: BLE001
                 pass
         for sequence, step in (("<Tab>", 1), ("<Shift-Tab>", -1), ("<ISO_Left_Tab>", -1)):
-            target.bind(sequence, lambda _e, i=index, s=step, o=order: _move_focus(o, i, s))
+            # _e=None: some CustomTkinter widgets call bound callbacks without an
+            # event, and a missing argument surfaced as an "unexpected error" dialog.
+            target.bind(sequence, lambda _e=None, i=index, s=step, o=order: _move_focus(o, i, s))
     return order

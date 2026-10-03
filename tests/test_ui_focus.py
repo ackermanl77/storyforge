@@ -68,6 +68,14 @@ class TestTabOrder(unittest.TestCase):
         a.bindings["<Shift-Tab>"](None)
         self.assertTrue(c.focused, "Shift+Tab on the first widget wraps to the last")
 
+    def test_bindings_accept_being_called_without_an_event(self):
+        # Regression: some CustomTkinter widgets invoke bound callbacks with no
+        # event; the lambda required one and raised TypeError in the app.
+        a, b = FakeWidget("a"), FakeWidget("b")
+        apply_tab_order(Container(), a, b)
+        self.assertEqual(a.bindings["<Tab>"](), "break")
+        self.assertTrue(b.focused)
+
     def test_hidden_and_disabled_widgets_are_skipped(self):
         a = FakeWidget("a")
         hidden = FakeWidget("hidden", viewable=False)
