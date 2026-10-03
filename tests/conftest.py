@@ -13,7 +13,7 @@ os.environ.setdefault("STORYFORGE_USER_DATA_DIR", _SESSION_DIR.name)
 
 def _retry_tk_init_on_transient_tcl_read() -> None:
     """En los runners Windows de GitHub, crear una ventana Tk a veces falla
-    con "Can't find a usable init.tcl ... couldn't read file ...: No error"
+    con "Can't find a usable init.tcl (o tk.tcl) ... couldn't read file ...: No error"
     (una lectura que falla un instante, no un Tcl roto: la siguiente ventana
     se crea bien). Las pruebas reintentan ese error puntual; la app no cambia."""
     try:
@@ -31,7 +31,8 @@ def _retry_tk_init_on_transient_tcl_read() -> None:
             try:
                 return original_init(self, *args, **kwargs)
             except tkinter.TclError as exc:
-                if "init.tcl" not in str(exc) or attempt == 4:
+                # init.tcl or tk.tcl: the same transient read failure, seen with both.
+                if "Can't find a usable" not in str(exc) or attempt == 4:
                     raise
                 time.sleep(0.5 * (attempt + 1))
 
