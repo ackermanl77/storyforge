@@ -447,10 +447,13 @@ def build_chapter_system_prompt(
     progresivamente si el prompt no cabe en la ventana de contexto del
     modelo cargado (ver engine.CONTEXT_BUDGET_LEVELS).
     """
-    bible, task = _chapter_prompt_parts(
+    bible, task, step_blocks = _chapter_prompt_parts(
         project, chapter_index, max_plot_words, max_characters_words, max_setting_words,
         max_previous_words, max_outline_words, max_lore_words,
     )
+    step_context = _step_context_block(step_blocks)
+    if step_context:
+        return f"{bible}{step_context}\n\n{task}"
     return bible + task
 
 
@@ -464,7 +467,7 @@ def _chapter_prompt_parts(
     max_outline_words: int = 400,
     max_lore_words: int = 200,
     recent_text: str = "",
-) -> Tuple[str, str]:
+) -> Tuple[str, str, List[str]]:
     """
     (biblia, tarea): la "biblia" de la historia (contexto, capitulos
     previos, esquema, lorebook, reglas de estilo) va en el turno de sistema;
@@ -506,7 +509,6 @@ def _chapter_prompt_parts(
         f"{overview}\n"
         f"PROGRESS SO FAR:\n{previous}\n\n"
         f"{outline_block}"
-        f"{lore_block}"
         f"{purpose_instruction}"
         f"{style_emphasis}"
         f"{STYLE_GUIDE}\n"
@@ -515,7 +517,8 @@ def _chapter_prompt_parts(
         f"Now write Chapter {chapter_index + 1}, titled \"{chapter.title}\". "
         f"Target length: approximately {chapter.target_words} words. "
     )
-    return bible, task
+    blocks = [lore_block.rstrip()] if lore_block else []
+    return bible, task, blocks
 
 
 def _outline_beats(outline: str) -> List[str]:
@@ -570,18 +573,37 @@ def build_author_note(project: Project, chapter: Chapter) -> str:
     return "AUTHOR'S NOTE (apply this to the passage you write now): " + " ".join(notes)
 
 
+STEP_CONTEXT_HEADER = "STEP-SPECIFIC CONTEXT (closest to the passage you are writing now):"
+
+
+def _step_context_block(blocks: List[str]) -> str:
+    clean = [block.strip() for block in blocks if block and block.strip()]
+    if not clean:
+        return ""
+    return f"{STEP_CONTEXT_HEADER}\n\n" + "\n\n".join(clean)
+
+
 def build_chapter_start_chat(project: Project, chapter_index: int, budget: dict) -> ChatPrompt:
     """Primera seccion de un capitulo (todavia no hay texto escrito)."""
-    bible, task = _chapter_prompt_parts(project, chapter_index, **_chapter_budget_kwargs(budget))
+    bible, task, step_blocks = _chapter_prompt_parts(project, chapter_index, **_chapter_budget_kwargs(budget))
     note = build_author_note(project, project.chapters[chapter_index])
-    note_block = f"\n{note}" if note else ""
+    if note:
+        step_blocks.append(note)
+    step_context = _step_context_block(step_blocks)
+    user = (
+        f"{task.strip()}\n\nBegin the chapter now. Output only the chapter's prose "
+        "(no chapter heading, no notes)."
+    )
+    if step_context:
+        user = f"{user}\n\n{step_context}"
+    # Completado sin chat: termina con la indicacion de empezar, para que el
+    # modelo arranque a escribir prosa justo despues.
+    step_part = f"\n\n{step_context}" if step_context else ""
+    raw = f"{bible}{task}{step_part}\n\nBegin the chapter now:\n"
     return ChatPrompt(
         system=bible.rstrip(),
-        user=(
-            f"{task.strip()}\n\nBegin the chapter now. Output only the chapter's prose "
-            f"(no chapter heading, no notes).{note_block}"
-        ),
-        raw=f"{bible}{task}{note_block}\n\nBegin the chapter now:\n",
+        user=user,
+        raw=raw,
     )
 
 
@@ -601,23 +623,27 @@ def build_chapter_continuation_chat(
     oracion) en vez de "contestar" una instruccion. `hints` son lineas extra
     (avance por beats, "todavia no termines", "esta es la ultima parte").
     """
-    bible, task = _chapter_prompt_parts(
+    bible, task, step_blocks = _chapter_prompt_parts(
         project, chapter_index, recent_text=already_written, **_chapter_budget_kwargs(budget),
     )
-    hints = list(hints or [])
+    hints = [h for h in (hints or []) if h]
     note = build_author_note(project, project.chapters[chapter_index])
-    if note:
-        hints.append(note)  # al final: lo ultimo que lee el modelo antes de escribir
-    extra = "\n".join(h for h in hints if h)
-    extra_block = f"\n{extra}" if extra else ""
+    # Orden de los bloques variables: lorebook, largo, pistas y al final la
+    # nota del autor -- lo ultimo que lee el modelo antes de escribir.
+    tail_blocks = hints + ([note] if note else [])
+    step_context = _step_context_block(step_blocks + [f"Write about {remaining_words} more words."] + tail_blocks)
     user = (
         f"{task.strip()}\n\nThe chapter is already in progress; your reply starts with the "
         "last part of what has been written so far. Continue it seamlessly from the exact "
         "point where it stops. Do not repeat earlier sentences, do not restart the scene "
-        f"and do not summarize. Write about {remaining_words} more words."
-        f"{extra_block}"
+        "and do not summarize."
     )
-    cont = build_continuation_prompt(already_written, remaining_words, tail_words=tail_words, hints=hints)
+    if step_context:
+        user = f"{user}\n\n{step_context}"
+    # build_continuation_prompt ya dice cuantas palabras faltan: no se repite aqui.
+    cont = build_continuation_prompt(
+        already_written, remaining_words, tail_words=tail_words, hints=step_blocks + tail_blocks
+    )
     return ChatPrompt(
         system=bible.rstrip(),
         user=user,
@@ -794,15 +820,15 @@ def build_continuation_prompt(
     lineas extra opcionales (ver build_chapter_continuation_chat).
     """
     tail = _trim_words_tail(already_written, tail_words)
-    extra = "\n".join(h for h in (hints or []) if h)
-    extra_block = f"\n{extra}" if extra else ""
+    step_context = _step_context_block(list(hints or []))
+    step_suffix = f"\n\n{step_context}" if step_context else ""
     return (
         "Continue the same chapter directly from where it left off. Do not "
         "repeat previous sentences, do not restart the scene, and do not "
         "summarize what already happened — just keep writing the story.\n\n"
-        f"...(end of what has been written so far)\n{tail}\n\n"
         f"Continue for about {remaining_words} more words, keeping the same "
-        f"tone, characters and formatting rules.{extra_block}"
+        f"tone, characters and formatting rules.{step_suffix}\n\n"
+        f"...(end of what has been written so far)\n{tail}"
     )
 
 

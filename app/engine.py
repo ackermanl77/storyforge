@@ -313,6 +313,8 @@ class LocalStoryEngine:
         # vuelven a medir en cada seccion y en cada intento de presupuesto.
         self._token_cache: "OrderedDict[str, int]" = OrderedDict()
         self._token_cache_llm = None
+        self._prompt_cache = None
+        self._prompt_cache_llm = None
 
     # ---------------- detener / estadisticas ----------------
     def request_stop(self) -> None:
@@ -463,6 +465,7 @@ class LocalStoryEngine:
             n_ctx=self._n_ctx, n_threads=n_threads, n_gpu_layers=n_gpu_layers,
             flash_attn=bool(flash_attn), n_batch=n_batch, n_ubatch=n_ubatch, kv_cache_type=kv_cache_type,
         )
+        self._ensure_prompt_cache()
 
     def unload(self) -> None:
         llm = self._llm
@@ -472,6 +475,8 @@ class LocalStoryEngine:
         self._formatter_llm = None
         self.model_info = None
         self._token_cache.clear()
+        self._prompt_cache = None
+        self._prompt_cache_llm = None
         # Llama.close() (llama-cpp-python >= 0.2.8x) libera la VRAM/RAM del
         # modelo en el momento, en vez de depender de cuando pase el
         # recolector de basura -- load() llama a unload() justamente para no
@@ -544,6 +549,28 @@ class LocalStoryEngine:
         if isinstance(prompt, str):
             return prompt
         return self.formatter.render(prompt)
+
+    def _ensure_prompt_cache(self) -> None:
+        """
+        Habilita la cache de estados de llama-cpp-python cuando existe.
+
+        La misma instancia de `Llama` ya reutiliza el prefijo comun de dos
+        llamadas consecutivas; esta cache amplifica ese beneficio cuando se
+        intercalan otras llamadas (por ejemplo resumenes) y luego se vuelve a
+        un prompt que comparte gran parte de su prefijo.
+        """
+        if self._llm is None or self._prompt_cache_llm is self._llm:
+            return
+        self._prompt_cache = None
+        set_cache = getattr(self._llm, "set_cache", None)
+        if callable(set_cache):
+            try:
+                from llama_cpp import LlamaRAMCache
+                self._prompt_cache = LlamaRAMCache()
+                set_cache(self._prompt_cache)
+            except Exception:  # noqa: BLE001
+                self._prompt_cache = None
+        self._prompt_cache_llm = self._llm
 
     # ---------------- manejo de contexto / tokens ----------------
     def _count_tokens(self, text: str) -> int:
@@ -657,6 +684,7 @@ class LocalStoryEngine:
         """
         if self._llm is None:
             raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
+        self._ensure_prompt_cache()
 
         text_prompt = self.render_prompt(prompt)
         prompt_tokens = self._count_tokens(text_prompt)

@@ -26,9 +26,6 @@ She swore quietly.
 THIS CHAPTER'S OUTLINE (follow these beats in order; you may add sensory detail, dialogue and internal thoughts, but do not skip or reorder the events described):
 Ines and Tomas survey the city at night.
 
-RELEVANT WORLD INFO (only what applies to this part of the story):
-Velmora Bell: A bell that rings at each shift.
-
 CHAPTER PURPOSE: This is the story's CLIMAX. Build steadily toward the central conflict's decisive confrontation or turning point, raise the stakes and tension throughout, and deliver a genuine, consequential turning point by the end of the chapter -- not a minor skirmish.
 
 WRITING STYLE EMPHASIS: Favor rich, sensory description: spend more time on setting, atmosphere and physical detail, even where it slows the pace.
@@ -49,5 +46,11 @@ FORMATTING RULES (follow strictly):
 Now write Chapter 2, titled "Night Survey". Target length: approximately 1500 words.
 
 Begin the chapter now. Output only the chapter's prose (no chapter heading, no notes).
+
+STEP-SPECIFIC CONTEXT (closest to the passage you are writing now):
+
+RELEVANT WORLD INFO (only what applies to this part of the story):
+Velmora Bell: A bell that rings at each shift.
+
 AUTHOR'S NOTE (apply this to the passage you write now): Keep the tone wry. Tomas hides a lantern.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
 
