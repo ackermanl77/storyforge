@@ -45,3 +45,44 @@ def _retry_tk_init_on_transient_tcl_read() -> None:
 
 
 _retry_tk_init_on_transient_tcl_read()
+
+
+try:
+    import pytest
+except ImportError:  # python -m unittest: no fixtures
+    pytest = None
+
+if pytest is not None:
+
+    @pytest.fixture(autouse=True)
+    def _no_blocking_message_boxes(monkeypatch):
+        """Un messagebox real bloquea para siempre sin nadie que lo cierre
+        (en CI una prueba quedo colgada asi hasta el limite del job). Durante
+        las pruebas se reemplazan por dobles que solo registran; una prueba que
+        quiere un dialogo lo parchea ella misma (eso tiene prioridad). Un
+        showerror no esperado -- un error de la app en un callback de Tk --
+        hace fallar la prueba con su texto, en vez de colgarla."""
+        try:
+            from tkinter import messagebox
+        except ImportError:
+            yield []
+            return
+        shown = []
+
+        def stub(kind, answer):
+            def show(title=None, message=None, **_kwargs):
+                shown.append((kind, title, message))
+                return answer
+
+            return show
+
+        for kind, answer in (
+            ("showerror", "ok"), ("showwarning", "ok"), ("showinfo", "ok"),
+            ("askyesno", False), ("askokcancel", False), ("askretrycancel", False),
+            ("askyesnocancel", None), ("askquestion", "no"),
+        ):
+            monkeypatch.setattr(messagebox, kind, stub(kind, answer))
+        yield shown
+        errors = [message for kind, _title, message in shown if kind == "showerror"]
+        if errors:
+            pytest.fail("unexpected error dialog(s) during the test:\n" + "\n---\n".join(map(str, errors)))
