@@ -31,8 +31,12 @@ def _retry_tk_init_on_transient_tcl_read() -> None:
             try:
                 return original_init(self, *args, **kwargs)
             except tkinter.TclError as exc:
-                # init.tcl or tk.tcl: the same transient read failure, seen with both.
-                if "Can't find a usable" not in str(exc) or attempt == 4:
+                # The same transient read failure has shown up as "Can't find a
+                # usable init.tcl"/"tk.tcl" and, when init.tcl was half read, as
+                # 'invalid command name "tcl_findLibrary"'.
+                message = str(exc)
+                transient = "Can't find a usable" in message or "tcl_findLibrary" in message
+                if not transient or attempt == 4:
                     raise
                 time.sleep(0.5 * (attempt + 1))
 

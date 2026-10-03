@@ -34,6 +34,8 @@ env:
 jobs:
   build:
     runs-on: windows-latest
+    # A hung GUI test used to sit until GitHub's 6-hour limit.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -79,8 +81,21 @@ jobs:
       - name: Lint (ruff)
         run: ruff check app tests
 
+      # The first Tk window on a fresh runner sometimes fails to read Tcl's own
+      # init.tcl/tk.tcl (likely the virus scanner's first look at those files);
+      # open a few windows up front so the tests start on warm files.
+      - name: Warm up Tcl/Tk
+        shell: pwsh
+        run: |
+          for ($i = 1; $i -le 3; $i++) {
+            python -c "import tkinter; root = tkinter.Tk(); root.update(); root.destroy(); print('Tk ok')"
+            if ($LASTEXITCODE -eq 0) { break }
+            Start-Sleep -Seconds 2
+          }
+          exit 0
+
       - name: Run tests with coverage
-        run: python -m pytest -q --cov=app --cov-report=term --cov-report=xml:coverage.xml
+        run: python -m pytest -q --timeout=300 --cov=app --cov-report=term --cov-report=xml:coverage.xml
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4
