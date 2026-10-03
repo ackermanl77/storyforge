@@ -227,7 +227,11 @@ class TestLorebookB8(unittest.TestCase):
         start = build_chapter_start_chat(p, 0, BUDGET)
         self.assertNotIn("LORE_MARKER", start.system)
         cont = build_chapter_continuation_chat(p, 0, BUDGET, "Then a dragon landed.", 100, 400)
-        self.assertIn("LORE_MARKER", cont.system)
+        # B12: matched lore is step-specific, so it sits in the user turn; the
+        # system turn (the reusable prefix) stays identical between sections.
+        self.assertIn("LORE_MARKER", cont.user)
+        self.assertNotIn("LORE_MARKER", cont.system)
+        self.assertEqual(start.system, cont.system)
 
 
 class TestAuthorNoteF7(unittest.TestCase):
@@ -514,6 +518,63 @@ class TestSettingsAndFiles(unittest.TestCase):
         with mock.patch("app.fileutil.os.replace", side_effect=PermissionError("x")):
             with self.assertRaises(PermissionError):
                 replace_with_retry("a", "b", retries=2, sleep=lambda s: None)
+
+
+class TestPromptPrefixReuseB12(unittest.TestCase):
+    """B12: the stable story bible comes first and everything that changes per
+    section goes last, so llama.cpp can reuse the KV cache of the shared prefix."""
+
+    def _lore_project(self):
+        p = _project()
+        p.lore_entries.append(LoreEntry(name="Dragon", keywords="dragon", text="LORE_MARKER"))
+        p.author_note = "Keep it tense."
+        return p
+
+    def test_step_specific_blocks_follow_the_stable_task(self):
+        cont = build_chapter_continuation_chat(
+            self._lore_project(), 0, BUDGET, "Then a dragon landed.", 100, 400, hints=["PROGRESS: beat 2."]
+        )
+        user = cont.user
+        lore, words, hint, note = (user.index(s) for s in ("LORE_MARKER", "Write about 100 more words.",
+                                                            "PROGRESS: beat 2.", "AUTHOR'S NOTE"))
+        self.assertLess(user.index("Do not repeat earlier sentences"), lore)
+        self.assertTrue(lore < words < hint < note, "the author's note must stay the last thing read")
+        self.assertTrue(user.rstrip().endswith("Keep it tense."))
+
+    def test_raw_continuation_states_the_length_once_and_ends_with_the_tail(self):
+        cont = build_chapter_continuation_chat(self._lore_project(), 0, BUDGET, "Then a dragon landed.", 100, 400)
+        self.assertEqual(cont.raw.count("more words"), 1)
+        self.assertTrue(cont.raw.rstrip().endswith("Then a dragon landed."))
+        self.assertIn("LORE_MARKER", cont.raw)
+
+    def test_raw_start_still_ends_with_the_begin_cue(self):
+        start = build_chapter_start_chat(self._lore_project(), 0, BUDGET)
+        self.assertTrue(start.raw.endswith("Begin the chapter now:\n"))
+        self.assertIn("Keep it tense.", start.raw)
+
+    def test_engine_installs_a_ram_prompt_cache_once_per_model(self):
+        class CachingLlama(RecordingLlama):
+            def __init__(self):
+                super().__init__()
+                self.caches = []
+
+            def set_cache(self, cache):
+                self.caches.append(cache)
+
+        fake_cache_cls = type("LlamaRAMCache", (), {})
+        engine = LocalStoryEngine()
+        engine._llm = llm = CachingLlama()
+        with mock.patch.dict(sys.modules, {"llama_cpp": types.SimpleNamespace(LlamaRAMCache=fake_cache_cls)}):
+            engine._ensure_prompt_cache()
+            engine._ensure_prompt_cache()
+        self.assertEqual(len(llm.caches), 1)
+        self.assertIsInstance(llm.caches[0], fake_cache_cls)
+
+    def test_prompt_cache_is_optional(self):
+        engine = LocalStoryEngine()
+        engine._llm = RecordingLlama()  # no set_cache (older llama-cpp-python, test doubles)
+        engine._ensure_prompt_cache()
+        self.assertIsNone(engine._prompt_cache)
 
 
 if __name__ == "__main__":
