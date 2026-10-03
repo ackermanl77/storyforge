@@ -79,8 +79,14 @@ jobs:
       - name: Lint (ruff)
         run: ruff check app tests
 
-      - name: Run tests
-        run: python -m pytest -q
+      - name: Run tests with coverage
+        run: python -m pytest -q --cov=app --cov-report=term --cov-report=xml:coverage.xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.variant }}
+          path: coverage.xml
 
       - name: Download NLTK data to bundle
         run: python -m nltk.downloader -d nltk_data stopwords wordnet

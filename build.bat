@@ -27,14 +27,14 @@ echo  StoryForge Local - build de Windows (%VARIANT%)
 echo ============================================
 
 echo.
-echo [1/6] Creando entorno limpio .build-venv ...
+echo [1/7] Creando entorno limpio .build-venv ...
 if exist .build-venv rmdir /s /q .build-venv
 py -%STORYFORGE_PYVER% -m venv .build-venv
 if errorlevel 1 goto :fail
 set PY=.build-venv\Scripts\python.exe
 
 echo.
-echo [2/6] Instalando dependencias con versiones exactas...
+echo [2/7] Instalando dependencias con versiones exactas...
 %PY% -m pip install --upgrade pip
 if errorlevel 1 goto :fail
 %PY% -m pip install -r requirements-build.txt
@@ -47,22 +47,40 @@ if /i not "%VARIANT%"=="cpu" (
 )
 
 echo.
-echo [3/6] Descargando los datos de NLTK (stopwords, wordnet) para incluirlos...
+echo [3/7] Descargando los datos de NLTK (stopwords, wordnet) para incluirlos...
 %PY% -m nltk.downloader -d nltk_data stopwords wordnet
 if errorlevel 1 goto :fail
 
 echo.
-echo [4/6] Pruebas...
-%PY% -m pytest -q
+echo [4/7] Pruebas con cobertura...
+%PY% -m pytest --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml -q
 if errorlevel 1 goto :fail
 
 echo.
-echo [5/6] Empaquetando con PyInstaller...
+echo [5/7] Empaquetando con PyInstaller...
 %PY% -m PyInstaller --noconfirm --clean storyforge.spec
 if errorlevel 1 goto :fail
 
 echo.
-echo [6/6] Copiando a StoryForge-App\ (carpeta fija y facil de ubicar)...
+echo [6/7] Compilando instalador de Inno Setup (opcional)...
+REM Inno Setup 6: instalacion para todos, para el usuario actual o en el PATH.
+REM Si no esta, se avisa y se sigue: StoryForge-App\ igual queda listo.
+set ISCC=
+if exist "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" set "ISCC=%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe"
+if not defined ISCC if exist "%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" set "ISCC=%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe"
+if not defined ISCC for %%I in (ISCC.exe) do if not "%%~$PATH:I"=="" set "ISCC=%%~$PATH:I"
+if not defined ISCC (
+    echo AVISO: no se encontro Inno Setup 6 ^(ISCC.exe^); se omite el instalador.
+    goto :copy_app
+)
+for /f %%V in ('%PY% -c "import app; print(app.__version__)"') do set APP_VERSION=%%V
+"%ISCC%" /DAppVersion=%APP_VERSION% /DBuildVariant=%VARIANT% installer\StoryForge.iss
+if errorlevel 1 goto :fail
+
+:copy_app
+
+echo.
+echo [7/7] Copiando a StoryForge-App\ (carpeta fija y facil de ubicar)...
 REM Se borra todo lo del build anterior EXCEPTO StoryForge-App\models\: ahi es
 REM donde se le dice al usuario que ponga sus modelos .gguf (varios GB).
 if exist StoryForge-App (
@@ -80,13 +98,14 @@ if errorlevel 1 goto :fail
 if not exist StoryForge-App\models mkdir StoryForge-App\models
 copy /y models\README.txt StoryForge-App\models\README.txt >nul
 
-REM dist\ quedaria como una segunda copia completa de la app y build\ es la
-REM carpeta de trabajo de PyInstaller: se borran solo despues de copiar bien.
-rmdir /s /q dist 2>nul
+REM dist\installer\ conserva el .exe del instalador; solo se borra la copia
+REM onedir ya espejada a StoryForge-App\.
+rmdir /s /q dist\StoryForge 2>nul
 rmdir /s /q build 2>nul
 
 echo.
 echo Listo. El programa quedo en: StoryForge-App\StoryForge.exe
+if defined ISCC echo Instalador generado en: dist\installer\
 echo Pon tu modelo .gguf en StoryForge-App\models\ (esa carpeta se conserva
 echo entre builds), o mejor en una carpeta fuera de OneDrive configurada en
 echo Archivo ^> Preferencias.
