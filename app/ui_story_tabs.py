@@ -122,7 +122,7 @@ class StoryTabsMixin:
             APP_TITLE, S.ESTO_REEMPLAZARA_EL_CONTENIDO_ACTUAL
         ):
             return
-        box.set(text)
+        box.set(text, undoable=True)  # Ctrl+Z vuelve al texto anterior, como "Expandir con IA"
         self.schedule_dirty_check()
 
     def _expand_field(self, box: LimitedTextBox, field_key: str, field_label: str, max_words: int) -> None:
