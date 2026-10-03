@@ -26,5 +26,5 @@ Two ways to fill in Plot / Personajes / Setting faster: expand a short note into
 
 ## Known limits
 
-- Expand and import both **replace** the field outright — there's no "insert at cursor" or "append" option, and neither integrates with the chapter version-history mechanism (`docs/workflows/version-history/workflow.md`), since that's chapter-specific (`Chapter.push_history()`), not something `Project.plot`/`characters`/`setting` have. Undo relies entirely on the OS-level undo the `CTkTextbox` widget itself may or may not support, or not saving the project yet.
+- Expand and import both **replace** the field outright — there's no "insert at cursor" or "append" option, and neither integrates with the chapter version-history mechanism (`docs/workflows/version-history/workflow.md`), since that's chapter-specific (`Chapter.push_history()`), not something `Project.plot`/`characters`/`setting` have. An "Expandir con IA" result is one Ctrl+Z undo step (`LimitedTextBox.set(..., undoable=True)`); an import is loaded like a programmatic load and resets the undo stack, so it can't be undone with Ctrl+Z.
 - Import doesn't validate or preview the file before replacing — a binary file or one in the wrong encoding will still "succeed" (via `errors="replace"`) but produce garbled replacement characters in the field.
