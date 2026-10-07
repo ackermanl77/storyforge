@@ -16,7 +16,8 @@ name: Build Windows .exe
 # Each build is zipped as StoryForge-<version>-<variant>.zip (version from
 # app/__init__.py), with an empty models/ folder holding models/README.txt and
 # the NLTK stopwords/wordnet data bundled. A pushed tag vX.Y.Z (which must
-# match app/__init__.py) also publishes both zips as a GitHub Release.
+# match app/__init__.py) also builds each variant's per-user installer
+# (installer/StoryForge.iss) and publishes the zips and installers as a GitHub Release.
 #
 # NOTE: this repo's default branch is `master`, not `main`.
 on:
@@ -117,11 +118,34 @@ jobs:
           Copy-Item models/README.txt dist/StoryForge/models/README.txt
           Compress-Archive -Path dist/StoryForge -DestinationPath "StoryForge-${{ steps.version.outputs.version }}-${{ matrix.variant }}.zip"
 
+      # Releases also ship the per-user installer (installer/StoryForge.iss); only on tags, so
+      # the per-push builds don't store another ~600 MB.
+      - name: Make sure Inno Setup 6 is available
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue) -and -not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) {
+            choco install innosetup --no-progress -y
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+
+      - name: Build the installer
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        run: |
+          $iscc = (Get-Command iscc -ErrorAction SilentlyContinue).Source
+          if (-not $iscc) { $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" "/DBuildVariant=${{ matrix.variant }}" installer\StoryForge.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Move-Item "dist\installer\StoryForge-${{ steps.version.outputs.version }}-${{ matrix.variant }}-setup.exe" .
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: StoryForge-${{ steps.version.outputs.version }}-${{ matrix.variant }}
-          path: StoryForge-${{ steps.version.outputs.version }}-${{ matrix.variant }}.zip
+          path: |
+            StoryForge-${{ steps.version.outputs.version }}-${{ matrix.variant }}.zip
+            StoryForge-${{ steps.version.outputs.version }}-${{ matrix.variant }}-setup.exe
           if-no-files-found: error
           # Every push builds ~600 MB (cpu + cuda13); the default 90 days filled the account's
           # Actions storage quota. A tagged release keeps its zips as release assets anyway.
@@ -143,4 +167,4 @@ jobs:
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ github.ref_name }}" artifacts/*.zip --repo "${{ github.repository }}" --title "StoryForge ${{ github.ref_name }}" --generate-notes
+        run: gh release create "${{ github.ref_name }}" artifacts/*.zip artifacts/*-setup.exe --repo "${{ github.repository }}" --title "StoryForge ${{ github.ref_name }}" --generate-notes
