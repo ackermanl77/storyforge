@@ -32,6 +32,12 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir=..\dist\installer
 OutputBaseFilename=StoryForge-{#AppVersion}-{#BuildVariant}-setup
+; build.bat con CODESIGN_THUMBPRINT pasa /DSign y la herramienta "codesign":
+; Inno Setup firma este instalador y el desinstalador que escribe.
+#ifdef Sign
+SignTool=codesign
+SignedUninstaller=yes
+#endif
 SetupIconFile=..\assets\icon.ico
 UninstallDisplayIcon={app}\{#AppExe}
 Compression=lzma2
