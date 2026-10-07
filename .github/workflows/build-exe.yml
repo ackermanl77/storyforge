@@ -102,6 +102,7 @@ jobs:
         with:
           name: coverage-${{ matrix.variant }}
           path: coverage.xml
+          retention-days: 7
 
       - name: Download NLTK data to bundle
         run: python -m nltk.downloader -d nltk_data stopwords wordnet
@@ -122,6 +123,9 @@ jobs:
           name: StoryForge-${{ steps.version.outputs.version }}-${{ matrix.variant }}
           path: StoryForge-${{ steps.version.outputs.version }}-${{ matrix.variant }}.zip
           if-no-files-found: error
+          # Every push builds ~600 MB (cpu + cuda13); the default 90 days filled the account's
+          # Actions storage quota. A tagged release keeps its zips as release assets anyway.
+          retention-days: 7
 
   release:
     if: github.ref_type == 'tag'
