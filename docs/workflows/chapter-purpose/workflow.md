@@ -14,6 +14,7 @@ Unlike `writing_style` (a whole-project setting in the Esquema tab), this is per
 
 ## Implementation
 
+- The UI shows accented display labels ("Propósito", "Escena climática", "Epílogo", "(Capítulo regular)") from `app/strings_es.py::PURPOSE_LABELS`; the stored values below stay unaccented so older project files keep loading.
 - `app/project.py::CHAPTER_PURPOSES` is the fixed list of valid values; `Chapter.purpose: str` holds the current selection (`""` = regular chapter). Persisted like every other chapter field; a project file saved before this feature existed has no `"purpose"` key and loads as `""`, not an error.
 - `app/prompts.py::CHAPTER_PURPOSE_INSTRUCTIONS` maps each label to one English instruction paragraph (output is always requested in English, consistent with the rest of this app's prompts) describing what that chapter should accomplish — e.g. "Apertura" asks for the normal world and the inciting incident without resolving anything; "Final" asks to resolve the central conflict and not introduce new threads. `build_chapter_purpose_instruction(chapter)` looks it up, returning `""` for an unset or unrecognized value (e.g. an old project with a since-removed label) rather than raising.
 - That instruction is inserted into `build_chapter_system_prompt()` right before the `writing_style` emphasis and the `STYLE_GUIDE` — both still apply regardless of the chosen purpose.

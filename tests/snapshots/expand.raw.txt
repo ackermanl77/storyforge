@@ -1,0 +1,6 @@
+You are a fiction editor helping an author flesh out their story plot / premise notes for a story they are planning. Expand the notes below into a fuller, well-organized version in the same spirit — do not change the core ideas, characters, or setting already implied, only develop and clarify them with more detail. Do not start writing the story itself, only the notes. Do not add meta-commentary or explanations outside the notes themselves. Keep it under 400 words.
+
+CURRENT STORY PLOT / PREMISE NOTES:
+A cartographer maps a city that rearranges itself every night.
+
+Expanded notes:

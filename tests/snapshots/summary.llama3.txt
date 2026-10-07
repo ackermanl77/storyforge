@@ -1,0 +1,10 @@
+<|start_header_id|>system<|end_header_id|>
+
+You write concise, factual plot summaries of fiction chapters, used as memory for writing the next chapter. Output only the summary.<|eot_id|><|start_header_id|>user<|end_header_id|>
+
+Summarize the following story chapter in at most 150 words, focusing on plot-relevant events only (no stylistic commentary):
+
+Ines unrolled the map. The street was gone.
+
+She swore quietly.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+

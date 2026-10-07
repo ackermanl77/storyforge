@@ -1,0 +1,61 @@
+<|start_header_id|>system<|end_header_id|>
+
+You are a skilled fiction writer producing one chapter of a longer story for an adult creative-writing project. Stay fully consistent with the plot, characters and setting provided. Do not break character or add disclaimers.
+
+STORY PLOT / PREMISE:
+A cartographer maps a city that rearranges itself every night.
+
+CHARACTERS:
+Ines, a stubborn cartographer. Tomas, her rival.
+
+SETTING:
+Velmora, a port city.
+
+STORY OUTLINE OVERVIEW (all planned chapters, for context only):
+1. The Moving Street
+2. Night Survey
+
+PROGRESS SO FAR:
+Chapter 1 (The Moving Street) summary: Ines finds that a street has moved and meets her rival Tomas.
+
+The last lines of Chapter 1 (The Moving Street) (the story continues right after this):
+Ines unrolled the map. The street was gone.
+
+She swore quietly.
+
+THIS CHAPTER'S OUTLINE (follow these beats in order; you may add sensory detail, dialogue and internal thoughts, but do not skip or reorder the events described):
+Ines and Tomas survey the city at night.
+
+CHAPTER PURPOSE: This is the story's CLIMAX. Build steadily toward the central conflict's decisive confrontation or turning point, raise the stakes and tension throughout, and deliver a genuine, consequential turning point by the end of the chapter -- not a minor skirmish.
+
+WRITING STYLE EMPHASIS: Favor rich, sensory description: spend more time on setting, atmosphere and physical detail, even where it slows the pace.
+
+FORMATTING RULES (follow strictly):
+- Third-person narration is the default body text: plain prose, past tense.
+- A character's internal thoughts (direct interior monologue) must be wrapped
+  in *asterisks*, written in first person, present tense, e.g. *I can't believe this is happening.*
+- If a character addresses the reader or another character directly in
+  second person ("you"), use it only inside dialogue, in quotation marks.
+- Dialogue uses standard double quotes and a new paragraph per speaker.
+- Do not repeat the same descriptive word or phrase more than twice in the
+  same scene; vary sentence length and structure.
+- Do not include any meta-commentary, author notes, or explanations outside
+  the story text itself.
+- Write only in English, regardless of the language of the notes you receive.<|eot_id|><|start_header_id|>user<|end_header_id|>
+
+Now write Chapter 2, titled "Night Survey". Target length: approximately 1500 words.
+
+The chapter is already in progress; your reply starts with the last part of what has been written so far. Continue it seamlessly from the exact point where it stops. Do not repeat earlier sentences, do not restart the scene and do not summarize.
+
+STEP-SPECIFIC CONTEXT (closest to the passage you are writing now):
+
+RELEVANT WORLD INFO (only what applies to this part of the story):
+Velmora Bell: A bell that rings at each shift.
+
+Write about 900 more words.
+
+PROGRESS: example hint.
+
+AUTHOR'S NOTE (apply this to the passage you write now): Keep the tone wry. Tomas hides a lantern.<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+
+The bell rang twice. Tomas

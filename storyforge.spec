@@ -18,6 +18,45 @@ for pkg in ("customtkinter", "llama_cpp", "docx"):
     binaries += pkg_binaries
     hiddenimports += pkg_hiddenimports
 
+
+def _is_import_lib(path):
+    # llama_cpp/lib trae las import libraries de MSVC (llama.lib ~20 MB,
+    # ggml*.lib, mtmd.lib) junto a las DLLs: solo sirven para enlazar C/C++
+    # contra ellas, nunca se cargan en tiempo de ejecucion.
+    return path.lower().endswith(".lib")
+
+
+datas = [d for d in datas if not _is_import_lib(d[0])]
+binaries = [b for b in binaries if not _is_import_lib(b[0])]
+
+# A CUDA-enabled llama-cpp-python wheel (README, "Rendimiento / GPU") ships
+# ggml-cuda.dll but not the CUDA runtime DLLs it needs (cublas64_*/cublasLt64_*/
+# cudart64_*) -- those come from the standalone nvidia-cuda-runtime/nvidia-cublas
+# pip packages. In dev, app/engine.py::_ensure_cuda_dlls_discoverable() finds
+# them under site-packages; in the frozen app there is no site-packages, so they
+# are bundled into llama_cpp/lib instead, next to ggml-cuda.dll -- llama_cpp's
+# own loader prepends that folder to PATH before loading, which is exactly what
+# the winmode=0 DLL search needs. With a CPU-only llama-cpp-python build (or no
+# nvidia packages installed) the glob finds nothing and this is a no-op.
+# Both nvidia package layouts are searched: CUDA 13 nests the DLLs one level
+# deeper (nvidia/cu13/bin/x86_64/*.dll), CUDA 12 puts them directly in
+# nvidia/<pkg>/bin/*.dll -- same rule as app/engine.py::find_nvidia_dll_dirs()
+# (duplicated here rather than imported, so building never imports app/).
+import glob
+import os
+import site
+
+_CUDA_RUNTIME_DLLS = ("cublas64_", "cublasLt64_", "cudart64_")
+_LLAMA_LIB_DIR = os.path.join("llama_cpp", "lib")
+_bundled_cuda_dll_names = set()
+for _site_packages in site.getsitepackages():
+    for _pattern in (("nvidia", "*", "bin", "*.dll"), ("nvidia", "*", "bin", "*", "*.dll")):
+        for _dll in sorted(glob.glob(os.path.join(_site_packages, *_pattern))):
+            _name = os.path.basename(_dll)
+            if _name.startswith(_CUDA_RUNTIME_DLLS) and _name.lower() not in _bundled_cuda_dll_names:
+                _bundled_cuda_dll_names.add(_name.lower())
+                binaries.append((_dll, _LLAMA_LIB_DIR))
+
 # collect_all("llama_cpp") sweeps in the whole package regardless of what
 # this app actually imports (app/engine.py only ever does
 # `from llama_cpp import Llama`). In an environment where llama_cpp's
@@ -50,7 +89,63 @@ EXCLUDED_UNUSED_HEAVY_DEPS = [
     "pandas",
     "pyarrow",
     "scipy",
+    # Also installed in the shared build interpreter (for other projects) and dragged in
+    # transitively by optional integrations, but never imported by app/ -- llama.cpp runs GGUF
+    # models with its own tokenizer, no torch/transformers involved. Without these excludes a CPU
+    # torch (~1 GB) plus sympy ends up bundled for nothing.
+    "torch",
+    "torchvision",
+    "sympy",
+    "transformers",
+    "diffusers",
 ]
+
+# collect_all("llama_cpp") also lists every llama_cpp.server.* submodule as a
+# hidden import; with llama_cpp.server excluded above, PyInstaller then prints
+# "ERROR: Hidden import 'llama_cpp.server...' not found" for each one (harmless
+# but alarming in the build log). Drop hidden imports of excluded packages.
+hiddenimports = [
+    h for h in hiddenimports
+    if not any(h == x or h.startswith(x + ".") for x in EXCLUDED_UNUSED_HEAVY_DEPS)
+]
+
+# Version (K3): leida de app/__init__.py con una expresion regular (el build
+# nunca importa app/), y escrita como recurso de version de Windows para que
+# StoryForge.exe muestre version/producto en Propiedades > Detalles.
+import re
+
+with open(os.path.join("app", "__init__.py"), encoding="utf-8") as _f:
+    APP_VERSION = re.search(r'__version__\s*=\s*"([^"]+)"', _f.read()).group(1)
+_numbers = [int(x) for x in re.findall(r"\d+", APP_VERSION)[:4]]
+_numbers += [0] * (4 - len(_numbers))
+_version_tuple = tuple(_numbers)
+os.makedirs("build", exist_ok=True)
+VERSION_FILE = os.path.join("build", "version_info.txt")
+with open(VERSION_FILE, "w", encoding="utf-8") as _f:
+    _f.write(f"""VSVersionInfo(
+  ffi=FixedFileInfo(filevers={_version_tuple}, prodvers={_version_tuple}, mask=0x3f, flags=0x0,
+                    OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
+  kids=[
+    StringFileInfo([StringTable('040A04B0', [
+      StringStruct('CompanyName', 'StoryForge Local'),
+      StringStruct('FileDescription', 'StoryForge Local - escritura de historias con IA local'),
+      StringStruct('FileVersion', '{APP_VERSION}'),
+      StringStruct('InternalName', 'StoryForge'),
+      StringStruct('OriginalFilename', 'StoryForge.exe'),
+      StringStruct('ProductName', 'StoryForge Local'),
+      StringStruct('ProductVersion', '{APP_VERSION}')])]),
+    VarFileInfo([VarStruct('Translation', [0x040A, 1200])])
+  ]
+)
+""")
+
+# Datos de NLTK (K4): si el build los descargo en nltk_data/ (build.bat lo
+# hace), se incluyen siempre, en vez de depender de la cache de la maquina.
+if os.path.isdir("nltk_data"):
+    datas.append(("nltk_data", "nltk_data"))
+
+# Icono de la ventana (app/gui.py::window_icon_path); el del .exe va en EXE(icon=).
+datas.append(("assets/icon.ico", "assets"))
 
 a = Analysis(
     ["storyforge.py"],
@@ -65,6 +160,32 @@ a = Analysis(
     noarchive=False,
     cipher=block_cipher,
 )
+
+# PyInstaller's own binary-dependency analysis ALSO collects cublas64_*/
+# cublasLt64_* (ggml-cuda.dll links against them, and it resolves them from
+# the nvidia/ folders the loop above just pulled from), placing them at their
+# original relative path, _internal/nvidia/cu13/bin/x86_64/ -- a second
+# ~550 MB copy of cuBLAS next to the one in llama_cpp/lib. Only the
+# llama_cpp/lib copy is ever loaded: llama_cpp's loader prepends llama_cpp/lib
+# to PATH before its winmode=0 (legacy search order) ctypes.CDLL call, and in
+# the frozen app nothing puts _internal/nvidia/... on PATH (engine.py's
+# _ensure_cuda_dlls_discoverable() only scans sys.path entries ending in
+# "site-packages", which a frozen app has none of). So the nvidia/ copies are
+# dropped here -- but only those whose file name is also bundled in
+# llama_cpp/lib, so nothing that exists only under nvidia/ goes missing.
+def _toc_dest(entry):
+    return entry[0].replace("\\", "/")
+
+
+a.binaries = [
+    b for b in a.binaries
+    if not (
+        _toc_dest(b).startswith("nvidia/")
+        and os.path.basename(_toc_dest(b)).lower() in _bundled_cuda_dll_names
+    )
+    and not _is_import_lib(_toc_dest(b))
+]
+a.datas = [d for d in a.datas if not _is_import_lib(_toc_dest(d))]
 
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
@@ -84,6 +205,8 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version=VERSION_FILE,
+    icon="assets/icon.ico",
 )
 
 coll = COLLECT(

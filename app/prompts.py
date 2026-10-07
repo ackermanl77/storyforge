@@ -5,10 +5,30 @@ para pensamientos internos, dialogo y cambios de punto de vista.
 """
 from __future__ import annotations
 
+import math
 import re
-from typing import List, Tuple
+from dataclasses import dataclass
+from typing import List, Optional, Tuple
 
-from .project import Chapter, Project
+from .project import Chapter, LoreEntry, Project
+
+
+@dataclass
+class ChatPrompt:
+    """
+    Un prompt en dos formas equivalentes (ver app/chat_format.py):
+
+    - `system`/`user`/`prefill`: para modelos instruct, que se renderizan con
+      la plantilla de chat del modelo (turno de sistema, turno de usuario y,
+      opcionalmente, el comienzo de la respuesta del asistente -- `prefill`
+      -- que el modelo simplemente continua).
+    - `raw`: el prompt de completion cruda de siempre, para modelos base o
+      cuando se elige "Sin plantilla" en la pestana Modelo.
+    """
+    system: str
+    user: str
+    prefill: str = ""
+    raw: str = ""
 
 # Instruccion en ingles (la salida siempre se pide en ingles, ver STYLE_GUIDE
 # abajo) para cada valor posible de project.writing_style (project.WRITING_
@@ -137,6 +157,37 @@ def _trim_words_tail(text: str, max_words: int) -> str:
     return "[...] " + " ".join(words[-max_words:])
 
 
+_NON_SPACE_RE = re.compile(r"\S+")
+_SENTENCE_BREAK_RE = re.compile(r"(?<=[.!?\"”])\s+")
+
+
+def tail_preserving_format(text: str, max_words: int) -> str:
+    """
+    Como _trim_words_tail, pero SIN reescribir los espacios: conserva los
+    saltos de parrafo originales y no agrega "[...]". Es el texto con el que
+    empieza la respuesta del asistente al continuar un capitulo (el modelo
+    lo sigue escribiendo tal cual), asi que tiene que verse como prosa
+    normal. Si puede, empieza en un limite de parrafo u oracion cercano en
+    vez de a mitad de una frase.
+    """
+    text = (text or "").rstrip()
+    if max_words <= 0:
+        return ""
+    matches = list(_NON_SPACE_RE.finditer(text))
+    if len(matches) <= max_words:
+        return text.lstrip()
+    start = matches[-max_words].start()
+    window = (len(text) - start) // 3
+    para = text.find("\n\n", start)
+    if para != -1 and para - start <= window:
+        start = para
+    else:
+        sentence = _SENTENCE_BREAK_RE.search(text, start)
+        if sentence and sentence.start() - start <= window:
+            start = sentence.end()
+    return text[start:].lstrip()
+
+
 def build_context_block(project: Project, max_plot_words: int = 1200,
                          max_characters_words: int = 600,
                          max_setting_words: int = 600) -> str:
@@ -155,18 +206,89 @@ def build_context_block(project: Project, max_plot_words: int = 1200,
     )
 
 
+HANDOFF_MAX_WORDS = 150  # final literal del capitulo anterior incluido como "punto de relevo"
+_MISSING_SUMMARY_EXCERPT_WORDS = 120
+
+
+def _handoff_words(max_words: int) -> int:
+    """Cuantas palabras del FINAL del capitulo anterior incluir, segun el
+    presupuesto: ~1/4 del total, entre 40 y HANDOFF_MAX_WORDS."""
+    return min(HANDOFF_MAX_WORDS, max(40, max_words // 4))
+
+
 def build_previous_context(project: Project, upto_index: int, max_words: int = 500) -> str:
-    """Resumen breve de los capitulos anteriores para dar continuidad."""
-    parts = []
-    for i in range(upto_index):
-        ch = project.chapters[i]
-        summary = ch.summary.strip() or _trim_words(ch.content.strip(), 200)
-        if summary:
-            parts.append(f"Chapter {i + 1} ({ch.title}) summary: {summary}")
-    if not parts:
+    """
+    Contexto de continuidad con los capitulos anteriores a `upto_index`.
+
+    Se arma del MAS RECIENTE hacia atras (antes se unian todos en orden y se
+    recortaba conservando el principio, asi que desde el capitulo ~4 el
+    capitulo inmediatamente anterior -- justo el que mas importa -- quedaba
+    fuera en todos los niveles de presupuesto):
+
+    1. Siempre: el resumen del capitulo N-1 y las ultimas palabras de su
+       texto (el punto exacto donde retomar la historia).
+    2. Con el presupuesto que quede: los resumenes de los capitulos
+       anteriores, del mas nuevo al mas viejo.
+    3. Lo que ya no entra se menciona solo por titulo, en una linea.
+
+    Un capitulo sin resumen aporta el FINAL de su texto (no el principio).
+    """
+    upto_index = max(0, min(upto_index, len(project.chapters)))
+    has_material = any(
+        project.chapters[i].summary.strip() or project.chapters[i].content.strip()
+        for i in range(upto_index)
+    )
+    if not has_material:
         return "This is the first chapter of the story."
-    text = "\n".join(parts)
-    return _trim_words(text, max_words)
+
+    last_index = upto_index - 1
+    last = project.chapters[last_index]
+    handoff = ""
+    if last.content.strip():
+        handoff = tail_preserving_format(last.content, _handoff_words(max_words))
+    remaining = max_words - len(handoff.split())
+
+    def label(i: int) -> str:
+        return f"Chapter {i + 1} ({project.chapters[i].title})"
+
+    # (indice, linea) del mas reciente al mas viejo
+    included: List[Tuple[int, str]] = []
+    omitted: List[int] = []
+
+    last_summary = last.summary.strip()
+    if last_summary:
+        text = _trim_words(last_summary, max(remaining, 40))
+        included.append((last_index, f"{label(last_index)} summary: {text}"))
+        remaining -= len(text.split())
+
+    for i in range(last_index - 1, -1, -1):
+        ch = project.chapters[i]
+        body = ch.summary.strip() or _trim_words_tail(ch.content.strip(), _MISSING_SUMMARY_EXCERPT_WORDS)
+        if not body:
+            continue
+        if omitted:
+            omitted.append(i)
+            continue
+        line_words = len(body.split())
+        if line_words <= remaining:
+            included.append((i, f"{label(i)} summary: {body}"))
+            remaining -= line_words
+        elif remaining >= 30:
+            included.append((i, f"{label(i)} summary: {_trim_words(body, remaining)}"))
+            remaining = 0
+        else:
+            omitted.append(i)
+
+    lines: List[str] = []
+    if omitted:
+        titles = ", ".join(label(i) for i in sorted(omitted))
+        lines.append(f"Earlier chapters (not detailed here for space): {titles}.")
+    lines.extend(line for _i, line in sorted(included))
+    if handoff:
+        lines.append(
+            f"\nThe last lines of {label(last_index)} (the story continues right after this):\n{handoff}"
+        )
+    return "\n".join(lines).strip()
 
 
 def build_story_outline_overview(project: Project) -> str:
@@ -182,6 +304,133 @@ def build_story_outline_overview(project: Project) -> str:
     return f"STORY OUTLINE OVERVIEW (all planned chapters, for context only):\n{lines}\n"
 
 
+@dataclass
+class LoreMatch:
+    """Por que se incluyo una entrada del lorebook: `keyword` que coincidio
+    (vacio si es una entrada "siempre incluida"), `position` del ultimo
+    acierto en el texto escaneado (mas alto = mas reciente) y `via` = nombre
+    de la entrada en cuyo texto aparecio la keyword (escaneo recursivo)."""
+    entry: LoreEntry
+    keyword: str = ""
+    position: int = -1
+    via: str = ""
+
+    def reason_es(self) -> str:
+        if self.entry.constant and not self.keyword:
+            return "siempre incluida"
+        if self.via:
+            return f"\"{self.keyword}\" (mencionada en la entrada \"{self.via}\")"
+        return f"\"{self.keyword}\""
+
+
+def _last_keyword_hit(entry: LoreEntry, text: str) -> Tuple[str, int]:
+    """(keyword, posicion del ultimo acierto) de la keyword que aparece mas
+    tarde en `text`; ("", -1) si ninguna aparece."""
+    best = ("", -1)
+    if not text:
+        return best
+    for keyword in entry.keyword_list():
+        pattern = r"(?i)\b" + re.escape(keyword) + r"\b"
+        last = -1
+        for m in re.finditer(pattern, text):
+            last = m.start()
+        if last > best[1]:
+            best = (keyword, last)
+    return best
+
+
+def match_lore_entries(entries: List[LoreEntry], scan_text: str, recursive: bool = True) -> List[LoreMatch]:
+    """
+    Lorebook / World Info: las entradas activas (`enabled`) cuyo keyword
+    aparece como palabra/frase completa (sin distinguir mayusculas) en
+    `scan_text` -- el texto NARRATIVAMENTE CERCANO a la generacion en curso
+    (esquema del capitulo, resumenes previos y el final de lo ya escrito) --
+    mas las entradas `constant` (siempre incluidas).
+
+    Con `recursive`, un nivel de escaneo recursivo: una entrada mencionada
+    solo en el TEXTO de otra entrada que si coincidio tambien se incluye
+    (p.ej. la entrada de un personaje menciona su espada, que tiene su propia
+    entrada).
+
+    Orden: siempre-incluidas primero, despues por prioridad (mayor primero)
+    y, a igual prioridad, por lo reciente del acierto en el texto escaneado.
+    """
+    active = [e for e in entries if e.enabled]
+    matches: List[LoreMatch] = []
+    seen = set()
+    for entry in active:
+        keyword, pos = _last_keyword_hit(entry, scan_text or "")
+        if pos >= 0:
+            matches.append(LoreMatch(entry, keyword, pos))
+            seen.add(id(entry))
+        elif entry.constant:
+            matches.append(LoreMatch(entry))
+            seen.add(id(entry))
+    if recursive:
+        for source in list(matches):
+            for entry in active:
+                if id(entry) in seen:
+                    continue
+                keyword, _pos = _last_keyword_hit(entry, source.entry.text)
+                if keyword:
+                    # Detras de las coincidencias directas de su prioridad.
+                    matches.append(LoreMatch(entry, keyword, -1, via=source.entry.name.strip() or "(sin nombre)"))
+                    seen.add(id(entry))
+    order = {id(e): i for i, e in enumerate(entries)}
+    matches.sort(key=lambda m: (
+        0 if (m.entry.constant and not m.keyword) else 1,
+        -m.entry.priority,
+        -m.position,
+        order.get(id(m.entry), 0),
+    ))
+    return matches
+
+
+def find_relevant_lore_entries(entries: List[LoreEntry], scan_text: str) -> List[LoreEntry]:
+    """
+    Las entradas que coinciden directamente con `scan_text` (sin escaneo
+    recursivo), en el orden del lorebook. Ver match_lore_entries().
+    """
+    if not scan_text or not scan_text.strip():
+        return [e for e in entries if e.enabled and e.constant]
+    matched = {id(m.entry) for m in match_lore_entries(entries, scan_text, recursive=False)}
+    return [e for e in entries if id(e) in matched]
+
+
+LORE_SCAN_RECENT_WORDS = 500
+
+
+def build_lore_scan_text(chapter: Chapter, previous: str, recent_text: str = "") -> str:
+    """Texto que se escanea en busca de keywords del lorebook: el esquema del
+    capitulo, el contexto de capitulos previos y (al continuar) las ultimas
+    ~500 palabras ya escritas del capitulo -- asi un personaje que aparece a
+    mitad de capitulo recibe su entrada en la seccion siguiente."""
+    recent = _trim_words_tail(recent_text.strip(), LORE_SCAN_RECENT_WORDS) if recent_text else ""
+    return f"{chapter.outline}\n{previous}\n{recent}"
+
+
+def build_lorebook_block(
+    entries: List[LoreEntry], scan_text: str, max_entry_words: int = 200, max_entries: int = 8,
+) -> str:
+    """
+    Bloque de contexto con SOLO las entradas del lorebook relevantes a
+    `scan_text` (ver match_lore_entries) -- vacio si ninguna coincide, para
+    no gastar contexto en absoluto cuando el lorebook no aplica a esta
+    seccion. `max_entries` acota cuantas entradas como maximo se incluyen
+    (las de mayor prioridad primero); cada una se recorta a
+    `max_entry_words`, igual que el resto de los campos de este archivo.
+    """
+    matched = [m.entry for m in match_lore_entries(entries, scan_text)][:max_entries]
+    if not matched:
+        return ""
+    lines = []
+    for entry in matched:
+        name = entry.name.strip() or "(sin nombre)"
+        text = _trim_words(entry.text.strip(), max_entry_words)
+        lines.append(f"{name}: {text}")
+    return "RELEVANT WORLD INFO (only what applies to this part of the story):\n" + "\n".join(lines) + "\n\n"
+
+
 def build_chapter_system_prompt(
     project: Project,
     chapter_index: int,
@@ -190,12 +439,41 @@ def build_chapter_system_prompt(
     max_setting_words: int = 600,
     max_previous_words: int = 500,
     max_outline_words: int = 400,
+    max_lore_words: int = 200,
 ) -> str:
     """
     Construye el prompt de sistema para un capitulo. Los parametros max_*
     controlan cuanto contexto se incluye; el motor de generacion los reduce
     progresivamente si el prompt no cabe en la ventana de contexto del
     modelo cargado (ver engine.CONTEXT_BUDGET_LEVELS).
+    """
+    bible, task, step_blocks = _chapter_prompt_parts(
+        project, chapter_index, max_plot_words, max_characters_words, max_setting_words,
+        max_previous_words, max_outline_words, max_lore_words,
+    )
+    step_context = _step_context_block(step_blocks)
+    if step_context:
+        return f"{bible}{step_context}\n\n{task}"
+    return bible + task
+
+
+def _chapter_prompt_parts(
+    project: Project,
+    chapter_index: int,
+    max_plot_words: int = 1200,
+    max_characters_words: int = 600,
+    max_setting_words: int = 600,
+    max_previous_words: int = 500,
+    max_outline_words: int = 400,
+    max_lore_words: int = 200,
+    recent_text: str = "",
+) -> Tuple[str, str, List[str]]:
+    """
+    (biblia, tarea): la "biblia" de la historia (contexto, capitulos
+    previos, esquema, lorebook, reglas de estilo) va en el turno de sistema;
+    la tarea ("Now write Chapter N...") en el turno de usuario. En modo
+    completion cruda se concatenan, igual que siempre. `recent_text` (lo ya
+    escrito del capitulo, al continuar) tambien se escanea para el lorebook.
     """
     context = build_context_block(project, max_plot_words, max_characters_words, max_setting_words)
     previous = build_previous_context(project, chapter_index, max_previous_words)
@@ -213,9 +491,16 @@ def build_chapter_system_prompt(
             "sensory detail, dialogue and internal thoughts, but do not skip or "
             f"reorder the events described):\n{outline_text}\n\n"
         )
+    # Lorebook: se escanean el esquema de ESTE capitulo y el resumen de los
+    # capitulos anteriores -- el texto narrativamente mas cercano a lo que se
+    # esta por escribir -- en busca de las keywords de cada entrada, en vez
+    # de incluir el lorebook completo (que podria no caber en absoluto en el
+    # contexto de un modelo local con un elenco/mundo grande).
+    lore_scan_text = build_lore_scan_text(chapter, previous, recent_text)
+    lore_block = build_lorebook_block(project.lore_entries, lore_scan_text, max_entry_words=max_lore_words)
     style_emphasis = build_writing_style_instruction(project)
     purpose_instruction = build_chapter_purpose_instruction(chapter)
-    return (
+    bible = (
         "You are a skilled fiction writer producing one chapter of a longer "
         "story for an adult creative-writing project. Stay fully consistent "
         "with the plot, characters and setting provided. Do not break "
@@ -227,12 +512,216 @@ def build_chapter_system_prompt(
         f"{purpose_instruction}"
         f"{style_emphasis}"
         f"{STYLE_GUIDE}\n"
+    )
+    task = (
         f"Now write Chapter {chapter_index + 1}, titled \"{chapter.title}\". "
         f"Target length: approximately {chapter.target_words} words. "
     )
+    blocks = [lore_block.rstrip()] if lore_block else []
+    return bible, task, blocks
 
 
-_CHAPTER_HEADER_RE = re.compile(r"(?im)^\s*chapter\s+(\d+)\s*[:.\-]\s*(.*)$")
+def _outline_beats(outline: str) -> List[str]:
+    """Parte el esquema de un capitulo en beats: una linea por beat si viene
+    en lista/lineas, o una oracion por beat si es un parrafo."""
+    lines = [re.sub(r"^\s*(?:[-*•]|\d+[.)])\s*", "", ln).strip() for ln in outline.splitlines()]
+    lines = [ln for ln in lines if ln]
+    if len(lines) >= 2:
+        return lines
+    text = " ".join(lines)
+    return [s.strip() for s in _SENTENCE_BREAK_RE.split(text) if s.strip()]
+
+
+def build_beat_progress_hint(outline: str, written_words: int, target_words: int) -> str:
+    """
+    Pista de avance para una seccion de continuacion: que proporcion del
+    capitulo ya esta escrita y por que beat del esquema deberia ir, estimado
+    por palabras escritas / objetivo. Vacio si el esquema no tiene al menos
+    dos beats.
+    """
+    beats = _outline_beats(outline or "")
+    if len(beats) < 2 or target_words <= 0:
+        return ""
+    fraction = max(0.0, min(1.0, written_words / target_words))
+    done = min(len(beats) - 1, int(math.floor(fraction * len(beats))))
+    next_beat = _trim_words(beats[done], 40)
+    return (
+        f"PROGRESS: about {int(fraction * 100)}% of this chapter is written. The outline "
+        f"beats before beat {done + 1} of {len(beats)} are probably covered; continue "
+        f"with beat {done + 1}: \"{next_beat}\"."
+    )
+
+
+NOT_OVER_NUDGE = (
+    "The chapter is not finished yet: do not write an ending, a conclusion or a "
+    "summary; keep developing the remaining events."
+)
+FINAL_SECTION_HINT = "This is the final part of the chapter: bring it to a natural close."
+
+
+def build_author_note(project: Project, chapter: Chapter) -> str:
+    """
+    Nota del autor (de la historia y/o del capitulo): una instruccion corta
+    que se inserta CERCA DEL FINAL del prompt, justo antes de la orden de
+    escribir. En un prompt largo, lo que esta al principio (la biblia) pierde
+    peso; esto es la forma barata de "dirigir" la seccion siguiente (como el
+    Author's Note de NovelAI / KoboldCpp / SillyTavern). Vacio si no hay.
+    """
+    notes = [n.strip() for n in (project.author_note, chapter.author_note) if n and n.strip()]
+    if not notes:
+        return ""
+    return "AUTHOR'S NOTE (apply this to the passage you write now): " + " ".join(notes)
+
+
+STEP_CONTEXT_HEADER = "STEP-SPECIFIC CONTEXT (closest to the passage you are writing now):"
+
+
+def _step_context_block(blocks: List[str]) -> str:
+    clean = [block.strip() for block in blocks if block and block.strip()]
+    if not clean:
+        return ""
+    return f"{STEP_CONTEXT_HEADER}\n\n" + "\n\n".join(clean)
+
+
+def build_chapter_start_chat(project: Project, chapter_index: int, budget: dict) -> ChatPrompt:
+    """Primera seccion de un capitulo (todavia no hay texto escrito)."""
+    bible, task, step_blocks = _chapter_prompt_parts(project, chapter_index, **_chapter_budget_kwargs(budget))
+    note = build_author_note(project, project.chapters[chapter_index])
+    if note:
+        step_blocks.append(note)
+    step_context = _step_context_block(step_blocks)
+    user = (
+        f"{task.strip()}\n\nBegin the chapter now. Output only the chapter's prose "
+        "(no chapter heading, no notes)."
+    )
+    if step_context:
+        user = f"{user}\n\n{step_context}"
+    # Completado sin chat: termina con la indicacion de empezar, para que el
+    # modelo arranque a escribir prosa justo despues.
+    step_part = f"\n\n{step_context}" if step_context else ""
+    raw = f"{bible}{task}{step_part}\n\nBegin the chapter now:\n"
+    return ChatPrompt(
+        system=bible.rstrip(),
+        user=user,
+        raw=raw,
+    )
+
+
+def build_chapter_continuation_chat(
+    project: Project,
+    chapter_index: int,
+    budget: dict,
+    already_written: str,
+    remaining_words: int,
+    tail_words: int,
+    hints: Optional[List[str]] = None,
+) -> ChatPrompt:
+    """
+    Seccion de continuacion. En modo chat, el final de lo ya escrito va como
+    comienzo de la respuesta del asistente (`prefill`): el modelo sigue
+    escribiendo la prosa desde ese punto exacto (incluso a mitad de una
+    oracion) en vez de "contestar" una instruccion. `hints` son lineas extra
+    (avance por beats, "todavia no termines", "esta es la ultima parte").
+    """
+    bible, task, step_blocks = _chapter_prompt_parts(
+        project, chapter_index, recent_text=already_written, **_chapter_budget_kwargs(budget),
+    )
+    hints = [h for h in (hints or []) if h]
+    note = build_author_note(project, project.chapters[chapter_index])
+    # Orden de los bloques variables: lorebook, largo, pistas y al final la
+    # nota del autor -- lo ultimo que lee el modelo antes de escribir.
+    tail_blocks = hints + ([note] if note else [])
+    step_context = _step_context_block(step_blocks + [f"Write about {remaining_words} more words."] + tail_blocks)
+    user = (
+        f"{task.strip()}\n\nThe chapter is already in progress; your reply starts with the "
+        "last part of what has been written so far. Continue it seamlessly from the exact "
+        "point where it stops. Do not repeat earlier sentences, do not restart the scene "
+        "and do not summarize."
+    )
+    if step_context:
+        user = f"{user}\n\n{step_context}"
+    # build_continuation_prompt ya dice cuantas palabras faltan: no se repite aqui.
+    cont = build_continuation_prompt(
+        already_written, remaining_words, tail_words=tail_words, hints=step_blocks + tail_blocks
+    )
+    return ChatPrompt(
+        system=bible.rstrip(),
+        user=user,
+        prefill=tail_preserving_format(already_written, tail_words),
+        raw=f"{bible}{task}\n\n{cont}\n",
+    )
+
+
+def _chapter_budget_kwargs(budget: dict) -> dict:
+    keys = (
+        "max_plot_words", "max_characters_words", "max_setting_words",
+        "max_previous_words", "max_outline_words", "max_lore_words",
+    )
+    return {k: budget[k] for k in keys if k in budget}
+
+
+# ---------------- esquema: parser tolerante ----------------
+_NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7,
+    "eight": 8, "nine": 9, "ten": 10, "eleven": 11, "twelve": 12, "thirteen": 13,
+    "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+    "nineteen": 19, "twenty": 20,
+    "uno": 1, "dos": 2, "tres": 3, "cuatro": 4, "cinco": 5, "seis": 6, "siete": 7,
+    "ocho": 8, "nueve": 9, "diez": 10,
+}
+_ROMAN_VALUES = {"i": 1, "v": 5, "x": 10, "l": 50, "c": 100}
+
+# Una linea que empieza (tras markdown opcional: "#", ">", "**", "__", "*")
+# con "Chapter"/"Capitulo" + numero (cifras, palabra o romano). El resto de
+# la linea se valida en _parse_header_rest(): sin un separador (":", ".",
+# "-", ...) o markdown, "Chapter 3 ends with a storm." es prosa, no un titulo.
+_CHAPTER_HEADER_RE = re.compile(
+    r"(?im)^[ \t]*(?P<prefix>(?:#{1,6}[ \t]*|>[ \t]*)?(?:\*\*|__|\*|_)?)[ \t]*"
+    r"(?:chapter|cap[ií]tulo)[ \t]+(?P<num>\d{1,3}|[a-z]+)\b(?P<rest>[^\n]*)$"
+)
+_HEADER_SEPARATOR_RE = re.compile(r"^[*_]*[ \t]*[:.\-–—)][ \t]*")
+_HORIZONTAL_RULE_RE = re.compile(r"(?m)^[ \t]*[-*_=]{3,}[ \t]*$")
+
+
+def _roman_to_int(text: str) -> Optional[int]:
+    text = text.lower()
+    if not text or any(ch not in _ROMAN_VALUES for ch in text):
+        return None
+    total = 0
+    for i, ch in enumerate(text):
+        value = _ROMAN_VALUES[ch]
+        if i + 1 < len(text) and _ROMAN_VALUES[text[i + 1]] > value:
+            total -= value
+        else:
+            total += value
+    return total if 0 < total <= 100 else None
+
+
+def _chapter_number(token: str) -> Optional[int]:
+    if token.isdigit():
+        return int(token)
+    return _NUMBER_WORDS.get(token.lower()) or _roman_to_int(token)
+
+
+def _clean_title(text: str) -> str:
+    title = text.strip().strip("*_#").strip()
+    if len(title) >= 2 and title[0] in "\"'“" and title[-1] in "\"'”":
+        title = title[1:-1].strip()
+    return title
+
+
+def _parse_header_rest(prefix: str, rest: str) -> Optional[str]:
+    """Titulo limpio si `rest` (lo que sigue al numero) es un encabezado
+    valido; None si la linea parece prosa comun."""
+    stripped = rest.strip()
+    sep = _HEADER_SEPARATOR_RE.match(stripped)
+    if sep:
+        return _clean_title(stripped[sep.end():])
+    if not stripped.strip("*_#"):
+        return ""  # "Chapter 2" solo en su linea (o "**Chapter 2**")
+    if prefix.strip():
+        return _clean_title(stripped)  # "### Chapter 2 The Storm"
+    return None
 
 
 def build_outline_prompt(
@@ -269,41 +758,77 @@ def build_outline_prompt(
     )
 
 
+class OutlineParseError(ValueError):
+    """La respuesta del modelo no tiene ningun encabezado de capitulo
+    reconocible. `raw_text` es la respuesta completa, para mostrarsela al
+    usuario en vez de aplicarla a ciegas como un unico capitulo."""
+
+    def __init__(self, message: str, raw_text: str = ""):
+        super().__init__(message)
+        self.raw_text = raw_text
+
+
 def parse_outline_response(text: str, expected_chapters: int) -> List[Tuple[str, str]]:
     """
     Extrae pares (titulo, beats) de la respuesta del modelo a
-    build_outline_prompt. Tolera variaciones menores de formato
-    ("Chapter 1:", "Chapter 1.", etc.). Si el modelo no siguio el formato en
-    absoluto, devuelve todo el texto como un unico capitulo (mejor que nada).
+    build_outline_prompt. Tolera el markdown que los modelos suelen agregar
+    aunque se les pida texto plano: "**Chapter 1: The Call**",
+    "### Chapter 1 - The Call", "Chapter One: ...", "Chapter IV. ...",
+    "**Chapter 1:** ..." (ver _CHAPTER_HEADER_RE). Devuelve [] si `text`
+    esta vacio.
+
+    Si hay texto pero ningun encabezado reconocible, lanza OutlineParseError
+    en vez de devolver todo como un unico "capitulo 1": eso escribia un
+    bloque enorme en el esquema del capitulo 1 que, si pasaba de
+    MAX_OUTLINE_WORDS_PER_CHAPTER, bloqueaba despues toda generacion.
     """
-    matches = list(_CHAPTER_HEADER_RE.finditer(text))
+    matches = []
+    for match in _CHAPTER_HEADER_RE.finditer(text):
+        number = _chapter_number(match.group("num"))
+        if number is None:
+            continue
+        title = _parse_header_rest(match.group("prefix"), match.group("rest"))
+        if title is None:
+            continue
+        matches.append((match, number, title))
+
     results: List[Tuple[str, str]] = []
-    for i, match in enumerate(matches):
-        title = match.group(2).strip() or f"Chapter {match.group(1)}"
+    for i, (match, number, title) in enumerate(matches):
         start = match.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        body = text[start:end].strip()
-        results.append((title, body))
+        end = matches[i + 1][0].start() if i + 1 < len(matches) else len(text)
+        body = _HORIZONTAL_RULE_RE.sub("", text[start:end]).strip()
+        results.append((title or f"Chapter {number}", body))
     if not results:
-        stripped = text.strip()
-        return [("Chapter 1", stripped)] if stripped else []
+        if not text.strip():
+            return []
+        raise OutlineParseError(
+            "La respuesta del modelo no tiene el formato de esquema esperado "
+            "(\"Chapter 1: <titulo>\" seguido de sus eventos).",
+            raw_text=text,
+        )
     return results[:expected_chapters]
 
 
-def build_continuation_prompt(already_written: str, remaining_words: int, tail_words: int = 400) -> str:
+def build_continuation_prompt(
+    already_written: str, remaining_words: int, tail_words: int = 400,
+    hints: Optional[List[str]] = None,
+) -> str:
     """
-    Prompt para pedir que el modelo continue un capitulo ya empezado. Usa el
-    FINAL de lo ya escrito (no el inicio) para que el modelo sepa exactamente
-    donde retomar la escena.
+    Prompt (modo completion cruda) para pedir que el modelo continue un
+    capitulo ya empezado. Usa el FINAL de lo ya escrito (no el inicio) para
+    que el modelo sepa exactamente donde retomar la escena. `hints` son
+    lineas extra opcionales (ver build_chapter_continuation_chat).
     """
     tail = _trim_words_tail(already_written, tail_words)
+    step_context = _step_context_block(list(hints or []))
+    step_suffix = f"\n\n{step_context}" if step_context else ""
     return (
         "Continue the same chapter directly from where it left off. Do not "
         "repeat previous sentences, do not restart the scene, and do not "
         "summarize what already happened — just keep writing the story.\n\n"
-        f"...(end of what has been written so far)\n{tail}\n\n"
         f"Continue for about {remaining_words} more words, keeping the same "
-        f"tone, characters and formatting rules."
+        f"tone, characters and formatting rules.{step_suffix}\n\n"
+        f"...(end of what has been written so far)\n{tail}"
     )
 
 
@@ -342,7 +867,9 @@ def build_refine_chapter_prompt(
     project: Project,
     chapter_index: int,
     instruction: str,
-    max_content_words: int = 3000,
+    content: Optional[str] = None,
+    part: int = 1,
+    total_parts: int = 1,
 ) -> str:
     """
     Prompt para revisar un capitulo YA generado segun una instruccion del
@@ -350,15 +877,27 @@ def build_refine_chapter_prompt(
     vez de generar texto nuevo desde cero. Mantiene el STYLE_GUIDE y el
     enfasis de writing_style del proyecto (las reglas de formato siguen
     aplicando a la version revisada).
+
+    `content` es el texto a revisar (por defecto, el capitulo completo). A
+    diferencia del resto de los campos de este archivo, NUNCA se recorta
+    aqui: la respuesta reemplaza el capitulo entero, asi que recortar perdia
+    en silencio lo que quedaba fuera. Si no cabe, engine.refine_chapter()
+    lo divide en partes y llama a esta funcion una vez por parte, con
+    `part`/`total_parts` para que el modelo sepa que revisa solo un tramo.
     """
     chapter = project.chapters[chapter_index]
-    # A diferencia de build_continuation_prompt (que solo necesita el FINAL
-    # de lo escrito para saber donde retomar), una revision idealmente
-    # necesita el capitulo COMPLETO -- por eso se conserva el inicio
-    # (_trim_words) en vez de la cola si no cabe entero, como el resto de
-    # los campos de contexto de este archivo.
-    content = _trim_words(chapter.content.strip(), max_content_words)
+    if content is None:
+        content = chapter.content
+    content = content.strip()
     style_emphasis = build_writing_style_instruction(project)
+    part_note = ""
+    if total_parts > 1:
+        part_note = (
+            f"NOTE: this is part {part} of {total_parts} of the chapter, which is being "
+            "revised in consecutive parts. Rewrite ONLY this part, applying the "
+            "instruction where it is relevant to this part; do not add a chapter "
+            "heading, a recap of earlier parts, or an ending that is not in this part.\n\n"
+        )
     return (
         "You are editing an already-written chapter of a longer story, per "
         "the author's instruction below. Rewrite the chapter applying that "
@@ -367,8 +906,211 @@ def build_refine_chapter_prompt(
         "Output only the revised chapter text, nothing else — no notes, no "
         "commentary, no explanation of what you changed.\n\n"
         f"EDITING INSTRUCTION: {instruction.strip()}\n\n"
+        f"{part_note}"
         f"{style_emphasis}"
         f"{STYLE_GUIDE}\n"
         f"CURRENT CHAPTER TEXT:\n{content}\n\n"
         "Revised chapter:"
     )
+
+
+# ---------------- variantes chat (ver ChatPrompt) ----------------
+# Cada una conserva en `raw` exactamente el prompt de completion cruda de
+# siempre; `system`/`user` son el mismo pedido partido en turnos de chat.
+
+def build_outline_chat(project: Project, num_chapters: int, **budget) -> ChatPrompt:
+    raw = build_outline_prompt(project, num_chapters, **budget)
+    return ChatPrompt(
+        system=(
+            "You are a fiction editor planning a story before it is written. Follow the "
+            "requested output format exactly: plain text, one \"Chapter N: <title>\" line per "
+            "chapter followed by its events, no markdown."
+        ),
+        user=raw,
+        raw=raw,
+    )
+
+
+def build_summary_chat(text: str, max_words: int) -> ChatPrompt:
+    instructions = summary_instructions(max_words)
+    return ChatPrompt(
+        system=(
+            "You write concise, factual plot summaries of fiction chapters, used as memory "
+            "for writing the next chapter. Output only the summary."
+        ),
+        user=f"{instructions}{text}",
+        raw=f"{instructions}{text}{SUMMARY_SUFFIX}",
+    )
+
+
+SUMMARY_SUFFIX = "\n\nSummary:"
+
+
+def summary_instructions(max_words: int) -> str:
+    return (
+        "Summarize the following story chapter in at most "
+        f"{max_words} words, focusing on plot-relevant events only "
+        "(no stylistic commentary):\n\n"
+    )
+
+
+def build_partial_summary_chat(text: str, max_words: int, part: int, total_parts: int) -> ChatPrompt:
+    """Resumen de UNA parte de un capitulo demasiado largo para resumirse de
+    una vez (ver engine.summarize): despues se resumen los resumenes."""
+    instructions = (
+        f"The following is part {part} of {total_parts} of a story chapter. Summarize this "
+        f"part in at most {max_words} words, focusing on plot-relevant events only "
+        "(no stylistic commentary):\n\n"
+    )
+    return ChatPrompt(
+        system=(
+            "You write concise, factual plot summaries of fiction chapters, used as memory "
+            "for writing the next chapter. Output only the summary."
+        ),
+        user=f"{instructions}{text}",
+        raw=f"{instructions}{text}{SUMMARY_SUFFIX}",
+    )
+
+
+def build_combine_summaries_chat(part_summaries: List[str], max_words: int) -> ChatPrompt:
+    joined = "\n\n".join(f"Part {i}: {s.strip()}" for i, s in enumerate(part_summaries, start=1))
+    instructions = (
+        "Below are summaries of consecutive parts of one story chapter, in order. Combine "
+        f"them into a single summary of the whole chapter in at most {max_words} words, "
+        "keeping the plot-relevant events in order:\n\n"
+    )
+    return ChatPrompt(
+        system=(
+            "You write concise, factual plot summaries of fiction chapters, used as memory "
+            "for writing the next chapter. Output only the summary."
+        ),
+        user=f"{instructions}{joined}",
+        raw=f"{instructions}{joined}{SUMMARY_SUFFIX}",
+    )
+
+
+def build_expand_field_chat(field_key: str, text: str, max_words: int) -> ChatPrompt:
+    raw = build_expand_field_prompt(field_key, text, max_words)
+    label = EXPAND_FIELD_LABELS.get(field_key, field_key)
+    user = raw[: -len("Expanded notes:")].rstrip() if raw.endswith("Expanded notes:") else raw
+    return ChatPrompt(
+        system=(
+            f"You are a fiction editor helping an author flesh out their {label} notes. "
+            "Output only the expanded notes, with no preamble or commentary."
+        ),
+        user=user,
+        raw=raw,
+    )
+
+
+def build_refine_chapter_chat(
+    project: Project,
+    chapter_index: int,
+    instruction: str,
+    content: Optional[str] = None,
+    part: int = 1,
+    total_parts: int = 1,
+) -> ChatPrompt:
+    raw = build_refine_chapter_prompt(project, chapter_index, instruction, content, part, total_parts)
+    marker = "EDITING INSTRUCTION:"
+    cut = raw.find(marker)
+    system = raw[:cut].rstrip() if cut > 0 else "You are editing an already-written chapter of a longer story."
+    style = f"{build_writing_style_instruction(project)}{STYLE_GUIDE}".rstrip()
+    user = raw[cut:] if cut > 0 else raw
+    # En chat las reglas de estilo van en el turno de sistema, no en medio
+    # del pedido del usuario.
+    user = user.replace(f"{build_writing_style_instruction(project)}{STYLE_GUIDE}\n", "")
+    if user.endswith("Revised chapter:"):
+        user = user[: -len("Revised chapter:")].rstrip()
+    return ChatPrompt(system=f"{system}\n\n{style}", user=user, raw=raw)
+
+
+# ---------------- completar un esquema incompleto ----------------
+def build_outline_completion_chat(
+    project: Project, num_chapters: int, existing: List[Tuple[str, str]], **budget,
+) -> ChatPrompt:
+    """
+    Pide SOLO los capitulos que faltan de un esquema que salio incompleto
+    (respuesta cortada por largo, o el modelo escribio menos capitulos de los
+    pedidos): los ya planeados van como contexto y el modelo sigue desde
+    "Chapter k+1". Ver engine.complete_outline().
+    """
+    context = build_context_block(project, **budget)
+    style_emphasis = build_writing_style_instruction(project)
+    start = len(existing) + 1
+    planned = "\n\n".join(
+        f"Chapter {i}: {title}\n{beats.strip()}" for i, (title, beats) in enumerate(existing, start=1)
+    )
+    raw = (
+        "You are a fiction editor planning a story before it is written. The outline below "
+        f"for a story with EXACTLY {num_chapters} chapters is unfinished: only chapters 1 to "
+        f"{start - 1} have been planned.\n\n"
+        f"{context}\n"
+        f"{style_emphasis}"
+        f"OUTLINE SO FAR:\n{planned}\n\n"
+        f"Write ONLY the missing chapters, from Chapter {start} to Chapter {num_chapters}, "
+        "continuing the same story arc so that it reaches a clear climax and resolution by "
+        f"Chapter {num_chapters}. Use exactly this format (plain text, no markdown):\n\n"
+        f"Chapter {start}: <short chapter title>\n"
+        "<2 to 4 sentences describing the key events of this chapter>\n\n"
+        "Do not repeat the chapters that are already planned."
+    )
+    return ChatPrompt(
+        system=(
+            "You are a fiction editor planning a story before it is written. Follow the "
+            "requested output format exactly: plain text, one \"Chapter N: <title>\" line per "
+            "chapter followed by its events, no markdown."
+        ),
+        user=raw,
+        raw=raw,
+    )
+
+
+# ---------------- acciones sobre una seleccion ----------------
+REWRITE_MODES = {
+    "rewrite": "Rewrite the PASSAGE with fresher, stronger prose, keeping the same events and meaning.",
+    "expand": "Expand the PASSAGE to roughly twice its length with more detail, action and interiority, keeping the same events.",
+    "describe": "Rewrite the PASSAGE adding vivid sensory description (sight, sound, smell, touch) of the scene, keeping the same events.",
+    "shorten": "Condense the PASSAGE to roughly half its length, keeping every plot-relevant event.",
+}
+REWRITE_MODE_LABELS = {
+    "rewrite": "Reescribir",
+    "expand": "Expandir",
+    "describe": "Describir",
+    "shorten": "Acortar",
+}
+REWRITE_CONTEXT_WORDS = 300
+
+
+def build_rewrite_span_chat(
+    project: Project, chapter_index: int, before: str, selection: str, after: str,
+    mode: str = "rewrite", instruction: str = "",
+) -> ChatPrompt:
+    """
+    Reescribe SOLO un fragmento seleccionado del capitulo (Reescribir /
+    Expandir / Describir / Acortar, como en Sudowrite), con ~300 palabras de
+    contexto antes y despues para que encaje. La respuesta reemplaza solo la
+    seleccion (ver engine.rewrite_span()).
+    """
+    task = REWRITE_MODES.get(mode, REWRITE_MODES["rewrite"])
+    if instruction.strip():
+        task += f" Additional instruction from the author: {instruction.strip()}"
+    style_emphasis = build_writing_style_instruction(project)
+    chapter = project.chapters[chapter_index]
+    before_ctx = _trim_words_tail(before.strip(), REWRITE_CONTEXT_WORDS)
+    after_ctx = _trim_words(after.strip(), REWRITE_CONTEXT_WORDS)
+    system = (
+        "You are editing one passage of an already-written chapter of a longer story. "
+        "Output only the replacement passage -- no notes, no quotes around it, no "
+        "commentary, and no text from before or after the passage.\n\n"
+        f"{style_emphasis}{STYLE_GUIDE}".rstrip()
+    )
+    user = (
+        f"Chapter {chapter_index + 1}: \"{chapter.title}\".\n\n"
+        f"TEXT BEFORE THE PASSAGE (context only, do not rewrite):\n{before_ctx or '(start of chapter)'}\n\n"
+        f"PASSAGE:\n{selection.strip()}\n\n"
+        f"TEXT AFTER THE PASSAGE (context only, do not rewrite):\n{after_ctx or '(end of chapter)'}\n\n"
+        f"TASK: {task}"
+    )
+    raw = f"{system}\n\n{user}\n\nReplacement passage:\n"
+    return ChatPrompt(system=system, user=user, raw=raw)

@@ -1,1028 +1,336 @@
 """
-Interfaz grafica de escritorio (CustomTkinter) para StoryForge Local.
+Interfaz grafica de escritorio (CustomTkinter) para StoryForge Local: la
+ventana principal (StoryForgeApp) con lo que es de toda la app --
+preferencias, errores inesperados, exclusion mutua del motor, cambios sin
+guardar, autoguardado, abrir/guardar/exportar -- y run().
+
+Cada pestana y el menu son mixins en su propio modulo (F12):
+app/ui_menu.py (menu y atajos), app/ui_model_tab.py (Modelo),
+app/ui_story_tabs.py (Plot/Personajes/Setting), app/ui_lorebook_tab.py,
+app/ui_outline_tab.py (Esquema), app/ui_chapters_tab.py (Capitulos) y
+app/ui_chapter_editor.py (ChapterPanel, versiones anteriores); piezas
+comunes en app/ui_common.py. Ademas: app/task_runner.py (tareas del modelo
+en segundo plano), app/ui_status.py (barra de estado), app/ui_dialogs.py
+(ventanas secundarias) y app/strings_es.py (todos los textos visibles).
 """
 from __future__ import annotations
 
+import logging
 import os
+import platform
 import threading
-import tkinter as tk
-from pathlib import Path
+import time
 from tkinter import filedialog, messagebox
-from typing import Callable, Optional
+from typing import Dict, Optional
 
 import customtkinter as ctk
 
-from .engine import ContextOverflowError, LocalStoryEngine, ModelNotLoadedError, find_local_models
-from .export import export_docx, export_txt
-from .project import (
-    CHAPTER_PURPOSES,
-    MAX_CHAPTERS,
-    MAX_CHARACTERS_WORDS,
-    MAX_OUTLINE_WORDS_PER_CHAPTER,
-    MAX_PLOT_WORDS,
-    MAX_SETTING_WORDS,
-    MAX_WORDS_PER_CHAPTER,
-    WRITING_STYLES,
-    Chapter,
-    Project,
-    count_words,
+from . import __version__
+from . import strings_es as S
+from .engine import (
+    ContextOverflowError,  # noqa: F401 - reexportado para las pruebas
+    LocalStoryEngine,
+    ModelNotLoadedError,  # noqa: F401 - reexportado para las pruebas
+    supports_gpu_offload,
 )
-from .repetition import reduce_repetition, repetition_report
+from .export import export_docx, export_epub, export_markdown, export_txt
+from .gguf import query_free_vram_bytes
+from .paths import is_frozen, log_file_path, user_data_dir
+from .project import (
+    DEFAULT_PROJECT_NAME,
+    MAX_CHAPTERS,
+    WRITING_STYLES,
+    Project,
+    save_json_text,
+)
+from .settings import (
+    get_ui_preferences,
+    set_ui_preferences,
+)
+from .strings_es import (
+    CHAPTER_HEADING_LABELS,
+    CHAPTER_PURPOSE_DEFAULT_LABEL,
+    WRITING_STYLE_DEFAULT_LABEL,
+    style_key,
+    style_label,
+)
+from .task_runner import EngineTaskRunner
+from .ui_chapter_editor import ChapterPanel, VersionHistoryDialog
+from .ui_chapters_tab import ChaptersTabMixin
+from .ui_common import (
+    APP_TITLE,
+    MODELS_DIR,
+)
+from .ui_dialogs import (
+    DiffPreviewDialog,
+    PreferencesDialog,
+    TextViewerDialog,
+)
+from .ui_lorebook_tab import LorebookTabMixin, LoreEntryPanel, _lore_entry_matches_search
+from .ui_menu import MenuMixin
+from .ui_model_tab import ModelTabMixin
+from .ui_outline_tab import OutlinePanel, OutlineTabMixin
+from .ui_status import StatusBar
+from .ui_story_tabs import StoryTabsMixin
+
+# Copia de autoguardado, separada del guardado explicito del usuario. Vive en
+# user_data_dir() (%APPDATA%\StoryForge en el .exe) y se resuelve al crear la
+# ventana (StoryForgeApp.autosave_path): asi STORYFORGE_USER_DATA_DIR
+# redirige el autoguardado -- las pruebas lo usan para no tocar nunca el
+# autoguardado real del usuario.
+
+
+def log_location() -> str:
+    """Donde quedan los errores registrados (ver app/main.py)."""
+    if is_frozen():
+        return log_file_path()
+    return S.LOG_EN_CONSOLA
+
+
+def window_icon_path() -> Optional[str]:
+    """assets/icon.ico: dentro del build (sys._MEIPASS) o en el arbol del codigo."""
+    import sys
+
+    base = getattr(sys, "_MEIPASS", None) or os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = os.path.join(base, "assets", "icon.ico")
+    return path if os.path.isfile(path) else None
+
+
+def default_autosave_path() -> str:
+    return os.path.join(user_data_dir(), "autosave", "autosave.json")
+
+
+# Cada cuanto se revisa si hay que autoguardar: siempre mientras el modelo
+# trabaja, y cada AUTOSAVE_IDLE_SECONDS si hay cambios sin guardar (F10:
+# antes solo se autoguardaba durante una generacion).
+AUTOSAVE_INTERVAL_MS = 20_000
+AUTOSAVE_IDLE_SECONDS = 60
+# Espera tras la ultima tecla antes de recalcular "cambios sin guardar" (F10).
+DIRTY_CHECK_DEBOUNCE_MS = 500
+
+logger = logging.getLogger(__name__)
+
+
+def about_text(engine) -> str:
+    """Texto de Ayuda > Acerca de (K3)."""
+    try:
+        from importlib.metadata import version as pkg_version
+        llama_version = pkg_version("llama-cpp-python")
+    except Exception:  # noqa: BLE001
+        llama_version = S.NO_INSTALADO
+    free = query_free_vram_bytes()
+    gpu = S.SI if supports_gpu_offload() else S.NO_SOLO_CPU
+    vram = S.ABOUT_VRAM_GB.format(gb=free / 1024**3) if free is not None else S.NO_DISPONIBLE
+    model = os.path.basename(engine.model_path) if getattr(engine, "model_path", None) else S.NINGUNO
+    lines = [
+        f"{APP_TITLE} {__version__}",
+        "",
+        S.ABOUT_PYTHON.format(python_version=platform.python_version(), architecture=platform.architecture()[0],
+                              system=platform.system(), release=platform.release()),
+        S.ABOUT_LLAMA_CPP.format(llama_version=llama_version),
+        S.ABOUT_GPU.format(gpu=gpu),
+        S.ABOUT_VRAM.format(vram=vram),
+        S.ABOUT_MODELO.format(model=model),
+        "",
+        S.ABOUT_CARPETA_MODELOS.format(folder=MODELS_DIR),
+        S.ABOUT_DATOS_USUARIO.format(folder=user_data_dir()),
+        S.ABOUT_REGISTRO.format(location=log_location()),
+    ]
+    return "\n".join(lines)
 
-ctk.set_appearance_mode("dark")
-ctk.set_default_color_theme("blue")
 
-APP_TITLE = "StoryForge Local"
-APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-MODELS_DIR = os.path.join(APP_ROOT, "models")
-WRITING_STYLE_DEFAULT_LABEL = "(Por defecto)"
-WRITING_STYLE_OPTIONS = [WRITING_STYLE_DEFAULT_LABEL] + WRITING_STYLES
-CHAPTER_PURPOSE_DEFAULT_LABEL = "(Capitulo regular)"
-CHAPTER_PURPOSE_OPTIONS = [CHAPTER_PURPOSE_DEFAULT_LABEL] + CHAPTER_PURPOSES
-# Copia de autoguardado, separada del guardado explicito del usuario: un
-# capitulo puede tardar 15-40 minutos en generarse, asi que sin esto un
-# cierre inesperado (crash, corte de luz) a mitad de una generacion larga
-# perderia todo ese progreso.
-AUTOSAVE_PATH = os.path.join(APP_ROOT, "autosave", "autosave.json")
-AUTOSAVE_INTERVAL_MS = 20_000  # cada cuanto se reintenta el autoguardado mientras hay una generacion en curso
-
-
-class LimitedTextBox(ctk.CTkFrame):
-    """
-    Textbox con contador de palabras en vivo y limite maximo visible.
-    Opcionalmente muestra botones "Importar desde archivo..." (siempre
-    sincrono, no toca el motor) y/o "Expandir con IA" (llama al motor: el
-    llamador es responsable de deshabilitar self.expand_btn durante
-    self.app.busy, igual que con cualquier otro control que dispara al
-    modelo -- ver StoryForgeApp._set_engine_busy()).
-    """
-
-    def __init__(
-        self, master, label: str, max_words: int, height: int = 160,
-        on_expand: Optional[Callable[[], None]] = None,
-        on_import: Optional[Callable[[], None]] = None,
-        **kwargs,
-    ):
-        super().__init__(master, **kwargs)
-        self.max_words = max_words
-        self.grid_columnconfigure(0, weight=1)
-
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=4, pady=(4, 0))
-        header.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(header, text=label, font=ctk.CTkFont(weight="bold")).grid(row=0, column=0, sticky="w")
-        self.counter_label = ctk.CTkLabel(header, text=f"0 / {max_words:,} palabras")
-        self.counter_label.grid(row=0, column=1, sticky="e")
-
-        text_row = 1
-        if on_expand or on_import:
-            btn_bar = ctk.CTkFrame(self, fg_color="transparent")
-            btn_bar.grid(row=1, column=0, sticky="w", padx=4, pady=(2, 0))
-            if on_import:
-                self.import_btn = ctk.CTkButton(
-                    btn_bar, text="Importar desde archivo...", width=170, command=on_import
-                )
-                self.import_btn.pack(side="left", padx=(0, 6))
-            if on_expand:
-                self.expand_btn = ctk.CTkButton(btn_bar, text="Expandir con IA", width=140, command=on_expand)
-                self.expand_btn.pack(side="left")
-            text_row = 2
-
-        self.textbox = ctk.CTkTextbox(self, height=height, wrap="word")
-        self.textbox.grid(row=text_row, column=0, sticky="nsew", padx=4, pady=4)
-        self.grid_rowconfigure(text_row, weight=1)
-        self.textbox.bind("<KeyRelease>", self._on_change)
-
-    def _on_change(self, _event=None) -> None:
-        words = count_words(self.get())
-        over = words > self.max_words
-        color = "#e05555" if over else ("#9fd39f" if words > 0 else "gray")
-        self.counter_label.configure(text=f"{words:,} / {self.max_words:,} palabras", text_color=color)
-
-    def get(self) -> str:
-        return self.textbox.get("1.0", "end-1c")
-
-    def set(self, text: str) -> None:
-        self.textbox.delete("1.0", "end")
-        self.textbox.insert("1.0", text or "")
-        self._on_change()
-
-
-class ChapterPanel(ctk.CTkFrame):
-    """Panel para un capitulo: metadata + generacion + contenido + reduccion de repeticion."""
-
-    def __init__(self, master, app: "StoryForgeApp", index: int, chapter: Chapter, **kwargs):
-        super().__init__(master, border_width=1, corner_radius=8, **kwargs)
-        self.app = app
-        self.index = index
-        self.chapter = chapter
-        self._cancel_flag: Optional[dict] = None
-        self.grid_columnconfigure(1, weight=1)
-
-        ctk.CTkLabel(self, text=f"Capitulo {index + 1}", font=ctk.CTkFont(weight="bold")).grid(
-            row=0, column=0, padx=8, pady=(8, 2), sticky="w"
-        )
-
-        self.title_entry = ctk.CTkEntry(self, placeholder_text="Titulo del capitulo")
-        self.title_entry.insert(0, chapter.title)
-        self.title_entry.grid(row=0, column=1, padx=8, pady=(8, 2), sticky="ew")
-
-        ctk.CTkLabel(self, text="Palabras objetivo:").grid(row=0, column=2, padx=(8, 2), sticky="e")
-        self.target_entry = ctk.CTkEntry(self, width=80)
-        self.target_entry.insert(0, str(chapter.target_words))
-        self.target_entry.grid(row=0, column=3, padx=(0, 8), sticky="e")
-
-        # Proposito narrativo de este capitulo especifico (Apertura/Escena
-        # climatica/Final/Epilogo, o regular) -- a diferencia de
-        # writing_style, que es a nivel de todo el proyecto.
-        purpose_row = ctk.CTkFrame(self, fg_color="transparent")
-        purpose_row.grid(row=1, column=0, columnspan=4, sticky="w", padx=8, pady=(2, 0))
-        ctk.CTkLabel(purpose_row, text="Proposito:").pack(side="left", padx=(0, 6))
-        self.purpose_menu = ctk.CTkOptionMenu(purpose_row, values=CHAPTER_PURPOSE_OPTIONS, width=170)
-        self.purpose_menu.set(
-            chapter.purpose if chapter.purpose in CHAPTER_PURPOSES else CHAPTER_PURPOSE_DEFAULT_LABEL
-        )
-        self.purpose_menu.pack(side="left")
-
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=2, column=0, columnspan=4, sticky="ew", padx=8)
-        self.generate_btn = ctk.CTkButton(btn_frame, text="Generar", width=100, command=self._on_generate)
-        self.generate_btn.pack(side="left", padx=(0, 6), pady=4)
-        self.cancel_btn = ctk.CTkButton(
-            btn_frame, text="Cancelar", width=90, state="disabled",
-            fg_color="#8a6a2f", hover_color="#6e5526", command=self._on_cancel,
-        )
-        self.cancel_btn.pack(side="left", padx=6, pady=4)
-        self.reduce_btn = ctk.CTkButton(btn_frame, text="Reducir repeticion", width=140, command=self._on_reduce)
-        self.reduce_btn.pack(side="left", padx=6, pady=4)
-        self.report_btn = ctk.CTkButton(btn_frame, text="Reporte de repeticion", width=150, command=self._on_report)
-        self.report_btn.pack(side="left", padx=6, pady=4)
-        self.history_btn = ctk.CTkButton(btn_frame, text="Versiones anteriores (0)", width=170, command=self._on_show_history)
-        self.history_btn.pack(side="left", padx=6, pady=4)
-        self.remove_btn = ctk.CTkButton(
-            btn_frame, text="Eliminar capitulo", width=130, fg_color="#8a3b3b",
-            hover_color="#6e2f2f", command=self._on_remove,
-        )
-        self.remove_btn.pack(side="right", padx=(6, 0), pady=4)
-
-        self.status_label = ctk.CTkLabel(self, text="", text_color="gray")
-        self.status_label.grid(row=3, column=0, columnspan=4, sticky="w", padx=8)
-
-        self.content_box = ctk.CTkTextbox(self, height=220, wrap="word")
-        self.content_box.grid(row=4, column=0, columnspan=4, sticky="nsew", padx=8, pady=(4, 8))
-        self.content_box.insert("1.0", chapter.content)
-        self.grid_rowconfigure(4, weight=1)
-
-        self.word_count_label = ctk.CTkLabel(self, text="")
-        self.word_count_label.grid(row=5, column=0, columnspan=4, sticky="w", padx=8, pady=(0, 4))
-        self._refresh_word_count()
-        self.content_box.bind("<KeyRelease>", lambda e: self._refresh_word_count())
-
-        # Refinamiento: reescribe el capitulo YA generado segun una
-        # instruccion puntual (p.ej. "hazlo mas oscuro"), en vez de
-        # regenerarlo desde cero -- ver LocalStoryEngine.refine_chapter().
-        refine_row = ctk.CTkFrame(self, fg_color="transparent")
-        refine_row.grid(row=6, column=0, columnspan=4, sticky="ew", padx=8, pady=(0, 8))
-        refine_row.grid_columnconfigure(0, weight=1)
-        self.refine_entry = ctk.CTkEntry(
-            refine_row,
-            placeholder_text="Instruccion de refinamiento (ej: hazlo mas oscuro, acorta el dialogo del final)",
-        )
-        self.refine_entry.grid(row=0, column=0, sticky="ew", padx=(0, 6))
-        self.refine_btn = ctk.CTkButton(refine_row, text="Aplicar refinamiento", width=160, command=self._on_refine)
-        self.refine_btn.grid(row=0, column=1)
-
-        self._refresh_history_btn()
-
-    # ---- sincronizacion con el modelo de datos ----
-    def sync_to_model(self) -> None:
-        self.chapter.title = self.title_entry.get().strip() or f"Capitulo {self.index + 1}"
-        try:
-            target = int(self.target_entry.get())
-        except ValueError:
-            target = self.chapter.target_words
-        self.chapter.target_words = max(1, min(target, MAX_WORDS_PER_CHAPTER))
-        self.chapter.content = self.content_box.get("1.0", "end-1c")
-        selected_purpose = self.purpose_menu.get()
-        self.chapter.purpose = "" if selected_purpose == CHAPTER_PURPOSE_DEFAULT_LABEL else selected_purpose
-
-    def _refresh_history_btn(self) -> None:
-        self.history_btn.configure(text=f"Versiones anteriores ({len(self.chapter.history)})")
-
-    def _refresh_word_count(self) -> None:
-        words = count_words(self.content_box.get("1.0", "end-1c"))
-        over = words > MAX_WORDS_PER_CHAPTER
-        color = "#e05555" if over else "gray"
-        self.word_count_label.configure(
-            text=f"{words:,} / {MAX_WORDS_PER_CHAPTER:,} palabras generadas", text_color=color
-        )
-
-    def _set_busy(self, busy: bool, status: str = "") -> None:
-        state = "disabled" if busy else "normal"
-        self.generate_btn.configure(state=state)
-        self.reduce_btn.configure(state=state)
-        self.remove_btn.configure(state=state)
-        self.refine_btn.configure(state=state)
-        self.history_btn.configure(state=state)
-        self.cancel_btn.configure(state=("normal" if busy else "disabled"))
-        self.status_label.configure(text=status)
-
-    def _on_cancel(self) -> None:
-        if self._cancel_flag is not None:
-            self._cancel_flag["cancel"] = True
-            self.cancel_btn.configure(state="disabled")
-            self.status_label.configure(text="Cancelando... se detendra al terminar la seccion actual.")
-
-    def _on_generate(self) -> None:
-        if not self.app.engine.is_loaded:
-            messagebox.showwarning(APP_TITLE, "Primero carga un modelo local (.gguf) en la pestana 'Modelo'.")
-            return
-        if self.app.busy:
-            messagebox.showwarning(
-                APP_TITLE,
-                "Ya hay una generacion en curso (otro capitulo, el esquema, o cargando un "
-                "modelo). Espera a que termine antes de iniciar otra.",
-            )
-            return
-        # Sincronizamos TODO (plot/personajes/setting/esquema/capitulos), no
-        # solo este panel: la generacion depende de esos datos y antes solo
-        # se actualizaban al guardar/exportar, asi que podian estar
-        # desactualizados (o vacios) al generar sin haber guardado primero.
-        self.app._sync_all()
-        errors = self.app.project.validate_inputs()
-        if errors:
-            messagebox.showwarning(APP_TITLE, "Corrige antes de generar:\n\n" + "\n".join(errors))
-            return
-        if self.chapter.content.strip() and not messagebox.askyesno(
-            APP_TITLE,
-            f"El capitulo {self.index + 1} ya tiene texto generado. Generar de nuevo "
-            "reemplazara ese contenido (la version actual se guarda en "
-            "\"Versiones anteriores\", asi que es recuperable). ¿Continuar?",
-        ):
-            return
-
-        self.chapter.push_history()
-        self._refresh_history_btn()
-        self.app._set_engine_busy(True)
-        self._set_busy(True, "Generando... esto puede tardar varios minutos en CPU.")
-        cancel_flag = {"cancel": False}
-        self._cancel_flag = cancel_flag
-
-        def progress(text: str, words: int, target: int) -> None:
-            def apply():
-                self.content_box.delete("1.0", "end")
-                self.content_box.insert("1.0", text)
-                self._refresh_word_count()
-                self.status_label.configure(text=f"Generando... {words:,} / {target:,} palabras")
-            self.app.after(0, apply)
-
-        def worker():
-            try:
-                result = self.app.engine.generate_chapter(
-                    self.app.project, self.index, progress_callback=progress,
-                    cancel_check=lambda: cancel_flag["cancel"],
-                )
-                self.chapter.content = result
-
-                if result.strip() and not cancel_flag["cancel"]:
-                    # Resumimos el capitulo para dar continuidad al siguiente
-                    # (en vez de pasarle solo un recorte del texto crudo).
-                    self.app.after(0, lambda: self.status_label.configure(
-                        text="Generando resumen para continuidad entre capitulos..."
-                    ))
-                    try:
-                        self.chapter.summary = self.app.engine.summarize(result)
-                    except Exception:
-                        # Si el resumen falla no perdemos el capitulo generado;
-                        # el siguiente capitulo simplemente usara un recorte
-                        # del texto en su lugar (ver prompts.build_previous_context).
-                        pass
-            except ModelNotLoadedError as exc:
-                # No usar `exc` directamente dentro del lambda: `except ... as
-                # exc` se borra automaticamente al salir de este bloque
-                # (limpieza estandar de Python), y self.app.after() difiere
-                # la llamada hasta despues de eso -- referenciar `exc` ahi
-                # lanza NameError en vez de mostrar el error real. Se captura
-                # el mensaje en una variable local normal en su lugar.
-                message = str(exc)
-                self.app.after(0, lambda: messagebox.showerror(APP_TITLE, message))
-            except ContextOverflowError as exc:
-                message = f"El contexto es demasiado grande para este modelo:\n\n{exc}"
-                self.app.after(0, lambda: messagebox.showerror(APP_TITLE, message))
-            except Exception as exc:  # noqa: BLE001
-                message = f"Error generando capitulo: {exc}"
-                self.app.after(0, lambda: messagebox.showerror(APP_TITLE, message))
-            finally:
-                self._cancel_flag = None
-                self.app.after(0, lambda: self._set_busy(False, "Listo."))
-                self.app.after(0, self.app._autosave)
-                self.app.after(0, lambda: self.app._set_engine_busy(False))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _on_reduce(self) -> None:
-        self.sync_to_model()
-        if not self.chapter.content.strip():
-            return
-        self.chapter.push_history()
-        self._refresh_history_btn()
-        reduced = reduce_repetition(self.chapter.content)
-        self.content_box.delete("1.0", "end")
-        self.content_box.insert("1.0", reduced)
-        self.chapter.content = reduced
-        self._refresh_word_count()
-
-    def _on_report(self) -> None:
-        self.sync_to_model()
-        report = repetition_report(self.chapter.content)
-        messagebox.showinfo(f"Repeticion - Capitulo {self.index + 1}", report)
-
-    def _on_remove(self) -> None:
-        if messagebox.askyesno(APP_TITLE, f"¿Eliminar el capitulo {self.index + 1}?"):
-            self.app.remove_chapter(self.index)
-
-    # ---- refinamiento (revisar el capitulo ya generado segun una instruccion) ----
-    def _on_refine(self) -> None:
-        if not self.app.engine.is_loaded:
-            messagebox.showwarning(APP_TITLE, "Primero carga un modelo local (.gguf) en la pestana 'Modelo'.")
-            return
-        if self.app.busy:
-            messagebox.showwarning(
-                APP_TITLE,
-                "Ya hay una generacion en curso (otro capitulo, el esquema, o cargando un "
-                "modelo). Espera a que termine antes de iniciar otra.",
-            )
-            return
-        self.sync_to_model()
-        if not self.chapter.content.strip():
-            messagebox.showwarning(
-                APP_TITLE, "Este capitulo todavia no tiene contenido para refinar. Generalo primero."
-            )
-            return
-        instruction = self.refine_entry.get().strip()
-        if not instruction:
-            messagebox.showwarning(
-                APP_TITLE, "Escribe una instruccion de refinamiento (por ejemplo: \"hazlo mas oscuro\")."
-            )
-            return
-        if not messagebox.askyesno(
-            APP_TITLE,
-            f"Esto va a reescribir el capitulo {self.index + 1} completo segun esa instruccion, "
-            "reemplazando el contenido actual (la version actual se guarda en \"Versiones "
-            "anteriores\", asi que es recuperable). ¿Continuar?",
-        ):
-            return
-
-        self.chapter.push_history()
-        self._refresh_history_btn()
-        self.app._set_engine_busy(True)
-        self._set_busy(True, "Refinando capitulo... esto puede tardar varios minutos.")
-
-        def worker():
-            try:
-                result = self.app.engine.refine_chapter(self.app.project, self.index, instruction)
-
-                def apply():
-                    self.chapter.content = result
-                    self.content_box.delete("1.0", "end")
-                    self.content_box.insert("1.0", result)
-                    self._refresh_word_count()
-                self.app.after(0, apply)
-            except ModelNotLoadedError as exc:
-                # Ver el comentario equivalente en _on_generate: `exc` se
-                # borra al salir del bloque except, y self.app.after()
-                # difiere la llamada hasta despues de eso.
-                message = str(exc)
-                self.app.after(0, lambda: messagebox.showerror(APP_TITLE, message))
-            except ContextOverflowError as exc:
-                message = f"El contexto es demasiado grande para este modelo:\n\n{exc}"
-                self.app.after(0, lambda: messagebox.showerror(APP_TITLE, message))
-            except Exception as exc:  # noqa: BLE001
-                message = f"Error refinando el capitulo: {exc}"
-                self.app.after(0, lambda: messagebox.showerror(APP_TITLE, message))
-            finally:
-                self.app.after(0, lambda: self._set_busy(False, "Listo."))
-                self.app.after(0, self.app._autosave)
-                self.app.after(0, lambda: self.app._set_engine_busy(False))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    # ---- versiones anteriores ----
-    def _on_show_history(self) -> None:
-        if not self.chapter.history:
-            messagebox.showinfo(APP_TITLE, "Este capitulo no tiene versiones anteriores guardadas todavia.")
-            return
-        VersionHistoryDialog(self.app, self)
-
-
-class VersionHistoryDialog(ctk.CTkToplevel):
-    """
-    Ventana emergente para ver y restaurar versiones anteriores de un
-    capitulo (chapter.history, ver Chapter.push_history()). Se guarda una
-    version cada vez que se regenera, refina, o reduce repeticion sobre un
-    capitulo que ya tenia contenido -- esta ventana es la forma de
-    recuperarlas.
-    """
-
-    def __init__(self, master, panel: "ChapterPanel"):
-        super().__init__(master)
-        self.panel = panel
-        self.title(f"Versiones anteriores - Capitulo {panel.index + 1}")
-        self.geometry("700x500")
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
-
-        # El dropdown muestra la version mas reciente primero (es la que mas
-        # probablemente se quiera recuperar), pero chapter.history guarda la
-        # mas vieja primero -- self._labels ya queda en orden "mas reciente
-        # primero" para no tener que invertir nada al mostrar, solo al
-        # mapear de vuelta a un indice real en _selected_history_index().
-        history = panel.chapter.history
-        total = len(history)
-        self._labels = [
-            f"Version {i + 1} de {total} ({count_words(text)} palabras)"
-            for i, text in enumerate(history)
-        ]
-        self._labels.reverse()
-
-        top = ctk.CTkFrame(self, fg_color="transparent")
-        top.grid(row=0, column=0, sticky="ew", padx=10, pady=10)
-        ctk.CTkLabel(top, text="Version:").pack(side="left", padx=(0, 6))
-        self.version_menu = ctk.CTkOptionMenu(top, values=self._labels, command=self._on_select, width=220)
-        self.version_menu.pack(side="left", padx=(0, 12))
-        self.restore_btn = ctk.CTkButton(top, text="Restaurar esta version", command=self._on_restore)
-        self.restore_btn.pack(side="left")
-
-        self.preview_box = ctk.CTkTextbox(self, wrap="word")
-        self.preview_box.grid(row=1, column=0, sticky="nsew", padx=10, pady=(0, 10))
-        self.preview_box.configure(state="disabled")
-
-        self._on_select(self._labels[0])
-
-    def _selected_history_index(self) -> int:
-        display_index = self._labels.index(self.version_menu.get())
-        return len(self.panel.chapter.history) - 1 - display_index
-
-    def _on_select(self, _value: str = "") -> None:
-        text = self.panel.chapter.history[self._selected_history_index()]
-        self.preview_box.configure(state="normal")
-        self.preview_box.delete("1.0", "end")
-        self.preview_box.insert("1.0", text)
-        self.preview_box.configure(state="disabled")
-
-    def _on_restore(self) -> None:
-        text = self.panel.chapter.history[self._selected_history_index()]
-        if not messagebox.askyesno(
-            APP_TITLE,
-            "Esto reemplaza el contenido actual del capitulo por esta version anterior. El "
-            "contenido actual tambien se guarda como version antes de restaurar, asi que esto "
-            "es reversible. ¿Continuar?",
-        ):
-            return
-        self.panel.chapter.push_history()
-        self.panel.chapter.content = text
-        self.panel.content_box.delete("1.0", "end")
-        self.panel.content_box.insert("1.0", text)
-        self.panel._refresh_word_count()
-        self.panel._refresh_history_btn()
-        self.destroy()
-
-
-class OutlinePanel(ctk.CTkFrame):
-    """
-    Panel de esquema (beat sheet) de un capitulo: titulo + beats principales.
-    Vive en la pestana 'Esquema', separado de ChapterPanel (que es donde se
-    genera y edita la prosa), para poder revisar la estructura completa de
-    la historia de un vistazo antes de escribir un solo capitulo.
-    """
-
-    def __init__(self, master, index: int, chapter: Chapter, **kwargs):
-        super().__init__(master, border_width=1, corner_radius=8, **kwargs)
-        self.index = index
-        self.chapter = chapter
-        self.grid_columnconfigure(0, weight=1)
-
-        # El titulo se edita solo en la pestana 'Capitulos' (ChapterPanel);
-        # aqui solo se muestra, para no tener dos campos editables separados
-        # escribiendo al mismo chapter.title y desincronizandose entre si.
-        header = ctk.CTkFrame(self, fg_color="transparent")
-        header.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
-        header.grid_columnconfigure(0, weight=1)
-        title_text = chapter.title or f"Capitulo {index + 1}"
-        ctk.CTkLabel(header, text=f"Capitulo {index + 1}: {title_text}", font=ctk.CTkFont(weight="bold")).grid(
-            row=0, column=0, sticky="w"
-        )
-        self.counter_label = ctk.CTkLabel(header, text="")
-        self.counter_label.grid(row=0, column=1, sticky="e")
-
-        self.outline_box = ctk.CTkTextbox(self, height=90, wrap="word")
-        self.outline_box.insert("1.0", chapter.outline)
-        self.outline_box.grid(row=1, column=0, sticky="ew", padx=8, pady=(0, 8))
-        self.outline_box.bind("<KeyRelease>", self._on_change)
-        self._on_change()
-
-    def _on_change(self, _event=None) -> None:
-        words = count_words(self.outline_box.get("1.0", "end-1c"))
-        over = words > MAX_OUTLINE_WORDS_PER_CHAPTER
-        color = "#e05555" if over else "gray"
-        self.counter_label.configure(
-            text=f"{words:,} / {MAX_OUTLINE_WORDS_PER_CHAPTER:,} palabras", text_color=color
-        )
-
-    def sync_to_model(self) -> None:
-        self.chapter.outline = self.outline_box.get("1.0", "end-1c")
-
-
-class StoryForgeApp(ctk.CTk):
+class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, OutlineTabMixin,
+                    ChaptersTabMixin, ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
-        self.title(APP_TITLE)
-        self.geometry("1000x750")
+        self.prefs = get_ui_preferences()
+        self._apply_global_preferences()
+        self.geometry("1100x800")
+        self._set_window_icon()
 
         self.project = Project()
         self.engine = LocalStoryEngine()
         self.current_path: Optional[str] = None
         self.chapter_panels: list[ChapterPanel] = []
         self.outline_panels: list[OutlinePanel] = []
-        # El motor local envuelve una sola instancia de Llama, que no es segura
-        # para llamadas concurrentes: este flag evita que se generen dos
-        # capitulos a la vez, o que se cargue un modelo nuevo mientras el
-        # actual sigue generando texto en otro hilo.
+        # Paneles del lorebook VISIBLES (filtrados por la busqueda) y todos
+        # los creados, por id() de la entrada: filtrar ya no destruye y
+        # recrea cada panel en cada tecla (F11).
+        self.lore_panels: list[LoreEntryPanel] = []
+        self._lore_panel_cache: Dict[int, LoreEntryPanel] = {}
+        self._lore_filter_after = None
+        # ids de las LoreEntry que coincidieron con la ULTIMA generacion de
+        # capitulo (y por que, ver _record_lore_matches()).
+        self.last_lore_match_ids: set[int] = set()
+        self.last_lore_reasons: Dict[int, str] = {}
+        # El motor local envuelve una sola instancia de Llama, que no es
+        # segura para llamadas concurrentes: este flag evita dos tareas a la vez.
         self.busy = False
+        self.selected_chapter_index = 0
+        self.focus_mode = False
+        self.last_preview: Optional[DiffPreviewDialog] = None
+        self._model_paths: Dict[str, str] = {}
+        self._gpu_available = supports_gpu_offload()
+        self.task_runner = EngineTaskRunner(self)
+        # Resuelto ahora (no al importar el modulo): ver default_autosave_path().
+        self.autosave_path = default_autosave_path()
+        # Autoguardado en segundo plano (ver _autosave): contador de
+        # generaciones para que una escritura vieja nunca pise una nueva.
+        self._autosave_lock = threading.Lock()
+        self._autosave_gen = 0
+        self._autosave_written_gen = 0
+        self._autosave_discarded_gen = 0
+        self._autosave_errors: list = []
+        self._last_autosave = 0.0
+        self._clean_json = ""
+        self.dirty = False
+        self._dirty_after = None
+        # Errores inesperados en callbacks de Tk: sin esto, en el .exe
+        # (console=False) se imprimian a un stderr inexistente y se perdian.
+        self.report_callback_exception = self._report_callback_exception
+        self._showing_unexpected_error = False
 
         self._build_menu()
+        self.status_bar = StatusBar(self, self)
+        self.status_bar.pack(side="bottom", fill="x", padx=10, pady=(0, 6))
         self._build_tabs()
+        self._bind_shortcuts()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
+        self._mark_clean()
         self._offer_autosave_recovery()
+        self._restore_last_model_selection()
         self.after(AUTOSAVE_INTERVAL_MS, self._autosave_tick)
 
-    # ---------------- menu ----------------
-    def _build_menu(self) -> None:
-        menubar = tk.Menu(self)
-        file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Nuevo proyecto", command=self.new_project)
-        file_menu.add_command(label="Abrir proyecto...", command=self.open_project)
-        file_menu.add_command(label="Guardar proyecto", command=self.save_project)
-        file_menu.add_command(label="Guardar proyecto como...", command=self.save_project_as)
-        file_menu.add_separator()
-        file_menu.add_command(label="Exportar a Word (.docx)", command=self.export_word)
-        file_menu.add_command(label="Exportar a TXT", command=self.export_txt_file)
-        file_menu.add_separator()
-        file_menu.add_command(label="Salir", command=self._on_close)
-        menubar.add_cascade(label="Archivo", menu=file_menu)
-        self.configure(menu=menubar)
+    # ---------------- preferencias (F9) ----------------
+    def _set_window_icon(self) -> None:
+        """Icono de la ventana (barra de titulo y Alt+Tab): el mismo
+        assets/icon.ico del .exe, incluido en el build (storyforge.spec). Si
+        falta o Tk no lo acepta, queda el de CustomTkinter."""
+        path = window_icon_path()
+        if path is None:
+            return
+        try:
+            self.iconbitmap(path)
+        except Exception:  # noqa: BLE001 -- un icono nunca debe impedir abrir la app
+            logger.debug("could not set the window icon from %s", path, exc_info=True)
+
+    def _apply_global_preferences(self) -> None:
+        ctk.set_appearance_mode(self.prefs.get("appearance", "dark"))
+        ctk.set_default_color_theme("blue")
+        try:
+            ctk.set_widget_scaling(float(self.prefs.get("ui_scale", 1.0)))
+        except Exception:  # noqa: BLE001
+            pass
+
+    def apply_editor_preferences(self, box) -> None:
+        family = self.prefs.get("editor_font_family") or None
+        size = int(self.prefs.get("editor_font_size", 14))
+        spacing = int(self.prefs.get("editor_line_spacing", 4))
+        try:
+            box.configure(font=ctk.CTkFont(family=family, size=size) if family else ctk.CTkFont(size=size))
+            box._textbox.configure(spacing1=spacing // 2, spacing3=spacing - spacing // 2)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def open_preferences(self) -> None:
+        PreferencesDialog(self, self.prefs, self._save_preferences)
+
+    def _save_preferences(self, values: dict) -> None:
+        self.prefs.update(values)
+        set_ui_preferences(values)
+        self._apply_global_preferences()
+        for panel in self.chapter_panels:
+            self.apply_editor_preferences(panel.content_box)
+        self._refresh_models()
+
+    # ---------------- errores inesperados ----------------
+    def _report_unexpected_error(self, exc_type, exc, tb, where: str = "") -> None:
+        """Registra un error no capturado y se lo muestra al usuario (una
+        ventana a la vez, para no apilar dialogos si se repite)."""
+        logger.error("Error inesperado%s", where, exc_info=(exc_type, exc, tb))
+        if self._showing_unexpected_error:
+            return
+        self._showing_unexpected_error = True
+        try:
+            messagebox.showerror(
+                APP_TITLE,
+                S.ERROR_INESPERADO.format(where=where, error_type=exc_type.__name__, exc=exc,
+                                          log_location=log_location()),
+            )
+        finally:
+            self._showing_unexpected_error = False
+
+    def _report_callback_exception(self, exc_type, exc, tb) -> None:
+        self._report_unexpected_error(exc_type, exc, tb)
+
+    def _thread_excepthook(self, args) -> None:
+        """Para threading.excepthook: un error no capturado en un hilo de
+        trabajo se registra y se muestra desde el hilo principal."""
+        if args.exc_type is SystemExit:
+            return
+        exc_type, exc, tb = args.exc_type, args.exc_value, args.exc_traceback
+        try:
+            self.after(0, lambda: self._report_unexpected_error(exc_type, exc, tb, S.EN_SEGUNDO_PLANO))
+        except Exception:  # noqa: BLE001 - la ventana ya no existe
+            logger.error("Error inesperado en segundo plano", exc_info=(exc_type, exc, tb))
+
+    def _open_log_folder(self) -> None:
+        folder = user_data_dir()
+        try:
+            os.makedirs(folder, exist_ok=True)
+            os.startfile(folder)  # type: ignore[attr-defined]  # solo Windows
+        except Exception as exc:  # noqa: BLE001
+            messagebox.showinfo(APP_TITLE, S.LA_CARPETA_DE_REGISTROS_ES.format(folder=folder, exc=exc))
+
+    def show_about(self) -> None:
+        TextViewerDialog(self, S.ACERCA_DE.format(APP_TITLE=APP_TITLE), about_text(self.engine))
+
+    def show_last_prompt(self) -> None:
+        stats = getattr(self.engine, "stats", None)
+        if stats is None or not stats.prompt_text:
+            messagebox.showinfo(APP_TITLE, S.TODAVIA_NO_SE_ENVIO_NINGUN)
+            return
+        sampling = ", ".join(f"{k}={v}" for k, v in sorted(stats.sampling.items()))
+        header = (
+            S.OPERACION_TOKENS_DE_PROMPT_RESERVADOS.format(operation=stats.operation,
+                                                           prompt_tokens=stats.prompt_tokens,
+                                                           max_tokens=stats.max_tokens, n_ctx=stats.n_ctx,
+                                                           budget_level=stats.budget_level, seed=stats.seed,
+                                                           sampling=sampling)
+        )
+        TextViewerDialog(self, S.PROMPT_ENVIADO_AL_MODELO, stats.prompt_text, header)
+
+    def show_diff_preview(self, title: str, old: str, new: str, on_accept, on_accept_continue=None,
+                          on_discard=None) -> DiffPreviewDialog:
+        self.last_preview = DiffPreviewDialog(self, title, old, new, on_accept, on_accept_continue, on_discard)
+        return self.last_preview
 
     # ---------------- tabs ----------------
     def _build_tabs(self) -> None:
         self.tabview = ctk.CTkTabview(self)
-        self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
+        self.tabview.pack(fill="both", expand=True, padx=10, pady=(10, 4))
 
-        self.tab_model = self.tabview.add("Modelo")
-        self.tab_plot = self.tabview.add("Plot")
-        self.tab_characters = self.tabview.add("Personajes")
-        self.tab_setting = self.tabview.add("Setting")
-        self.tab_outline = self.tabview.add("Esquema")
-        self.tab_chapters = self.tabview.add("Capitulos")
+        self.tab_model = self.tabview.add(S.TAB_MODELO)
+        self.tab_plot = self.tabview.add(S.TAB_PLOT)
+        self.tab_characters = self.tabview.add(S.TAB_PERSONAJES)
+        self.tab_setting = self.tabview.add(S.TAB_SETTING)
+        self.tab_lorebook = self.tabview.add(S.TAB_LOREBOOK)
+        self.tab_outline = self.tabview.add(S.TAB_ESQUEMA)
+        self.tab_chapters = self.tabview.add(S.TAB_CAPITULOS)
 
         self._build_model_tab()
         self._build_plot_tab()
         self._build_characters_tab()
         self._build_setting_tab()
+        self._build_lorebook_tab()
         self._build_outline_tab()
         self._build_chapters_tab()
-
-    def _build_model_tab(self) -> None:
-        tab = self.tab_model
-        tab.grid_columnconfigure(0, weight=1)
-
-        ctk.CTkLabel(
-            tab,
-            text=(
-                "Coloca un archivo de modelo .gguf en la carpeta 'models/' junto al programa "
-                "(ver README.md para recomendaciones de modelos) y cargalo aqui."
-            ),
-            wraplength=800, justify="left",
-        ).grid(row=0, column=0, sticky="w", padx=10, pady=10)
-
-        row = ctk.CTkFrame(tab, fg_color="transparent")
-        row.grid(row=1, column=0, sticky="ew", padx=10)
-        row.grid_columnconfigure(0, weight=1)
-
-        self.model_combo = ctk.CTkComboBox(row, values=self._list_models() or ["(sin modelos en models/)"])
-        self.model_combo.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        ctk.CTkButton(row, text="Actualizar lista", command=self._refresh_models).grid(row=0, column=1, padx=4)
-        ctk.CTkButton(row, text="Elegir archivo...", command=self._browse_model).grid(row=0, column=2, padx=4)
-        self.load_model_btn = ctk.CTkButton(row, text="Cargar modelo", command=self._load_model)
-        self.load_model_btn.grid(row=0, column=3, padx=4)
-
-        # Configuracion avanzada del motor (antes solo se podia cambiar
-        # editando LocalStoryEngine.load()/app/engine.py a mano). Los
-        # valores por defecto coinciden con los que ya tenia
-        # LocalStoryEngine.load() hardcodeados.
-        advanced = ctk.CTkFrame(tab, fg_color="transparent")
-        advanced.grid(row=2, column=0, sticky="w", padx=10, pady=(4, 0))
-
-        ctk.CTkLabel(advanced, text="Contexto (n_ctx):").pack(side="left", padx=(0, 4))
-        self.n_ctx_entry = ctk.CTkEntry(advanced, width=70)
-        self.n_ctx_entry.insert(0, "8192")
-        self.n_ctx_entry.pack(side="left", padx=(0, 12))
-
-        ctk.CTkLabel(advanced, text="Capas en GPU (n_gpu_layers, 0 = solo CPU):").pack(side="left", padx=(0, 4))
-        self.n_gpu_layers_entry = ctk.CTkEntry(advanced, width=50)
-        self.n_gpu_layers_entry.insert(0, "0")
-        self.n_gpu_layers_entry.pack(side="left", padx=(0, 12))
-
-        ctk.CTkLabel(advanced, text="Hilos CPU (vacio = automatico):").pack(side="left", padx=(0, 4))
-        self.n_threads_entry = ctk.CTkEntry(advanced, width=50)
-        self.n_threads_entry.pack(side="left")
-
-        ctk.CTkLabel(
-            tab,
-            text=(
-                "n_ctx mas grande permite mas contexto (plot/personajes/setting/capitulos "
-                "previos) por llamada, pero usa mas RAM y puede ser mas lento. n_gpu_layers "
-                "solo ayuda si llama-cpp-python fue instalado con soporte de GPU (ver README, "
-                "seccion 'Rendimiento / GPU'); en CPU-only, dejalo en 0."
-            ),
-            wraplength=800, justify="left", text_color="gray", font=ctk.CTkFont(size=11),
-        ).grid(row=3, column=0, sticky="w", padx=10, pady=(2, 0))
-
-        self.model_status = ctk.CTkLabel(tab, text="Ningun modelo cargado.", text_color="gray")
-        self.model_status.grid(row=4, column=0, sticky="w", padx=10, pady=10)
-
-    def _list_models(self) -> list[str]:
-        return find_local_models(MODELS_DIR)
-
-    def _refresh_models(self) -> None:
-        values = self._list_models() or ["(sin modelos en models/)"]
-        self.model_combo.configure(values=values)
-        self.model_combo.set(values[0])
-
-    def _browse_model(self) -> None:
-        path = filedialog.askopenfilename(title="Selecciona un modelo .gguf", filetypes=[("GGUF", "*.gguf")])
-        if path:
-            self.model_combo.set(path)
-
-    def _load_model(self) -> None:
-        if self.busy:
-            messagebox.showwarning(
-                APP_TITLE,
-                "Espera a que termine la generacion en curso antes de cargar otro modelo.",
-            )
-            return
-        selected = self.model_combo.get()
-        if not selected or selected.startswith("("):
-            messagebox.showwarning(APP_TITLE, "Selecciona un archivo .gguf valido.")
-            return
-
-        try:
-            n_ctx = int(self.n_ctx_entry.get())
-            if n_ctx <= 0:
-                raise ValueError
-        except ValueError:
-            messagebox.showwarning(APP_TITLE, "Contexto (n_ctx) invalido: debe ser un entero mayor a 0.")
-            return
-        try:
-            n_gpu_layers = int(self.n_gpu_layers_entry.get())
-            if n_gpu_layers < 0:
-                raise ValueError
-        except ValueError:
-            messagebox.showwarning(APP_TITLE, "Capas en GPU (n_gpu_layers) invalido: debe ser un entero >= 0.")
-            return
-        n_threads_raw = self.n_threads_entry.get().strip()
-        n_threads: Optional[int] = None
-        if n_threads_raw:
-            try:
-                n_threads = int(n_threads_raw)
-                if n_threads <= 0:
-                    raise ValueError
-            except ValueError:
-                messagebox.showwarning(
-                    APP_TITLE, "Hilos CPU (n_threads) invalido: debe ser un entero mayor a 0, o vacio."
-                )
-                return
-
-        path = selected if os.path.isabs(selected) else os.path.join(MODELS_DIR, selected)
-        self.model_status.configure(text=f"Cargando {os.path.basename(path)}...", text_color="gray")
-        self.update_idletasks()
-        self._set_engine_busy(True)
-
-        def worker():
-            try:
-                self.engine.load(path, n_ctx=n_ctx, n_threads=n_threads, n_gpu_layers=n_gpu_layers)
-                self.project.model_path = path
-                loaded_text = (
-                    f"Modelo cargado: {os.path.basename(path)} "
-                    f"(n_ctx={n_ctx}, n_gpu_layers={n_gpu_layers}"
-                    f"{f', n_threads={n_threads}' if n_threads else ''})"
-                )
-                self.after(0, lambda: self.model_status.configure(text=loaded_text, text_color="#9fd39f"))
-            except Exception as exc:  # noqa: BLE001
-                # Ver el comentario equivalente en ChapterPanel._on_generate:
-                # `exc` se borra al salir del bloque except, y self.after()
-                # difiere la llamada hasta despues de eso.
-                message = f"Error: {exc}"
-                self.after(0, lambda: self.model_status.configure(text=message, text_color="#e05555"))
-            finally:
-                self.after(0, lambda: self._set_engine_busy(False))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _build_plot_tab(self) -> None:
-        self.tab_plot.grid_columnconfigure(0, weight=1)
-        self.tab_plot.grid_rowconfigure(0, weight=1)
-        self.plot_box = LimitedTextBox(
-            self.tab_plot, "Story Plot (idea de la historia)", MAX_PLOT_WORDS, height=500,
-            on_expand=lambda: self._expand_field(self.plot_box, "plot", "Plot", MAX_PLOT_WORDS),
-            on_import=lambda: self._import_field(self.plot_box),
-        )
-        self.plot_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-
-    def _build_characters_tab(self) -> None:
-        self.tab_characters.grid_columnconfigure(0, weight=1)
-        self.tab_characters.grid_rowconfigure(0, weight=1)
-        self.characters_box = LimitedTextBox(
-            self.tab_characters, "Personajes (descripcion, personalidad, relaciones)",
-            MAX_CHARACTERS_WORDS, height=500,
-            on_expand=lambda: self._expand_field(
-                self.characters_box, "characters", "Personajes", MAX_CHARACTERS_WORDS
-            ),
-            on_import=lambda: self._import_field(self.characters_box),
-        )
-        self.characters_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-
-    def _build_setting_tab(self) -> None:
-        self.tab_setting.grid_columnconfigure(0, weight=1)
-        self.tab_setting.grid_rowconfigure(0, weight=1)
-        self.setting_box = LimitedTextBox(
-            self.tab_setting, "Setting (donde y cuando ocurre la historia)",
-            MAX_SETTING_WORDS, height=500,
-            on_expand=lambda: self._expand_field(self.setting_box, "setting", "Setting", MAX_SETTING_WORDS),
-            on_import=lambda: self._import_field(self.setting_box),
-        )
-        self.setting_box.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
-
-    def _import_field(self, box: LimitedTextBox) -> None:
-        """Reemplaza el contenido de `box` con el texto de un archivo elegido
-        por el usuario. Sincrono, no toca el motor -- no requiere el
-        candado de self.busy."""
-        path = filedialog.askopenfilename(
-            title="Importar texto desde archivo",
-            filetypes=[("Texto", "*.txt"), ("Todos los archivos", "*.*")],
-        )
-        if not path:
-            return
-        try:
-            text = Path(path).read_text(encoding="utf-8", errors="replace")
-        except OSError as exc:
-            messagebox.showerror(APP_TITLE, f"No se pudo leer el archivo: {exc}")
-            return
-        if box.get().strip() and not messagebox.askyesno(
-            APP_TITLE, "Esto reemplazara el contenido actual de este campo. ¿Continuar?"
-        ):
-            return
-        box.set(text)
-
-    def _expand_field(self, box: LimitedTextBox, field_key: str, field_label: str, max_words: int) -> None:
-        """
-        Toma la nota corta que el usuario ya escribio en `box` y la
-        reemplaza por una version mas desarrollada, generada por el modelo
-        (LocalStoryEngine.expand_field()). Igual que cualquier otra accion
-        que llama al motor, respeta self.busy / _set_engine_busy().
-        """
-        if not self.engine.is_loaded:
-            messagebox.showwarning(APP_TITLE, "Primero carga un modelo local (.gguf) en la pestana 'Modelo'.")
-            return
-        if self.busy:
-            messagebox.showwarning(
-                APP_TITLE, "Ya hay una generacion en curso. Espera a que termine antes de iniciar otra."
-            )
-            return
-        text = box.get().strip()
-        if not text:
-            messagebox.showwarning(APP_TITLE, f"Escribe una idea corta en {field_label} primero.")
-            return
-        if count_words(text) > 60 and not messagebox.askyesno(
-            APP_TITLE,
-            f"{field_label} ya tiene bastante texto escrito. Expandir con IA lo reemplaza por "
-            "completo. ¿Continuar?",
-        ):
-            return
-
-        self._set_engine_busy(True)
-
-        def worker():
-            try:
-                expanded = self.engine.expand_field(field_key, text, max_words=min(max_words, 500))
-
-                def apply():
-                    box.set(expanded)
-                self.after(0, apply)
-            except ModelNotLoadedError as exc:
-                # Ver el comentario equivalente en ChapterPanel._on_generate:
-                # `exc` se borra al salir del bloque except, y self.after()
-                # difiere la llamada hasta despues de eso.
-                message = str(exc)
-                self.after(0, lambda: messagebox.showerror(APP_TITLE, message))
-            except ContextOverflowError as exc:
-                message = f"El contexto es demasiado grande para este modelo:\n\n{exc}"
-                self.after(0, lambda: messagebox.showerror(APP_TITLE, message))
-            except Exception as exc:  # noqa: BLE001
-                message = f"Error expandiendo el campo: {exc}"
-                self.after(0, lambda: messagebox.showerror(APP_TITLE, message))
-            finally:
-                self.after(0, lambda: self._set_engine_busy(False))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _build_outline_tab(self) -> None:
-        tab = self.tab_outline
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(2, weight=1)
-
-        ctk.CTkLabel(
-            tab,
-            text=(
-                "Genera primero un esquema (beat sheet) de todos los capitulos a partir "
-                "del plot, personajes y setting. Escribir la historia siguiendo un esquema "
-                "acordado de antemano ayuda mucho a que se mantenga consistente de principio "
-                "a fin. Puedes editar el resultado aqui antes de generar la prosa en la "
-                "pestana 'Capitulos'."
-            ),
-            wraplength=850, justify="left",
-        ).grid(row=0, column=0, sticky="w", padx=10, pady=(10, 0))
-
-        controls = ctk.CTkFrame(tab, fg_color="transparent")
-        controls.grid(row=1, column=0, sticky="ew", padx=10, pady=10)
-        ctk.CTkLabel(controls, text="Numero de capitulos:").pack(side="left", padx=(0, 6))
-        self.outline_count_entry = ctk.CTkEntry(controls, width=50)
-        self.outline_count_entry.insert(0, str(len(self.project.chapters) or MAX_CHAPTERS))
-        self.outline_count_entry.pack(side="left", padx=(0, 12))
-        # Tipo de escritura: aplica a toda la historia (esquema y prosa de
-        # cada capitulo), no por capitulo individual -- ver
-        # prompts.build_writing_style_instruction().
-        ctk.CTkLabel(controls, text="Tipo de escritura:").pack(side="left", padx=(0, 6))
-        self.writing_style_menu = ctk.CTkOptionMenu(controls, values=WRITING_STYLE_OPTIONS, width=160)
-        self.writing_style_menu.set(
-            self.project.writing_style if self.project.writing_style in WRITING_STYLES
-            else WRITING_STYLE_DEFAULT_LABEL
-        )
-        self.writing_style_menu.pack(side="left", padx=(0, 12))
-        self.generate_outline_btn = ctk.CTkButton(
-            controls, text="Generar esquema completo", command=self._on_generate_outline
-        )
-        self.generate_outline_btn.pack(side="left")
-        self.outline_status = ctk.CTkLabel(controls, text="", text_color="gray")
-        self.outline_status.pack(side="left", padx=12)
-
-        self.outline_scroll = ctk.CTkScrollableFrame(tab)
-        self.outline_scroll.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 10))
-        self.outline_scroll.grid_columnconfigure(0, weight=1)
-        self._render_outline_panels()
-
-    def _on_generate_outline(self) -> None:
-        if not self.engine.is_loaded:
-            messagebox.showwarning(APP_TITLE, "Primero carga un modelo local (.gguf) en la pestana 'Modelo'.")
-            return
-        if self.busy:
-            messagebox.showwarning(
-                APP_TITLE,
-                "Ya hay una generacion en curso (un capitulo u otra operacion). Espera a que termine.",
-            )
-            return
-
-        self._sync_all()
-        errors = self.project.validate_inputs()
-        if errors:
-            messagebox.showwarning(APP_TITLE, "Corrige antes de generar el esquema:\n\n" + "\n".join(errors))
-            return
-
-        try:
-            num_chapters = int(self.outline_count_entry.get())
-        except ValueError:
-            messagebox.showwarning(APP_TITLE, "Numero de capitulos invalido.")
-            return
-        num_chapters = max(1, min(num_chapters, MAX_CHAPTERS))
-
-        if self.project.chapters and not messagebox.askyesno(
-            APP_TITLE,
-            "Esto reemplazara el titulo y esquema de los capitulos existentes "
-            "(la prosa ya generada de cada capitulo se conserva). ¿Continuar?",
-        ):
-            return
-
-        self.outline_status.configure(text="Generando esquema...", text_color="gray")
-        self._set_engine_busy(True)
-
-        def worker():
-            try:
-                outline_items = self.engine.generate_outline(self.project, num_chapters)
-
-                def apply():
-                    self._apply_outline(outline_items)
-                    self.outline_status.configure(
-                        text=f"Esquema generado: {len(outline_items)} capitulos.", text_color="#9fd39f"
-                    )
-                self.after(0, apply)
-            except ModelNotLoadedError as exc:
-                # Ver el comentario equivalente en ChapterPanel._on_generate:
-                # `exc` se borra al salir del bloque except, y self.after()
-                # difiere la llamada hasta despues de eso.
-                message = str(exc)
-                self.after(0, lambda: messagebox.showerror(APP_TITLE, message))
-            except ContextOverflowError as exc:
-                message = f"El contexto es demasiado grande para este modelo:\n\n{exc}"
-                self.after(0, lambda: messagebox.showerror(APP_TITLE, message))
-            except Exception as exc:  # noqa: BLE001
-                message = f"Error generando el esquema: {exc}"
-                self.after(0, lambda: messagebox.showerror(APP_TITLE, message))
-            finally:
-                self.after(0, self._autosave)
-                self.after(0, lambda: self._set_engine_busy(False))
-
-        threading.Thread(target=worker, daemon=True).start()
-
-    def _apply_outline(self, outline_items: list[tuple[str, str]]) -> None:
-        for i, (title, outline) in enumerate(outline_items):
-            if i < len(self.project.chapters):
-                self.project.chapters[i].title = title or self.project.chapters[i].title
-                self.project.chapters[i].outline = outline
-            elif self.project.can_add_chapter():
-                self.project.add_chapter(title=title, outline=outline)
-        self._render_outline_panels()
-        self._render_chapters()
-
-    def _render_outline_panels(self) -> None:
-        for child in self.outline_scroll.winfo_children():
-            child.destroy()
-        self.outline_panels = []
-        if not self.project.chapters:
-            ctk.CTkLabel(
-                self.outline_scroll,
-                text="Aun no hay capitulos. Genera un esquema completo arriba, o agrega "
-                     "capitulos manualmente en la pestana 'Capitulos'.",
-                text_color="gray", wraplength=800, justify="left",
-            ).grid(row=0, column=0, sticky="w", padx=8, pady=8)
-            return
-        for i, chapter in enumerate(self.project.chapters):
-            panel = OutlinePanel(self.outline_scroll, i, chapter)
-            panel.grid(row=i, column=0, sticky="ew", pady=6)
-            self.outline_panels.append(panel)
-
-    def _build_chapters_tab(self) -> None:
-        tab = self.tab_chapters
-        tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(1, weight=1)
-
-        top = ctk.CTkFrame(tab, fg_color="transparent")
-        top.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
-        self.add_chapter_btn = ctk.CTkButton(top, text="+ Agregar capitulo", command=self.add_chapter)
-        self.add_chapter_btn.pack(side="left")
-        ctk.CTkLabel(top, text=f"(maximo {MAX_CHAPTERS} capitulos)").pack(side="left", padx=8)
-
-        self.chapters_scroll = ctk.CTkScrollableFrame(tab)
-        self.chapters_scroll.grid(row=1, column=0, sticky="nsew", padx=10, pady=10)
-        self.chapters_scroll.grid_columnconfigure(0, weight=1)
-
-    # ---------------- gestion de capitulos ----------------
-    def add_chapter(self) -> None:
-        if not self.project.can_add_chapter():
-            messagebox.showinfo(APP_TITLE, f"Ya hay {MAX_CHAPTERS} capitulos (el maximo).")
-            return
-        self.project.add_chapter()
-        self._render_chapters()
-        self._render_outline_panels()
-
-    def remove_chapter(self, index: int) -> None:
-        del self.project.chapters[index]
-        self._render_chapters()
-        self._render_outline_panels()
-
-    def _render_chapters(self) -> None:
-        for child in self.chapters_scroll.winfo_children():
-            child.destroy()
-        self.chapter_panels = []
-        for i, chapter in enumerate(self.project.chapters):
-            panel = ChapterPanel(self.chapters_scroll, self, i, chapter)
-            panel.grid(row=i, column=0, sticky="ew", pady=6)
-            self.chapter_panels.append(panel)
-        self.add_chapter_btn.configure(
-            state="normal" if self.project.can_add_chapter() else "disabled"
-        )
-        # Si se agrego/elimino un capitulo mientras otra generacion seguia en
-        # curso en otro panel, los paneles recien creados deben nacer ya
-        # deshabilitados en vez de dejar una ventana para dispararla en paralelo.
-        if self.busy:
-            self._set_engine_busy(True)
 
     # ---------------- exclusion mutua del motor ----------------
     def _set_engine_busy(self, busy: bool) -> None:
         """
         Deshabilita, a nivel de toda la app, todo lo que pueda disparar una
-        llamada al modelo (generar un capitulo, generar el esquema, cargar un
-        modelo nuevo, refinar un capitulo, expandir Plot/Personajes/Setting
-        con IA) mientras alguna de esas operaciones ya esta en curso en otro
+        llamada al modelo mientras alguna operacion ya esta en curso en otro
         hilo. self.engine envuelve una sola instancia de Llama, que no
         soporta llamadas concurrentes.
         """
@@ -1030,194 +338,371 @@ class StoryForgeApp(ctk.CTk):
         state = "disabled" if busy else "normal"
         self.generate_outline_btn.configure(state=state)
         self.load_model_btn.configure(state=state)
+        self._refresh_complete_outline_btn()
         # Agregar/quitar capitulos durante una generacion desplazaria los
         # indices de project.chapters que el hilo en curso sigue usando.
         self.add_chapter_btn.configure(
             state="disabled" if busy else ("normal" if self.project.can_add_chapter() else "disabled")
         )
         for panel in self.chapter_panels:
-            panel.generate_btn.configure(state=state)
-            panel.remove_btn.configure(state=state)
-            panel.refine_btn.configure(state=state)
+            for btn in (panel.generate_btn, panel.continue_btn, panel.continue_cursor_btn,
+                        panel.regen_summary_btn, panel.remove_btn, panel.refine_btn):
+                btn.configure(state=state)
+            panel._refresh_retry_controls(busy)
         for box in (self.plot_box, self.characters_box, self.setting_box):
             expand_btn = getattr(box, "expand_btn", None)
             if expand_btn is not None:
                 expand_btn.configure(state=state)
+        self.add_lore_btn.configure(
+            state="disabled" if busy else ("normal" if self.project.can_add_lore_entry() else "disabled")
+        )
+        for panel in self._lore_panel_cache.values():
+            panel.remove_btn.configure(state=state)
+        if not busy:
+            self._refresh_word_totals()
+
+    # ---------------- cambios sin guardar (F10) ----------------
+    def _current_json(self) -> str:
+        return self.project.to_json()
+
+    def _mark_clean(self) -> None:
+        self._sync_all()
+        self._clean_json = self._current_json()
+        self.dirty = False
+        self._update_title()
+
+    def schedule_dirty_check(self) -> None:
+        if self._dirty_after is not None:
+            return
+        try:
+            self._dirty_after = self.after(DIRTY_CHECK_DEBOUNCE_MS, self._update_dirty_state)
+        except Exception:  # noqa: BLE001 - ventana destruida
+            self._dirty_after = None
+
+    def _update_dirty_state(self) -> bool:
+        self._dirty_after = None
+        try:
+            self._sync_all()
+            self.dirty = self._current_json() != self._clean_json
+        except Exception:  # noqa: BLE001
+            logger.exception("No se pudo comprobar si hay cambios sin guardar")
+        self._update_title()
+        return self.dirty
+
+    def is_dirty(self) -> bool:
+        return self._update_dirty_state()
+
+    def _update_title(self) -> None:
+        name = (self.story_title_entry.get().strip() if hasattr(self, "story_title_entry") else "") \
+            or self.project.name or DEFAULT_PROJECT_NAME
+        file_part = f" ({os.path.basename(self.current_path)})" if self.current_path else ""
+        mark = " •" if self.dirty else ""
+        self.title(f"{APP_TITLE} {__version__} — {name}{file_part}{mark}")
 
     # ---------------- autoguardado ----------------
     def _offer_autosave_recovery(self) -> None:
-        if not os.path.isfile(AUTOSAVE_PATH):
+        if not os.path.isfile(self.autosave_path):
             return
         try:
-            recovered = Project.load(AUTOSAVE_PATH)
+            recovered = Project.load(self.autosave_path)
         except Exception:
-            return  # autoguardado corrupto/ilegible: lo ignoramos en vez de tronar al abrir la app
+            # autoguardado corrupto/ilegible: lo ignoramos en vez de fallar al abrir la app
+            logger.exception("No se pudo leer el autoguardado %s", self.autosave_path)
+            return
         if not messagebox.askyesno(
             APP_TITLE,
-            "Se encontro una copia de autoguardado, probablemente de una generacion "
-            "interrumpida (cierre inesperado o crash) en una sesion anterior. "
-            "¿Recuperar ese proyecto ahora?",
+            S.SE_ENCONTRO_UNA_COPIA_DE,
         ):
             self._discard_autosave()
             return
         self.project = recovered
         self.current_path = None  # se recupera el contenido, pero se debe elegir donde guardarlo
         self._load_into_ui()
+        self._clean_json = ""  # lo recuperado no esta guardado en ningun archivo
+        self._update_dirty_state()
 
     def _autosave_tick(self) -> None:
+        self._report_autosave_errors()
         if self.busy:
+            self._autosave()
+        elif self._update_dirty_state() and time.monotonic() - self._last_autosave >= AUTOSAVE_IDLE_SECONDS:
             self._autosave()
         self.after(AUTOSAVE_INTERVAL_MS, self._autosave_tick)
 
     def _autosave(self) -> None:
         """
-        Guarda el estado actual en AUTOSAVE_PATH (separado del archivo que el
-        usuario guarda explicitamente) para poder recuperar el progreso si la
-        app se cierra a medio camino de una generacion larga (15-40 minutos
-        por capitulo). Nunca debe interrumpir la generacion: cualquier error
-        se ignora en silencio.
+        Guarda el estado actual en self.autosave_path (separado del archivo
+        que el usuario guarda explicitamente). El proyecto se serializa aqui,
+        en el hilo principal (una foto consistente), y se ESCRIBE en un hilo
+        aparte: una escritura lenta (disco de red, OneDrive) ya no congela la
+        interfaz. Un contador de generaciones garantiza que una escritura
+        vieja que termina tarde nunca pisa una mas nueva. Un error se
+        registra y se avisa UNA sola vez por sesion.
         """
         try:
             self._sync_all()
-            os.makedirs(os.path.dirname(AUTOSAVE_PATH), exist_ok=True)
-            self.project.save(AUTOSAVE_PATH)
-        except Exception:
-            pass
+            data = self._current_json()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("No se pudo preparar el autoguardado")
+            self._autosave_errors.append(exc)
+            self._report_autosave_errors()
+            return
+        self._autosave_gen += 1
+        gen = self._autosave_gen
+        path = self.autosave_path
+        self._last_autosave = time.monotonic()
+
+        def write() -> None:
+            with self._autosave_lock:
+                if gen <= self._autosave_written_gen or gen <= self._autosave_discarded_gen:
+                    return  # ya se escribio algo mas nuevo, o se descarto
+                try:
+                    os.makedirs(os.path.dirname(path), exist_ok=True)
+                    save_json_text(path, data)
+                    self._autosave_written_gen = gen
+                except Exception as exc:  # noqa: BLE001
+                    logger.exception("No se pudo escribir el autoguardado en %s", path)
+                    self._autosave_errors.append(exc)
+
+        threading.Thread(target=write, daemon=True).start()
+        self._report_autosave_errors()
+
+    def _report_autosave_errors(self) -> None:
+        if not self._autosave_errors:
+            return
+        exc = self._autosave_errors[-1]
+        self._autosave_errors.clear()
+        if getattr(self, "_autosave_error_reported", False):
+            return
+        self._autosave_error_reported = True
+        messagebox.showwarning(
+            APP_TITLE,
+            S.NO_SE_PUDO_ESCRIBIR_EL.format(autosave_path=self.autosave_path, exc=exc),
+        )
 
     def _discard_autosave(self) -> None:
-        try:
-            os.remove(AUTOSAVE_PATH)
-        except OSError:
-            pass
+        # Espera a que termine una escritura en curso y anula las pendientes.
+        with self._autosave_lock:
+            self._autosave_discarded_gen = self._autosave_gen
+            for path in (self.autosave_path, self.autosave_path + ".bak"):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
 
     # ---------------- sincronizacion general ----------------
     def _sync_all(self) -> None:
+        if not hasattr(self, "chapters_scroll"):
+            return  # todavia construyendo la ventana
         self.project.plot = self.plot_box.get()
         self.project.characters = self.characters_box.get()
         self.project.setting = self.setting_box.get()
-        selected_style = self.writing_style_menu.get()
-        self.project.writing_style = "" if selected_style == WRITING_STYLE_DEFAULT_LABEL else selected_style
+        self.project.name = self.story_title_entry.get().strip() or DEFAULT_PROJECT_NAME
+        self.project.author = self.author_entry.get().strip()
+        self.project.author_note = self.project_note_entry.get().strip()
+        heading_label = self.heading_menu.get()
+        self.project.chapter_heading = next(
+            (k for k, v in CHAPTER_HEADING_LABELS.items() if v == heading_label), "Chapter")
+        self.project.writing_style = style_key(self.writing_style_menu.get())
+        self._sync_sampling()
         for panel in self.outline_panels:
             panel.sync_to_model()
         for panel in self.chapter_panels:
             panel.sync_to_model()
+        self._sync_lore_panels()
 
-    def _load_into_ui(self) -> None:
+    def _load_into_ui(self, keep_selection: bool = False) -> None:
         self.plot_box.set(self.project.plot)
         self.characters_box.set(self.project.characters)
         self.setting_box.set(self.project.setting)
+        self._load_project_meta_into_ui()
+        self._load_sampling_into_ui()
         self.outline_count_entry.delete(0, "end")
         self.outline_count_entry.insert(0, str(len(self.project.chapters) or MAX_CHAPTERS))
-        self.writing_style_menu.set(
-            self.project.writing_style if self.project.writing_style in WRITING_STYLES
-            else WRITING_STYLE_DEFAULT_LABEL
-        )
+        self.writing_style_menu.set(style_label(
+            self.project.writing_style if self.project.writing_style in WRITING_STYLES else ""))
+        if not keep_selection:
+            # Los matches de la "ultima generacion" pertenecen al proyecto que se
+            # acaba de dejar atras.
+            self.last_lore_match_ids = set()
+            self.last_lore_reasons = {}
+            self._outline_requested = None
+            self.lore_search_entry.delete(0, "end")
+            self.selected_chapter_index = 0
+        self._clear_lore_panels()
+        self._render_lore_entries()
         self._render_outline_panels()
         self._render_chapters()
+        self._refresh_complete_outline_btn()
+        self._update_title()
 
     # ---------------- acciones de archivo ----------------
+    def _confirm_discard_changes(self, action: str) -> bool:
+        if not self.is_dirty():
+            return True
+        choice = messagebox.askyesnocancel(
+            APP_TITLE, S.HAY_CAMBIOS_SIN_GUARDAR_GUARDARLOS.format(action=action),
+        )
+        if choice is None:
+            return False
+        if choice:
+            return self.save_project()
+        return True
+
     def new_project(self) -> None:
         if self.busy:
             messagebox.showwarning(
-                APP_TITLE, "Hay una generacion en curso. Espera a que termine antes de cambiar de proyecto."
+                APP_TITLE, S.GENERACION_EN_CURSO_CAMBIAR_PROYECTO
             )
             return
-        if not messagebox.askyesno(APP_TITLE, "¿Crear un nuevo proyecto? Se perdera lo no guardado."):
+        if not self._confirm_discard_changes(S.CREAR_UN_PROYECTO_NUEVO):
             return
         self.project = Project()
         self.current_path = None
         self._load_into_ui()
+        self._mark_clean()
 
     def open_project(self) -> None:
         if self.busy:
             messagebox.showwarning(
-                APP_TITLE, "Hay una generacion en curso. Espera a que termine antes de cambiar de proyecto."
+                APP_TITLE, S.GENERACION_EN_CURSO_CAMBIAR_PROYECTO
             )
             return
-        path = filedialog.askopenfilename(title="Abrir proyecto", filetypes=[("Proyecto StoryForge", "*.json")])
+        if not self._confirm_discard_changes(S.ABRIR_OTRO_PROYECTO):
+            return
+        path = filedialog.askopenfilename(
+            title=S.ABRIR_PROYECTO,
+            filetypes=[(S.PROYECTO_STORYFORGE, "*.storyforge.json *.json"), (S.TODOS_LOS_ARCHIVOS, "*.*")],
+        )
         if not path:
             return
+        self.open_project_path(path)
+
+    def open_project_path(self, path: str) -> bool:
         try:
-            self.project = Project.load(path)
-            self.current_path = path
-            self._load_into_ui()
+            project = Project.load(path)
+            from_backup = False
         except Exception as exc:  # noqa: BLE001
-            messagebox.showerror(APP_TITLE, f"No se pudo abrir el proyecto: {exc}")
+            logger.exception("No se pudo abrir el proyecto %s", path)
+            backup = path + ".bak"
+            if not os.path.isfile(backup) or not messagebox.askyesno(
+                APP_TITLE,
+                S.NO_SE_PUDO_ABRIR_EL.format(exc=exc, backup=os.path.basename(backup)),
+            ):
+                messagebox.showerror(APP_TITLE, S.NO_SE_PUDO_ABRIR_PROYECTO.format(exc=exc))
+                return False
+            try:
+                project = Project.load(backup)
+                from_backup = True
+            except Exception as exc2:  # noqa: BLE001
+                messagebox.showerror(APP_TITLE, S.TAMPOCO_SE_PUDO_ABRIR_LA.format(exc2=exc2))
+                return False
+        self.project = project
+        # La copia .bak se abre sin destino: "Guardar" pregunta donde, para
+        # no pisar el archivo danado sin querer.
+        self.current_path = None if from_backup else path
+        self._load_into_ui()
+        self._mark_clean()
+        if from_backup:
+            self._clean_json = ""
+            self._update_dirty_state()
+            messagebox.showinfo(APP_TITLE, S.SE_ABRIO_LA_COPIA_DE)
+        self._restore_project_model()
+        return True
 
     def _on_close(self) -> None:
         if self.busy and not messagebox.askyesno(
             APP_TITLE,
-            "Hay una generacion en curso. Si sales ahora se perdera el progreso no guardado "
-            "de ese capitulo/esquema. ¿Salir de todas formas?",
+            S.GENERACION_EN_CURSO_SALIR,
         ):
             return
-
-        choice = messagebox.askyesnocancel(APP_TITLE, "¿Guardar el proyecto antes de salir?")
-        if choice is None:  # Cancelar: no salir
-            return
-        if choice:  # Si: guardar (si el dialogo "guardar como" se cancela, no salimos)
-            path_before = self.current_path
-            self.save_project()
-            if self.current_path is None and path_before is None:
+        if self.is_dirty():
+            choice = messagebox.askyesnocancel(APP_TITLE, S.GUARDAR_EL_PROYECTO_ANTES_DE)
+            if choice is None:  # Cancelar: no salir
                 return
-        else:
-            # El usuario decidio explicitamente no guardar: no le ofrezcamos
-            # "recuperar" ese mismo contenido descartado en el proximo arranque.
-            self._discard_autosave()
+            if choice:  # Si: guardar (si se cancela o falla, no salimos)
+                if not self.save_project():
+                    return
+        # Sin cambios, guardado, o descartado a proposito: no ofrecer
+        # "recuperar" en el proximo arranque.
+        self._discard_autosave()
         self.destroy()
 
-    def save_project(self) -> None:
+    def save_project(self) -> bool:
+        """Devuelve True si el proyecto quedo guardado (False si se cancelo o fallo)."""
         if not self.current_path:
-            self.save_project_as()
-            return
-        self._sync_all()
-        errors = self.project.validate_inputs()
-        if errors:
-            messagebox.showwarning(APP_TITLE, "Se guardara con estas advertencias:\n\n" + "\n".join(errors))
-        self.project.save(self.current_path)
-        # Ya hay un guardado explicito y mas reciente: la copia de
-        # autoguardado quedaria obsoleta y solo generaria una oferta de
-        # "recuperar" confusa en el proximo arranque.
-        self._discard_autosave()
-        messagebox.showinfo(APP_TITLE, "Proyecto guardado.")
+            return self.save_project_as()
+        return self._save_to(self.current_path)
 
-    def save_project_as(self) -> None:
+    def save_project_as(self) -> bool:
+        self._sync_all()
+        suggested = "".join(c for c in self.project.name if c not in '\\/:*?"<>|').strip() or S.NOMBRE_DE_ARCHIVO_SUGERIDO
         path = filedialog.asksaveasfilename(
-            title="Guardar proyecto como", defaultextension=".json",
-            filetypes=[("Proyecto StoryForge", "*.json")],
+            title=S.GUARDAR_PROYECTO_COMO, defaultextension=".storyforge.json",
+            initialfile=f"{suggested}.storyforge.json",
+            filetypes=[(S.PROYECTO_STORYFORGE, "*.storyforge.json *.json")],
+        )
+        if not path:
+            return False
+        return self._save_to(path)
+
+    def _save_to(self, path: str) -> bool:
+        self._sync_all()
+        problems = self.project.validate_inputs() + self.project.validate_warnings()
+        if problems:
+            messagebox.showwarning(APP_TITLE, S.SE_GUARDARA_CON_ESTAS_ADVERTENCIAS + "\n".join(problems))
+        try:
+            self.project.save(path)
+        except Exception as exc:  # noqa: BLE001
+            # Project.save() es atomico: el archivo anterior (si existia) sigue intacto.
+            logger.exception("No se pudo guardar el proyecto en %s", path)
+            messagebox.showerror(APP_TITLE, S.NO_SE_PUDO_GUARDAR.format(path=path, exc=exc))
+            return False
+        self.current_path = path
+        # La copia de autoguardado quedaria obsoleta.
+        self._discard_autosave()
+        self._mark_clean()
+        messagebox.showinfo(APP_TITLE, S.PROYECTO_GUARDADO)
+        return True
+
+    def _export(self, title: str, extension: str, label: str, exporter) -> None:
+        self._sync_all()
+        suggested = "".join(c for c in self.project.name if c not in '\\/:*?"<>|').strip() or S.NOMBRE_DE_ARCHIVO_SUGERIDO
+        path = filedialog.asksaveasfilename(
+            title=title, defaultextension=extension, initialfile=f"{suggested}{extension}",
+            filetypes=[(label, f"*{extension}")],
         )
         if not path:
             return
-        self.current_path = path
-        self.save_project()
+        try:
+            exporter(self.project, path)
+            messagebox.showinfo(APP_TITLE, S.EXPORTADO_A.format(path=path))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Error al exportar a %s", path)
+            messagebox.showerror(APP_TITLE, S.ERROR_AL_EXPORTAR.format(exc=exc))
 
     def export_word(self) -> None:
-        self._sync_all()
-        path = filedialog.asksaveasfilename(
-            title="Exportar a Word", defaultextension=".docx", filetypes=[("Word", "*.docx")]
-        )
-        if not path:
-            return
-        try:
-            export_docx(self.project, path)
-            messagebox.showinfo(APP_TITLE, f"Exportado a {path}")
-        except Exception as exc:  # noqa: BLE001
-            messagebox.showerror(APP_TITLE, f"Error al exportar: {exc}")
+        self._export(S.EXPORTAR_A_WORD, ".docx", S.WORD, export_docx)
 
     def export_txt_file(self) -> None:
-        self._sync_all()
-        path = filedialog.asksaveasfilename(
-            title="Exportar a TXT", defaultextension=".txt", filetypes=[("Texto", "*.txt")]
-        )
-        if not path:
-            return
-        try:
-            export_txt(self.project, path)
-            messagebox.showinfo(APP_TITLE, f"Exportado a {path}")
-        except Exception as exc:  # noqa: BLE001
-            messagebox.showerror(APP_TITLE, f"Error al exportar: {exc}")
+        self._export(S.EXPORTAR_A_TXT, ".txt", S.TIPO_TEXTO, export_txt)
+
+    def export_markdown_file(self) -> None:
+        self._export(S.EXPORTAR_A_MARKDOWN, ".md", S.MARKDOWN, export_markdown)
+
+    def export_epub_file(self) -> None:
+        self._export(S.EXPORTAR_A_EPUB, ".epub", S.EPUB, export_epub)
 
 
 def run() -> None:
     app = StoryForgeApp()
+    # Errores no capturados en hilos de trabajo: se registran y se muestran.
+    threading.excepthook = app._thread_excepthook
     app.mainloop()
+
+
+# Nombres que las pruebas importan desde app.gui.
+__all__ = [
+    "StoryForgeApp", "run", "VersionHistoryDialog", "default_autosave_path", "_lore_entry_matches_search",
+    "CHAPTER_PURPOSE_DEFAULT_LABEL", "WRITING_STYLE_DEFAULT_LABEL", "ContextOverflowError", "ModelNotLoadedError",
+]
