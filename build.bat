@@ -10,6 +10,11 @@ REM proyectos. El venv se recrea en cada build.
 REM
 REM Uso:  build.bat          -> variante CUDA 13 (GPU NVIDIA, por defecto)
 REM       build.bat cpu      -> variante solo CPU
+REM
+REM Firma (opcional): con CODESIGN_THUMBPRINT definido (huella SHA-1 de un
+REM certificado de firma de codigo del almacen de Windows) se firman
+REM StoryForge.exe, el instalador y su desinstalador con signtool (Windows SDK),
+REM con sello de tiempo de CODESIGN_TIMESTAMP_URL (por defecto el de DigiCert).
 
 setlocal
 set VARIANT=%1
@@ -25,6 +30,20 @@ if /i "%VARIANT%"=="cpu" (
 echo ============================================
 echo  StoryForge Local - build de Windows (%VARIANT%)
 echo ============================================
+
+REM La firma se revisa antes del build (varios minutos), no despues.
+set SIGNTOOL=
+if not defined CODESIGN_THUMBPRINT goto :sign_ready
+set "CODESIGN_THUMBPRINT=%CODESIGN_THUMBPRINT: =%"
+if not defined CODESIGN_TIMESTAMP_URL set CODESIGN_TIMESTAMP_URL=http://timestamp.digicert.com
+for %%I in (signtool.exe) do if not "%%~$PATH:I"=="" set "SIGNTOOL=%%~$PATH:I"
+if not defined SIGNTOOL for /f "delims=" %%S in ('powershell -NoProfile -Command "(Get-ChildItem (Join-Path ${env:ProgramFiles(x86)} 'Windows Kits\10\bin\10.*\x64\signtool.exe') -ErrorAction SilentlyContinue | Sort-Object FullName | Select-Object -Last 1).FullName"') do set "SIGNTOOL=%%S"
+if not defined SIGNTOOL (
+    echo ERROR: CODESIGN_THUMBPRINT esta definido pero no se encontro signtool.exe ^(Windows SDK^).
+    goto :fail
+)
+echo Firmando con el certificado %CODESIGN_THUMBPRINT% ^(%SIGNTOOL%^)
+:sign_ready
 
 echo.
 echo [1/7] Creando entorno limpio .build-venv ...
@@ -60,6 +79,10 @@ echo.
 echo [5/7] Empaquetando con PyInstaller...
 %PY% -m PyInstaller --noconfirm --clean storyforge.spec
 if errorlevel 1 goto :fail
+if not defined SIGNTOOL goto :signed_exe
+"%SIGNTOOL%" sign /sha1 %CODESIGN_THUMBPRINT% /fd SHA256 /tr %CODESIGN_TIMESTAMP_URL% /td SHA256 dist\StoryForge\StoryForge.exe
+if errorlevel 1 goto :fail
+:signed_exe
 
 echo.
 echo [6/7] Compilando instalador de Inno Setup (opcional)...
@@ -74,7 +97,11 @@ if not defined ISCC (
     goto :copy_app
 )
 for /f %%V in ('%PY% -c "import app; print(app.__version__)"') do set APP_VERSION=%%V
-"%ISCC%" /DAppVersion=%APP_VERSION% /DBuildVariant=%VARIANT% installer\StoryForge.iss
+REM Con firma, Inno Setup firma el instalador y el desinstalador con la
+REM herramienta "codesign" ($q = comillas, $f = el archivo; ver StoryForge.iss).
+set ISCC_SIGN=
+if defined SIGNTOOL set ISCC_SIGN=/DSign "/Scodesign=$q%SIGNTOOL%$q sign /sha1 %CODESIGN_THUMBPRINT% /fd SHA256 /tr %CODESIGN_TIMESTAMP_URL% /td SHA256 $f"
+"%ISCC%" /DAppVersion=%APP_VERSION% /DBuildVariant=%VARIANT% %ISCC_SIGN% installer\StoryForge.iss
 if errorlevel 1 goto :fail
 
 :copy_app

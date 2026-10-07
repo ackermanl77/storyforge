@@ -297,6 +297,10 @@ Archivo > Preferencias) y ejecuta `StoryForge.exe`. Para compilarlo tú:
    copia el programa a `StoryForge-App\StoryForge.exe` —
    una carpeta fija y facil de ubicar (a diferencia de `dist\`, que es la
    carpeta de trabajo de PyInstaller y se borra/regenera en cada build).
+   Para firmar (Authenticode) el .exe, el instalador y su desinstalador:
+   `set CODESIGN_THUMBPRINT=<huella SHA-1>` (un certificado de firma de
+   codigo del almacen de Windows) antes de `build.bat`; usa signtool del
+   Windows SDK y sella con `CODESIGN_TIMESTAMP_URL` (por defecto DigiCert).
 5. Copia la carpeta `models/` (con tu modelo adentro) junto al .exe, dentro
    de `StoryForge-App\`, si no quedo ahi automaticamente, y ejecuta
    `StoryForge-App\StoryForge.exe`. `build.bat` conserva
