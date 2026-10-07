@@ -174,7 +174,9 @@ class ChapterPanel(ctk.CTkFrame):
         self.find_count_label = ctk.CTkLabel(self.find_bar, text="", text_color=COLOR_MUTED)
         self.find_count_label.grid(row=0, column=9, padx=6)
         self.find_entry.bind("<Return>", lambda _e: (self.find_next(), "break")[1])
-        self.find_entry.bind("<KeyRelease>", lambda e: None if e.keysym == "Return" else self.highlight_matches())
+        # e=None: una corrida de CI llamo a uno de estos handlers de <KeyRelease> sin evento
+        # (TypeError en el callback de Tk); sin evento se trata como una tecla comun.
+        self.find_entry.bind("<KeyRelease>", lambda e=None: None if getattr(e, "keysym", "") == "Return" else self.highlight_matches())
         self.find_entry.bind("<Escape>", lambda _e: (self.hide_find_bar(), "break")[1])
         self.find_visible = False
 
@@ -197,7 +199,7 @@ class ChapterPanel(ctk.CTkFrame):
         self.word_count_label.pack(side="left")
         self.summary_status_label = ctk.CTkLabel(info_row, text="")
         self.summary_status_label.pack(side="left", padx=(16, 0))
-        self.content_box.bind("<KeyRelease>", lambda e: self._on_content_edited())
+        self.content_box.bind("<KeyRelease>", lambda _e=None: self._on_content_edited())
         # Ctrl+Enter: Generar (capitulo vacio) o Continuar (ya tiene texto).
         self.content_box.bind("<Control-Return>", self._on_ctrl_enter)
         # Clic derecho: reescribir / expandir / describir / acortar la seleccion (F7).
@@ -233,7 +235,7 @@ class ChapterPanel(ctk.CTkFrame):
         self.summary_box.grid(row=0, column=0, sticky="ew")
         self.summary_box.insert("1.0", chapter.summary)
         self.summary_box.edit_reset()
-        self.summary_box.bind("<KeyRelease>", lambda e: self._refresh_summary_status())
+        self.summary_box.bind("<KeyRelease>", lambda _e=None: self._refresh_summary_status())
         self.summary_visible = False
 
         self._refresh_word_count()
