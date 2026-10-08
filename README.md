@@ -444,17 +444,18 @@ python -m pytest -q
 ruff check app tests
 ```
 
-Resultado el 2026-10-03: **339 passed, 2 skipped, 21 subtests** (los 2
+Resultado el 2026-10-07: **340 passed, 2 skipped, 21 subtests** (los 2
 saltados son la prueba opcional con un modelo real); corre la suite tú
 mismo antes de confiar en este número. `scripts\run_coverage.ps1` genera el
 reporte de cobertura (usa `.venv`). Las pruebas
 nunca escriben en tu carpeta de datos real: `tests/conftest.py` y
 `tests/test_gui.py` apuntan `STORYFORGE_USER_DATA_DIR` a una carpeta
 temporal. CI (`.github/workflows/build-exe.yml`) corre en cada push a
-`master`/`test-story` `ruff check app tests` y la suite con cobertura, y
+`master` `ruff check app tests` y la suite con cobertura, y
 arma dos zips: `StoryForge-<versión>-cpu.zip` y
 `StoryForge-<versión>-cuda13.zip`. Un tag `v<versión>` (igual a
-`app/__init__.py`) los publica como GitHub Release.
+`app/__init__.py`) los publica como GitHub Release, junto con el instalador
+de cada variante.
 
 `tests/test_real_model.py` es una prueba opcional con un modelo real
 (`set STORYFORGE_TEST_MODEL=C:\ruta\modelo-chico.gguf`); sin esa variable

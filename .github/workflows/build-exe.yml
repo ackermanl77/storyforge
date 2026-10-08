@@ -1,6 +1,6 @@
 name: Build Windows .exe
 
-# Builds the packaged StoryForge.exe on every push to master / test-story, on
+# Builds the packaged StoryForge.exe on every push to master, on
 # version tags (v*), and on demand via workflow_dispatch, in two variants:
 #
 #   cpu    -- llama-cpp-python from the author's prebuilt CPU wheel index
@@ -24,7 +24,6 @@ on:
   push:
     branches:
       - master
-      - test-story
     tags:
       - "v*"
   workflow_dispatch: {}
