@@ -313,10 +313,15 @@ class TestEngineUsesChatTemplate(unittest.TestCase):
         self.assertTrue(first.startswith("<|start_header_id|>system<|end_header_id|>"))
         self.assertIn("Begin the chapter now", first)
         self.assertTrue(first.endswith("<|start_header_id|>assistant<|end_header_id|>\n\n"))
-        # The continuation's assistant turn is pre-filled with the chapter's
-        # own ending, so the model continues the prose instead of answering.
-        self.assertTrue(second.rstrip().endswith("end."))
-        self.assertIn("Section0", second.split("assistant<|end_header_id|>")[-1])
+        # The continuation's assistant turn is pre-filled with only the chapter's
+        # last lines (the rest is context in the user turn), so the model keeps
+        # writing prose without "already" holding a long reply it wants to end;
+        # after a section the model finished itself, it starts a new paragraph.
+        user_turn, reply = second.split("assistant<|end_header_id|>")[-2:]
+        self.assertTrue(reply.rstrip().endswith("end."))
+        self.assertTrue(reply.endswith("end.\n\n"))
+        self.assertNotIn("Section0", reply)
+        self.assertIn("Section0", user_turn)
         self.assertIn("<|eot_id|>", llm.stops[0])
         self.assertIn("Section1", result)
 
@@ -507,3 +512,74 @@ class TestContinueAndDynamicTail(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestChapterLength(unittest.TestCase):
+    """Chapters well short of their target (546 of 3000 words with Llama 3 8B):
+    the first part compressed the whole outline and ended, and an empty reply
+    after it ended the chapter."""
+
+    def test_each_part_gets_its_own_beats_and_only_the_last_one_may_end(self):
+        from app.prompts import build_section_scope_hint
+
+        outline = "\n".join(f"- Beat {i}" for i in range(1, 7))
+        parts = [build_section_scope_hint(outline, written, 900, 3000) for written in (0, 900, 1800)]
+        self.assertIn("beats 1 to 2 of 6", parts[0])
+        self.assertIn("beats 3 to 4 of 6", parts[1])
+        self.assertIn("beat 5 of 6", parts[2])  # beat 6 is left for the final part
+        self.assertTrue(all("Do not end" in part for part in parts))
+        self.assertIn("do not reach the chapter's ending", build_section_scope_hint("One paragraph.", 0, 900, 3000))
+
+    def test_the_first_part_of_a_long_chapter_is_scoped(self):
+        llm = ChatFakeLlama(lambda p, i: "word " * 2000, specials=LLAMA3_SPECIALS)
+        engine = LocalStoryEngine()
+        engine._llm = llm
+        engine.generate_chapter(_chapter_project(target=3000, outline="- A\n- B\n- C\n- D"), 0)
+        self.assertIn("SCOPE OF THIS PART", llm.prompts[0])
+        self.assertNotIn("SCOPE OF THIS PART", llm.prompts[-1])  # the final part may close
+
+    def test_an_empty_reply_is_retried_instead_of_ending_the_chapter(self):
+        replies = {0: "word " * 200 + "end.", 1: "", 2: ""}
+        llm = ChatFakeLlama(lambda p, i: replies.get(i, "more " * 400), specials=LLAMA3_SPECIALS)
+        engine = LocalStoryEngine()
+        engine._llm = llm
+        result = engine.generate_chapter(_chapter_project(target=600), 0)
+        self.assertGreaterEqual(count_words(result), 480)
+
+    def test_empty_replies_give_up_after_the_retry_limit(self):
+        llm = ChatFakeLlama(lambda p, i: ("word " * 100 + "end.") if i == 0 else "", specials=LLAMA3_SPECIALS)
+        engine = LocalStoryEngine()
+        engine._llm = llm
+        engine.generate_chapter(_chapter_project(target=3000), 0)
+        self.assertEqual(len(llm.prompts), 1 + engine_module.MAX_EMPTY_SECTION_RETRIES + 1)
+
+    def test_a_part_that_is_not_the_last_cannot_end_its_turn_early(self):
+        seen = []
+
+        class Recording(ChatFakeLlama):
+            def __call__(self, prompt, max_tokens=0, stop=None, stream=False, **kwargs):
+                seen.append((max_tokens, kwargs.get("logits_processor")))
+                return super().__call__(prompt, max_tokens, stop, stream, **kwargs)
+
+        llm = Recording(lambda p, i: "word " * 2000, specials=LLAMA3_SPECIALS)
+        engine = LocalStoryEngine()
+        engine._llm = llm
+        engine._count_tokens = lambda text: 50
+        engine.generate_chapter(_chapter_project(target=2000), 0)
+        processors = [p for _, p in seen]
+        self.assertIsNotNone(processors[0])
+        self.assertIsNone(processors[-1])  # the final part may stop whenever it wants
+        import numpy as np
+
+        scores = np.zeros(200, dtype=np.float32)
+        min_tokens = int(seen[0][0] * engine_module.MIN_SECTION_FRACTION)
+        processors[0](np.arange(50 + min_tokens - 1), scores)  # one token short of the minimum
+        self.assertEqual(scores[101], -np.inf)  # EOS blocked
+        self.assertEqual(scores[LLAMA3_SPECIALS["<|eot_id|>"]], -np.inf)
+        scores = np.zeros(200, dtype=np.float32)
+        processors[0](np.arange(50 + min_tokens), scores)
+        self.assertEqual(scores[101], 0)  # free to end once it's long enough
+
+    def test_breaking_out_of_the_story_is_cut(self):
+        for marker in ("(To be continued", "(End of", "[Your Name]", "(Note:"):
+            self.assertIn(marker, engine_module.DEFAULT_PROSE_STOP)

@@ -553,6 +553,50 @@ def build_beat_progress_hint(outline: str, written_words: int, target_words: int
     )
 
 
+def build_section_scope_hint(outline: str, written_words: int, section_words: int, target_words: int) -> str:
+    """
+    Alcance de una seccion que NO es la ultima: que beats del esquema
+    escribir ahora (los que le tocan por proporcion de palabras) y la orden de
+    no terminar el capitulo. Sin esto, la primera seccion recibia el esquema
+    entero y "unas {target} palabras", pero presupuesto para ~900: el modelo
+    comprimia todos los beats en ~600 palabras y escribia un final, y las
+    secciones siguientes solo podian agregar mas cierres.
+    """
+    if target_words <= 0:
+        return ""
+    start = max(0.0, min(1.0, written_words / target_words))
+    end = max(start, min(1.0, (written_words + section_words) / target_words))
+    beats = _outline_beats(outline or "")
+    if len(beats) >= 2:
+        # Rounded the same way at both ends, so consecutive parts split the
+        # beats without overlapping (an overlap invited the model to retell one).
+        first = min(len(beats) - 1, int(round(start * len(beats))))
+        last = max(first, min(len(beats) - 1, int(round(end * len(beats))) - 1))
+        if last >= len(beats) - 1 and first > 0:
+            last = len(beats) - 2  # the last beat belongs to the final part
+        last = max(first, last)
+        if first == last:
+            scope = f"beat {first + 1} of {len(beats)} (\"{_trim_words(beats[first], 40)}\")"
+        else:
+            scope = f"beats {first + 1} to {last + 1} of {len(beats)}"
+            scope += " (" + "; ".join(f"\"{_trim_words(b, 25)}\"" for b in beats[first:last + 1]) + ")"
+        return (
+            f"SCOPE OF THIS PART: this part covers about {int(start * 100)}-{int(end * 100)}% of the chapter. "
+            f"Write only {scope} now, as full scenes with dialogue, action, sensory detail and the characters' "
+            "thoughts; take your time. Stop when this part is told: the later beats come in later parts. "
+            "Do not end, conclude or sum up the chapter."
+        )
+    return (
+        f"SCOPE OF THIS PART: this part is only about {int(start * 100)}-{int(end * 100)}% of the chapter. "
+        "Develop the events slowly, as full scenes with dialogue, action, sensory detail and the characters' "
+        "thoughts, and do not reach the chapter's ending yet. Do not end, conclude or sum up the chapter."
+    )
+
+
+# Palabras del final del capitulo que van pre-llenadas en la respuesta al
+# continuar (ver build_chapter_continuation_chat).
+CONTINUATION_PREFILL_WORDS = 60
+
 NOT_OVER_NUDGE = (
     "The chapter is not finished yet: do not write an ending, a conclusion or a "
     "summary; keep developing the remaining events."
@@ -584,9 +628,13 @@ def _step_context_block(blocks: List[str]) -> str:
     return f"{STEP_CONTEXT_HEADER}\n\n" + "\n\n".join(clean)
 
 
-def build_chapter_start_chat(project: Project, chapter_index: int, budget: dict) -> ChatPrompt:
-    """Primera seccion de un capitulo (todavia no hay texto escrito)."""
+def build_chapter_start_chat(
+    project: Project, chapter_index: int, budget: dict, hints: Optional[List[str]] = None,
+) -> ChatPrompt:
+    """Primera seccion de un capitulo (todavia no hay texto escrito). `hints`:
+    lineas extra, como el alcance de la seccion (build_section_scope_hint)."""
     bible, task, step_blocks = _chapter_prompt_parts(project, chapter_index, **_chapter_budget_kwargs(budget))
+    step_blocks += [h for h in (hints or []) if h]
     note = build_author_note(project, project.chapters[chapter_index])
     if note:
         step_blocks.append(note)
@@ -633,9 +681,18 @@ def build_chapter_continuation_chat(
     # nota del autor -- lo ultimo que lee el modelo antes de escribir.
     tail_blocks = hints + ([note] if note else [])
     step_context = _step_context_block(step_blocks + [f"Write about {remaining_words} more words."] + tail_blocks)
+    # Solo el ultimo parrafo (~CONTINUATION_PREFILL_WORDS) va pre-llenado en la
+    # respuesta; el resto de la cola va en el mensaje como contexto. Con toda la
+    # cola (cientos de palabras) en la respuesta, el modelo "ya llevaba" una
+    # respuesta larga y queria cerrarla enseguida: secciones de 40-100 palabras
+    # que solo agregaban finales.
+    recent = tail_preserving_format(already_written, tail_words)
+    prefill = tail_preserving_format(already_written, min(tail_words, CONTINUATION_PREFILL_WORDS))
+    earlier = recent[: len(recent) - len(prefill)].rstrip() if recent.endswith(prefill) else ""
+    so_far = f"The chapter written so far ends like this:\n\n{earlier}\n\n" if earlier else ""
     user = (
-        f"{task.strip()}\n\nThe chapter is already in progress; your reply starts with the "
-        "last part of what has been written so far. Continue it seamlessly from the exact "
+        f"{task.strip()}\n\nThe chapter is already in progress. {so_far}Your reply starts with the "
+        "chapter's last lines, already written for you. Continue it seamlessly from the exact "
         "point where it stops. Do not repeat earlier sentences, do not restart the scene "
         "and do not summarize."
     )
@@ -648,7 +705,7 @@ def build_chapter_continuation_chat(
     return ChatPrompt(
         system=bible.rstrip(),
         user=user,
-        prefill=tail_preserving_format(already_written, tail_words),
+        prefill=prefill,
         raw=f"{bible}{task}\n\n{cont}\n",
     )
 

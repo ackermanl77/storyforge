@@ -102,6 +102,12 @@ See the README's "Limitaciones reales que debes conocer" section for the user-fa
 
 ## Recently Fixed
 
+- **Chapters far shorter than their target** (2026-10-08). Reproduced with the real `daredevil-8b-abliterated` (Llama 3 8B): a 3,000-word chapter came out at 546 words. Three causes, all in `app/engine.py`/`app/prompts.py`:
+  - The first section got the whole outline and "about 3000 words" but a ~900-word budget, so the model told every beat in ~600 words and wrote an ending. Every part but the last now gets a `SCOPE OF THIS PART` hint (`build_section_scope_hint()`: its share of the outline beats, split without overlap, and "do not end the chapter").
+  - Continuing pre-filled the last ~400 words into the model's reply, so it "already had" a long answer and closed it at once (sections of 40-100 words, or empty). Now only the last ~60 words are pre-filled (`CONTINUATION_PREFILL_WORDS`); the rest of the tail is context in the user turn, and after a section the model ended itself the pre-fill starts a new paragraph.
+  - An empty section ended the chapter; it is now retried with another seed (`MAX_EMPTY_SECTION_RETRIES`). Parts other than the last can't end their turn before 60% of their budget (`MIN_SECTION_FRACTION`, a llama.cpp logits processor blocking the end-of-turn tokens), and `(To be continued`, `(End of`, `[Your Name]` and `(Note:` are stop sequences, since a model kept from ending sometimes broke out of the story to sign off.
+  - Result with the same model: 3,000-word target -> 2,612 words, 2,000 -> 1,950 (the app accepts a natural ending from 80 % of the target), coherent across sections, no leaked notes.
+
 - **`test-story` merged into `master`** (PR #5, 2026-10-07): `master` is the only branch again, and CI builds only `master`, tags and manual runs.
   - **Chapter editor `TypeError` on `<KeyRelease>`.** One CI run (Python 3.12) called a chapter panel's `<KeyRelease>` handler without an event, which surfaced as an unexpected error dialog in `test_complete_missing_chapters`; not reproducible locally. The find bar, chapter text and summary handlers now take an optional event, like the Tab-order fix below.
   - **Signed builds** (see "Release") and **installers in tagged releases** (K4).

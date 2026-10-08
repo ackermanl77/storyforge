@@ -14,7 +14,7 @@ import sys
 import threading
 import time
 from collections import OrderedDict
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
 from . import strings_es as S
@@ -32,6 +32,7 @@ from .prompts import (
     NOT_OVER_NUDGE,
     ChatPrompt,
     build_beat_progress_hint,
+    build_section_scope_hint,
     build_chapter_continuation_chat,
     build_chapter_start_chat,
     build_combine_summaries_chat,
@@ -148,6 +149,18 @@ REFINE_OUTPUT_HEADROOM = 1.3
 # terminado en vez de pedir otra seccion (que tendia a escribir un segundo
 # "final"). Por debajo, se pide seguir con un aviso de que no termine aun.
 NATURAL_END_FRACTION = 0.8
+# Una seccion que vuelve vacia (el modelo cerro su turno enseguida) se
+# reintenta con otra semilla hasta estas veces por capitulo antes de rendirse;
+# antes, la primera respuesta vacia terminaba el capitulo muy por debajo del
+# objetivo (p.ej. 546 de 3000 palabras con Llama 3 8B).
+MAX_EMPTY_SECTION_RETRIES = 3
+NEW_PARAGRAPH = "\n\n"
+# Largo minimo de una seccion que no es la ultima, como fraccion de su
+# max_tokens: hasta ahi se bloquean los tokens de fin de turno del modelo.
+# Muchos modelos instruct (p.ej. Llama 3 8B) cierran su respuesta a las ~500
+# palabras pase lo que pase; sin esto, un capitulo de 3000 palabras terminaba
+# con ~550 o se completaba con parrafos de cierre repetidos.
+MIN_SECTION_FRACTION = 0.6
 # Al cortar un texto por max_tokens se descarta la oracion incompleta del
 # final solo si es corta (esta fraccion del texto como maximo): sin un
 # limite de oracion cerca, se conserva todo.
@@ -161,7 +174,14 @@ TOKEN_CACHE_SIZE = 64
 # cortaba despues del capitulo 1), ni para refinar/expandir, donde un parrafo
 # que empieza con "Chapter" es texto legitimo. Esas llamadas usan
 # ONLY_END_MARKER_STOP.
-DEFAULT_PROSE_STOP = ["\n\nCHAPTER", "\n\nChapter", "[END]"]
+DEFAULT_PROSE_STOP = [
+    "\n\nCHAPTER", "\n\nChapter", "[END]",
+    # El modelo saliendose de la historia para "despedirse" (visto con Llama 3 8B
+    # cuando no lo dejaban terminar el turno): se corta ahi.
+    "(To be continued", "(End of", "[Your Name]",
+    # ...o para comentar el esquema ("(Note: this part continues with beat 4...").
+    "(Note:",
+]
 ONLY_END_MARKER_STOP = ["[END]"]
 
 # Niveles de presupuesto de contexto (en palabras) para plot/personajes/
@@ -506,6 +526,44 @@ class LocalStoryEngine:
             return False
         return len(tokens) == 1
 
+    def _end_token_ids(self) -> List[int]:
+        """Ids de los tokens con los que el modelo termina su turno: el EOS y
+        los de corte del formato de chat que son un solo token especial
+        (<|eot_id|>, <|im_end|>...). Vacio si no se pueden leer."""
+        ids = set()
+        try:
+            eos = self._llm.token_eos()
+            if eos is not None and eos >= 0:
+                ids.add(int(eos))
+        except Exception:  # noqa: BLE001 - dobles de prueba sin token_eos()
+            pass
+        for text in self.formatter.stop:
+            try:
+                tokens = self._llm.tokenize(text.encode("utf-8"), add_bos=False, special=True)
+            except Exception:  # noqa: BLE001
+                continue
+            if len(tokens) == 1:
+                ids.add(int(tokens[0]))
+        return sorted(ids)
+
+    def _min_length_processor(self, min_tokens: int, prompt_tokens: int):
+        """logits_processor de llama.cpp que prohibe los tokens de fin de turno
+        hasta que se generaron `min_tokens` tokens; None si no hace falta."""
+        end_ids = self._end_token_ids() if min_tokens > 0 else []
+        if not end_ids:
+            return None
+
+        def processor(input_ids, scores):
+            if len(input_ids) - prompt_tokens < min_tokens:
+                scores[end_ids] = -float("inf")
+            return scores
+
+        try:  # llama-cpp-python iterates over a LogitsProcessorList
+            from llama_cpp import LogitsProcessorList
+        except Exception:  # noqa: BLE001 - dobles de prueba / sin llama_cpp
+            return [processor]
+        return LogitsProcessorList([processor])
+
     def _special_token_text(self, token_id_getter: str) -> str:
         try:
             token_id = getattr(self._llm, token_id_getter)()
@@ -663,9 +721,11 @@ class LocalStoryEngine:
         on_token: Optional[Callable[[str], None]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
         task: str = TASK_PROSE,
+        min_tokens: int = 0,
     ) -> CompletionResult:
         """
-        Una llamada al modelo. `prompt` puede ser texto ya armado o un
+        Una llamada al modelo. `min_tokens`: el modelo no puede terminar su
+        turno antes de generar esos tokens (ver MIN_SECTION_FRACTION). `prompt` puede ser texto ya armado o un
         ChatPrompt, que se renderiza con el formato de chat del modelo (ver
         render_prompt). Devuelve el texto SIN recortar (al continuar desde un
         texto pre-llenado, el espacio inicial es parte de la continuacion) y
@@ -696,6 +756,9 @@ class LocalStoryEngine:
             stops += [s for s in self.formatter.stop if s and s not in stops]
         call_kwargs = dict(max_tokens=max_tokens, stop=stops)
         call_kwargs.update(self._sampling_kwargs(task))
+        processor = self._min_length_processor(min_tokens, prompt_tokens)
+        if processor is not None:
+            call_kwargs["logits_processor"] = processor
         # Solo pedimos streaming token a token (llama_cpp.Llama.__call__(...,
         # stream=True), que devuelve un generador en vez de un dict) cuando
         # hay alguien escuchando o alguien que puede cancelar.
@@ -793,6 +856,7 @@ class LocalStoryEngine:
         cancel_check: Optional[Callable[[], bool]] = None,
         stop: Optional[List[str]] = None,
         task: str = TASK_PROSE,
+        min_tokens: int = 0,
     ) -> CompletionResult:
         """
         Intenta completar con cada nivel de CONTEXT_BUDGET_LEVELS (de mayor a
@@ -806,7 +870,7 @@ class LocalStoryEngine:
             try:
                 return self._complete_ex(
                     prompt_for_budget(budget), max_tokens=max_tokens, stop=stop,
-                    on_token=on_token, cancel_check=cancel_check, task=task,
+                    on_token=on_token, cancel_check=cancel_check, task=task, min_tokens=min_tokens,
                 )
             except ContextOverflowError as exc:
                 last_error = exc
@@ -1002,6 +1066,7 @@ class LocalStoryEngine:
         nudge = False
         last_finish: Optional[str] = None
         section = 0
+        empty_retries = 0
         while count_words(full_text) < target and section < MAX_SECTIONS_PER_CHAPTER:
             if self._is_cancelled(cancel_check):
                 break
@@ -1016,16 +1081,22 @@ class LocalStoryEngine:
             max_tokens = int(section_words * TOKENS_PER_WORD_ESTIMATE)
 
             hints: List[str] = []
+            final_part = target - written <= section_words
             if full_text:
                 hints.append(build_beat_progress_hint(chapter.outline, written, target))
-                if nudge:
-                    hints.append(NOT_OVER_NUDGE)
-                elif target - written <= section_words:
-                    hints.append(FINAL_SECTION_HINT)
+            if not final_part:
+                # Cada parte que no es la ultima recibe sus beats y la orden de
+                # no cerrar el capitulo (la primera tambien: era la que comprimia
+                # todo el esquema y escribia un final).
+                hints.append(build_section_scope_hint(chapter.outline, written, section_words, target))
+            if nudge:
+                hints.append(NOT_OVER_NUDGE)
+            elif full_text and final_part:
+                hints.append(FINAL_SECTION_HINT)
 
             def prompt_for_budget(budget: dict, _text=full_text, _remaining=remaining, _hints=hints) -> ChatPrompt:
                 if not _text:
-                    return build_chapter_start_chat(project, chapter_index, budget)
+                    return build_chapter_start_chat(project, chapter_index, budget, hints=_hints)
 
                 def build(tail_words: int) -> ChatPrompt:
                     return build_chapter_continuation_chat(
@@ -1033,14 +1104,28 @@ class LocalStoryEngine:
                     )
 
                 tail = self._dynamic_tail_words(build, _text, budget["tail_words"], max_tokens)
-                return build(tail)
+                prompt = build(tail)
+                if _new_paragraph:
+                    # El texto anterior termino en un final natural: la respuesta
+                    # pre-llenada empieza un parrafo nuevo, en vez de quedar justo
+                    # despues de una oracion cerrada -- donde el siguiente token
+                    # mas probable de un modelo de chat es "fin del turno".
+                    prompt = replace(prompt, prefill=prompt.prefill + NEW_PARAGRAPH)
+                return prompt
 
             # En modo chat, al continuar, el final del capitulo va pre-llenado
             # en la respuesta: el modelo sigue escribiendo desde ahi mismo,
             # asi que su salida se pega tal cual (con su espacio inicial).
             prefilled = bool(full_text) and self.formatter.is_chat
+            # Solo tras una seccion que el modelo cerro en esta misma ejecucion:
+            # "Continuar (desde el cursor)" puede empezar a mitad de una oracion.
+            new_paragraph = prefilled and last_finish == "stop"
+            _new_paragraph = new_paragraph
             base_text = full_text
-            joiner = "" if prefilled or not base_text else raw_joiner
+            if new_paragraph:
+                joiner = NEW_PARAGRAPH
+            else:
+                joiner = "" if prefilled or not base_text else raw_joiner
             # B13: el conteo de palabras se mantiene INCREMENTAL (solo se
             # cuentan las palabras del fragmento nuevo, corrigiendo la palabra
             # que queda partida entre fragmentos) en vez de recontar todo el
@@ -1048,11 +1133,11 @@ class LocalStoryEngine:
             # capitulo de 10k palabras, ~0.7 ms por token con el GIL tomado.
             base_words = count_words(base_text)
             section_piece = {"parts": [], "words": 0, "last_char": ""}
-            if base_text and prefilled:
+            if base_text and prefilled and not new_paragraph:
                 section_piece["last_char"] = base_text[-1]
 
             def on_token(delta: str, _base=base_text, _joiner=joiner, _piece=section_piece,
-                         _prefilled=prefilled, _base_words=base_words) -> None:
+                         _prefilled=prefilled and not new_paragraph, _base_words=base_words) -> None:
                 if not _piece["parts"] and not _prefilled:
                     delta = delta.lstrip()
                     if not delta:
@@ -1075,16 +1160,26 @@ class LocalStoryEngine:
                     prompt_for_budget, max_tokens,
                     on_token=on_token if progress_callback else None,
                     cancel_check=cancel_check,
+                    # La ultima parte puede cerrar cuando quiera; las demas no.
+                    min_tokens=0 if final_part else int(max_tokens * MIN_SECTION_FRACTION),
                 )
             except ContextOverflowError as exc:
                 raise ContextOverflowError(
                     S.NO_SE_PUDO_GENERAR_SECCION.format(exc=exc)
                 ) from exc
 
-            last_finish = result.finish_reason
-            piece = result.text.rstrip() if prefilled else result.text.strip()
+            piece = result.text.rstrip() if prefilled and not new_paragraph else result.text.strip()
             if not piece.strip():
-                break
+                if result.finish_reason == "cancelled" or empty_retries >= MAX_EMPTY_SECTION_RETRIES:
+                    break
+                # El modelo cerro su turno sin escribir: otra semilla (distinta
+                # tambien con una semilla fija del proyecto) y el aviso de que
+                # el capitulo no termino.
+                empty_retries += 1
+                self._op_seed = (self._op_seed + 1) if self._op_seed is not None else random.randint(0, MAX_SEED)
+                nudge = True
+                continue
+            last_finish = result.finish_reason
             if last_finish == "length" and not prefilled and not self.formatter.is_chat:
                 # Modo crudo: la proxima seccion empieza texto nuevo, asi que
                 # la oracion cortada se descarta y se sigue en el mismo parrafo.
