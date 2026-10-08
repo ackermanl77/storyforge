@@ -312,7 +312,13 @@ En la pestaña Capítulos, cada panel tiene:
 - El capítulo se escribe **por secciones** (de a ~900 palabras),
   mostrando el progreso en vivo, hasta acercarse al objetivo. Esto existe
   para poder llegar a objetivos largos sin exceder lo que un modelo local
-  puede escribir de un jalón.
+  puede escribir de un jalón. Cada sección escribe solo su parte del esquema
+  (por ejemplo, los eventos 1-2 de 6) y solo la última cierra el capítulo;
+  el capítulo se da por terminado cuando llega al objetivo, o cuando el
+  modelo lo cierra por su cuenta con al menos el 80 % escrito. Si te quedan
+  capítulos cortos, un esquema con más eventos y un modelo más capaz ayudan
+  más que subir el objetivo (ver las recomendaciones de
+  `models/README.txt`).
 - **Cancelar** (o Esc): se detiene en segundos, a mitad de la sección si
   hace falta, conservando lo generado hasta ese punto. Después puedes seguir
   con "Continuar".

@@ -59,6 +59,17 @@ correspondiente mas abajo.
 
 ## Historial de cambios
 
+**Capítulos más largos y limitaciones cerradas (2026-10-07/08):**
+- **Los capítulos llegan cerca de su objetivo.** Con Llama 3 8B un capítulo de 3000 palabras salía
+  con ~550: la primera sección recibía todo el esquema y escribía un final, y al continuar el modelo
+  cerraba su respuesta enseguida. Ahora cada sección escribe solo su parte del esquema, el modelo no
+  puede terminar una sección intermedia demasiado pronto y una respuesta vacía se reintenta. Con el
+  mismo modelo: 3000 → 2612 palabras, 2000 → 1950.
+- **"Versiones guardadas por capítulo"** (pestaña Plot), las **alternativas de Reintentar se guardan**
+  con el proyecto, y los mensajes de error del motor salen de `app/strings_es.py`.
+- **Firma de código** del `.exe`, el instalador y el desinstalador con `CODESIGN_THUMBPRINT`, y
+  los instaladores publicados con cada release.
+
 **Ronda B12/F9/K3/K4/T5 y CI (2026-10-02/03, versión 0.4.0):**
 - **Reutilización del prefijo del prompt**: lo estable de la historia va
   primero y lo que cambia en cada sección (lorebook, largo restante, pistas,
@@ -444,7 +455,7 @@ python -m pytest -q
 ruff check app tests
 ```
 
-Resultado el 2026-10-07: **346 passed, 2 skipped, 21 subtests** (los 2
+Resultado el 2026-10-08: **352 passed, 2 skipped, 21 subtests** (los 2
 saltados son la prueba opcional con un modelo real); corre la suite tú
 mismo antes de confiar en este número. `scripts\run_coverage.ps1` genera el
 reporte de cobertura (usa `.venv`). Las pruebas
