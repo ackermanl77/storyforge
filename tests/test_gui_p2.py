@@ -423,3 +423,20 @@ class TestHistoryLimitSetting(_Base):
         self.assertEqual(self.app.history_limit_menu.get(), "37")
         self.app._sync_all()
         self.assertEqual(self.app.project.history_limit, 37)
+
+
+class TestSavedAlternatives(_Base):
+    def test_a_reopened_chapter_can_still_cycle_its_alternatives(self):
+        ch = self.app.project.add_chapter("Cap", target_words=100)
+        ch.content = "segunda"
+        ch.set_alternatives(["primera", "segunda", "tercera"], 1)
+        self.app._render_chapters()
+        panel = self.app.chapter_panels[-1]
+        self.assertEqual(panel.alt_label.cget("text"), "2/3")
+        self.assertEqual(panel.next_alt_btn.cget("state"), "normal")
+        panel._cycle_alternative(1)
+        self.assertEqual(ch.content, "tercera")
+        self.assertEqual(ch.alt_index, 2)  # saved with the project
+        panel.content_box.insert("end", " editada")
+        panel._on_content_edited()  # a hand edit drops them
+        self.assertEqual(ch.alternatives, [])

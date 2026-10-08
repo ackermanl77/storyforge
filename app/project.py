@@ -34,6 +34,9 @@ MAX_AUTHOR_NOTE_WORDS = 150
 # puede cambiar por proyecto (Project.history_limit).
 MAX_CHAPTER_HISTORY = 20
 HISTORY_LIMIT_RANGE = (1, 100)
+# Alternativas de "Reintentar" que se guardan con el capitulo (las mas viejas
+# se descartan): cada una es el texto completo del capitulo.
+MAX_CHAPTER_ALTERNATIVES = 10
 
 # Limites del Lorebook / World Info: entradas de contexto que solo se
 # inyectan en el prompt cuando alguna de sus keywords aparece en el texto
@@ -167,6 +170,20 @@ class Chapter:
     # se guardo (p.ej. "refinar: hazlo mas oscuro"), "at": fecha ISO}.
     history: List[str] = field(default_factory=list)
     history_meta: List[Dict[str, str]] = field(default_factory=list)
+    # Alternativas de la ultima ejecucion de Generar/Continuar + "Reintentar"
+    # (se recorren con < >), guardadas con el proyecto; `alt_index` es la que
+    # esta en `content`. Una edicion a mano las descarta (ui_chapter_editor).
+    alternatives: List[str] = field(default_factory=list)
+    alt_index: int = -1
+
+    def set_alternatives(self, texts: List[str], index: int) -> None:
+        """Guarda las alternativas (a lo sumo MAX_CHAPTER_ALTERNATIVES, las
+        mas nuevas) con `index` apuntando a la misma dentro de la lista."""
+        drop = max(0, len(texts) - MAX_CHAPTER_ALTERNATIVES)
+        self.alternatives = list(texts[drop:])
+        self.alt_index = index - drop if self.alternatives and 0 <= index - drop < len(self.alternatives) else -1
+        if self.alt_index < 0:
+            self.alternatives = []
 
     def word_count(self) -> int:
         return count_words(self.content)
@@ -240,6 +257,8 @@ class Chapter:
             "purpose": self.purpose,
             "author_note": self.author_note,
             "history": self.history_entries(),
+            **({"alternatives": {"texts": list(self.alternatives), "index": self.alt_index}}
+               if self.alternatives else {}),
         }
 
     @staticmethod
@@ -267,6 +286,15 @@ class Chapter:
                 })
             else:
                 logger.warning("Version invalida en el historial de %s; se ignora", where or "un capitulo")
+        alternatives = d.get("alternatives")
+        if isinstance(alternatives, dict):
+            texts = alternatives.get("texts")
+            index = alternatives.get("index")
+            # Solo si la alternativa elegida sigue siendo el texto del capitulo
+            # (si no, el texto se edito por fuera y ya no corresponden).
+            if (isinstance(texts, list) and all(isinstance(t, str) for t in texts)
+                    and isinstance(index, int) and 0 <= index < len(texts) and texts[index] == chapter.content):
+                chapter.set_alternatives(texts, index)
         if "summary_source_hash" in d:
             chapter.summary_source_hash = _str_field(d, "summary_source_hash", "", where)
         elif chapter.summary.strip():

@@ -292,3 +292,31 @@ class TestPersistence(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestChapterAlternatives(unittest.TestCase):
+    """Las alternativas de Reintentar se guardan con el proyecto."""
+
+    def test_round_trip_and_stale_alternatives_are_dropped(self):
+        from app.project import Chapter
+
+        chapter = Chapter(title="C", content="b")
+        chapter.set_alternatives(["a", "b", "c"], 1)
+        data = chapter.to_dict()
+        self.assertEqual(data["alternatives"], {"texts": ["a", "b", "c"], "index": 1})
+        loaded = Chapter.from_dict(data)
+        self.assertEqual((loaded.alternatives, loaded.alt_index), (["a", "b", "c"], 1))
+        data["content"] = "edited elsewhere"  # the shown alternative no longer matches the text
+        self.assertEqual(Chapter.from_dict(data).alternatives, [])
+        self.assertNotIn("alternatives", Chapter(title="C").to_dict())  # nothing saved without them
+
+    def test_only_the_newest_alternatives_are_kept(self):
+        from app.project import MAX_CHAPTER_ALTERNATIVES, Chapter
+
+        chapter = Chapter(title="C")
+        texts = [f"v{i}" for i in range(MAX_CHAPTER_ALTERNATIVES + 3)]
+        chapter.set_alternatives(texts, len(texts) - 1)
+        self.assertEqual(len(chapter.alternatives), MAX_CHAPTER_ALTERNATIVES)
+        self.assertEqual(chapter.alternatives[chapter.alt_index], texts[-1])
+        chapter.set_alternatives(texts, 0)  # the shown one was dropped: none kept
+        self.assertEqual((chapter.alternatives, chapter.alt_index), ([], -1))

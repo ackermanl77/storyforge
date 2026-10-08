@@ -74,8 +74,8 @@ class ChapterPanel(ctk.CTkFrame):
         # "Reintentar": la ultima ejecucion de Generar/Continuar se puede
         # repetir (otra semilla) y recorrer sus alternativas con < >.
         self._last_run: Optional[dict] = None
-        self.alternatives: List[str] = []
-        self.alt_index = -1
+        # Las alternativas viven en el capitulo (Chapter.alternatives), asi se
+        # guardan con el proyecto; ver las propiedades de abajo.
         self.grid_columnconfigure(1, weight=1)
 
         ctk.CTkLabel(self, text=S.CAPITULO_N.format(number=index + 1), font=ctk.CTkFont(weight="bold")).grid(
@@ -241,6 +241,8 @@ class ChapterPanel(ctk.CTkFrame):
         self._refresh_word_count()
         self._refresh_summary_status()
         self._refresh_history_btn()
+        # Alternativas guardadas con el proyecto: < > disponibles al reabrirlo.
+        self._refresh_retry_controls(app.busy)
         apply_tab_order(self, self.focus_order_widgets())
 
     # ---- sincronizacion con el modelo de datos ----
@@ -471,6 +473,22 @@ class ChapterPanel(ctk.CTkFrame):
         self._start_generation(resume_from=text, regenerate=self._ask_regenerate_summaries())
 
     # ---- Reintentar / alternativas (F4) ----
+    @property
+    def alternatives(self) -> List[str]:
+        return self.chapter.alternatives
+
+    @alternatives.setter
+    def alternatives(self, texts: List[str]) -> None:
+        self.chapter.alternatives = list(texts)
+
+    @property
+    def alt_index(self) -> int:
+        return self.chapter.alt_index
+
+    @alt_index.setter
+    def alt_index(self, index: int) -> None:
+        self.chapter.alt_index = index
+
     def _on_retry(self) -> None:
         """Repite la ultima ejecucion de Generar/Continuar desde el mismo punto
         de partida (con otra semilla, salvo que el proyecto fije una) y
@@ -618,8 +636,8 @@ class ChapterPanel(ctk.CTkFrame):
             if summary_text is not None:
                 self._show_summary_text(self.chapter.summary)
             self._last_run = {"resume_from": resume_from}
-            self.alternatives = previous_alternatives + [result]
-            self.alt_index = len(self.alternatives) - 1
+            texts = previous_alternatives + [result]
+            self.chapter.set_alternatives(texts, len(texts) - 1)
             if result.strip() and not cancelled():
                 app._record_lore_matches(self.index)
             seed = getattr(engine, "last_seed", None)

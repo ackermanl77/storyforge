@@ -199,7 +199,9 @@ deshabilitados se saltan).
   para toda la historia en la pestaña Plot.
 - **Reintentar** repite la última ejecución de Generar/Continuar desde el
   mismo punto (con otra semilla) y guarda cada resultado como alternativa;
-  `<` y `>` las recorren. Editar el texto a mano descarta las alternativas.
+  `<` y `>` las recorren. Las alternativas se guardan con el proyecto (las
+  10 más recientes), así que al reabrirlo siguen ahí; editar el texto a mano
+  las descarta. "Reintentar" en sí vale solo en la sesión en que generaste.
 - **Clic derecho sobre texto seleccionado**: Reescribir, Expandir,
   Describir o Acortar solo ese fragmento (o con una instrucción propia). Ves
   una vista previa con diferencias antes de aceptar.
