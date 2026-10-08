@@ -320,6 +320,7 @@ CARGANDO_MODELO_TAREA = "Cargando {path}"
 TITULO_DE_LA_HISTORIA = "Título de la historia:"
 AUTOR = "Autor:"
 ENCABEZADO_AL_EXPORTAR = "Encabezado al exportar:"
+VERSIONES_POR_CAPITULO = "Versiones guardadas por capítulo:"
 NOTA_DEL_AUTOR_TODA_LA = "Nota del autor (toda la historia):"
 INSTRUCCION_CORTA_QUE_SE_APLICA = (
     "Instrucción corta que se aplica a cada sección (máximo {MAX_AUTHOR_NOTE_WORDS} palabras), "

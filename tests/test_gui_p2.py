@@ -402,3 +402,24 @@ class TestFocusModeF1(_Base):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestHistoryLimitSetting(_Base):
+    """Project.history_limit tiene un control en la pestana Plot (antes solo en el archivo)."""
+
+    def test_the_menu_sets_and_shows_the_project_limit(self):
+        self.app.history_limit_menu.set("5")
+        self.app._sync_all()
+        self.assertEqual(self.app.project.history_limit, 5)
+        panel = self._chapter("v0")
+        for i in range(1, 8):
+            panel.chapter.content = f"v{i - 1}"
+            self.app.project.push_chapter_history(panel.chapter, source="regenerar")
+        self.assertEqual(len(panel.chapter.history), 5)
+
+    def test_a_limit_from_the_file_outside_the_list_is_shown(self):
+        self.app.project.history_limit = 37
+        self.app._load_project_meta_into_ui()
+        self.assertEqual(self.app.history_limit_menu.get(), "37")
+        self.app._sync_all()
+        self.assertEqual(self.app.project.history_limit, 37)

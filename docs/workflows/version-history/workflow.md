@@ -19,6 +19,6 @@ Let a destructive edit to a chapter's content (regenerate, refine, reduce repeti
 
 ## Known limits
 
-- **Bounded to `history_limit` versions per chapter (default 20), silently dropping the oldest past that.** No warning when a version falls off the end, and the limit has no UI (only the project file's `history_limit`, 1-100).
+- **Bounded to `history_limit` versions per chapter (default 20), silently dropping the oldest past that.** No warning when a version falls off the end. The limit is set per project on the Plot tab ("Versiones guardadas por capítulo": 5/10/20/50/100; a file value outside that list, 1-100, is shown as is) and applies from each chapter's next change.
 - **Manual typing isn't versioned** — nothing calls `push_history()` when the user types over `content_box` by hand; the text box's own Ctrl+Z covers those edits.
 - Entries saved before the P2 round (format v1) have no source or timestamp.

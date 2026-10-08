@@ -16,6 +16,7 @@ from .project import (
     MAX_AUTHOR_NOTE_WORDS,
     MAX_CHARACTERS_WORDS,
     MAX_PLOT_WORDS,
+    HISTORY_LIMIT_RANGE,
     MAX_SETTING_WORDS,
     count_words,
 )
@@ -26,6 +27,9 @@ from .ui_common import (
     LimitedTextBox,
 )
 from .ui_focus import apply_tab_order
+
+#: Opciones del menu "Versiones guardadas por capitulo" (Project.history_limit).
+HISTORY_LIMIT_CHOICES = ("5", "10", "20", "50", "100")
 
 
 class StoryTabsMixin:
@@ -58,6 +62,10 @@ class StoryTabsMixin:
             note_row, placeholder_text=S.INSTRUCCION_CORTA_QUE_SE_APLICA.format(MAX_AUTHOR_NOTE_WORDS=MAX_AUTHOR_NOTE_WORDS),
         )
         self.project_note_entry.grid(row=0, column=1, sticky="ew")
+        # Project.history_limit (antes solo editable a mano en el archivo del proyecto).
+        ctk.CTkLabel(note_row, text=S.VERSIONES_POR_CAPITULO).grid(row=0, column=2, padx=(12, 6))
+        self.history_limit_menu = ctk.CTkOptionMenu(note_row, values=list(HISTORY_LIMIT_CHOICES), width=80)
+        self.history_limit_menu.grid(row=0, column=3)
         self.plot_box = LimitedTextBox(
             tab, S.STORY_PLOT_IDEA_DE_LA, MAX_PLOT_WORDS, height=460,
             on_expand=lambda: self._expand_field(self.plot_box, "plot", S.TAB_PLOT, MAX_PLOT_WORDS),
@@ -67,7 +75,7 @@ class StoryTabsMixin:
         apply_tab_order(
             tab,
             self.story_title_entry, self.author_entry, self.heading_menu, self.project_note_entry,
-            self.plot_box.focus_order_widgets(),
+            self.history_limit_menu, self.plot_box.focus_order_widgets(),
         )
         self._load_project_meta_into_ui()
 
@@ -77,6 +85,18 @@ class StoryTabsMixin:
         self._set_entry(self.project_note_entry, self.project.author_note)
         heading = self.project.chapter_heading if self.project.chapter_heading in CHAPTER_HEADING_LABELS else "Chapter"
         self.heading_menu.set(CHAPTER_HEADING_LABELS[heading])
+        # Un valor del archivo que no esta en la lista (cualquiera entre 1 y 100) se agrega a ella.
+        limit = str(self.project.history_limit)
+        if limit not in HISTORY_LIMIT_CHOICES:
+            self.history_limit_menu.configure(values=sorted({*HISTORY_LIMIT_CHOICES, limit}, key=int))
+        self.history_limit_menu.set(limit)
+
+    def _history_limit_from_ui(self) -> int:
+        lo, hi = HISTORY_LIMIT_RANGE
+        try:
+            return max(lo, min(int(self.history_limit_menu.get()), hi))
+        except ValueError:
+            return self.project.history_limit
 
     def _build_characters_tab(self) -> None:
         self.tab_characters.grid_columnconfigure(0, weight=1)

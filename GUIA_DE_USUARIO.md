@@ -410,7 +410,9 @@ Cada capítulo guarda automáticamente su versión previa cuando:
 - **Restauras** otra versión.
 
 Se guardan hasta **20 versiones** por capítulo (la más vieja se descarta
-al llegar al límite). Cada versión indica de dónde viene (generar,
+al llegar al límite); **"Versiones guardadas por capítulo"**, en la pestaña
+Plot, cambia ese número para el proyecto (5, 10, 20, 50 o 100; rige desde el
+próximo cambio de cada capítulo). Cada versión indica de dónde viene (generar,
 continuar, refinar con qué instrucción, reescribir selección, reemplazar,
 restaurar...) y la fecha, y "Comparar con la actual" muestra las
 diferencias.
@@ -555,7 +557,7 @@ pregunta si quieres guardar — con opción de cancelar el cierre.
 | Capítulos por historia | 10 |
 | Palabras por capítulo | 10,000 |
 | Esquema por capítulo | 800 palabras |
-| Versiones anteriores por capítulo | 20 |
+| Versiones anteriores por capítulo | 20 (configurable: 5 a 100) |
 | Nota del autor | 150 palabras |
 | Entradas del Lorebook | 200 (de hasta 500 palabras cada una) |
 
@@ -617,7 +619,8 @@ pestaña Modelo una vez instalada la versión de `llama-cpp-python` con
 soporte CUDA.
 
 **Perdí una versión anterior de un capítulo**
-Se guardan las últimas 20 versiones por capítulo; a partir de ahí cada
+Se guardan las últimas 20 versiones por capítulo (o las que elijas en
+"Versiones guardadas por capítulo", pestaña Plot); a partir de ahí cada
 cambio nuevo descarta la más vieja.
 
 **¿Por qué el modelo se niega a escribir cierto contenido?**
