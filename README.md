@@ -444,7 +444,7 @@ python -m pytest -q
 ruff check app tests
 ```
 
-Resultado el 2026-10-07: **340 passed, 2 skipped, 21 subtests** (los 2
+Resultado el 2026-10-07: **346 passed, 2 skipped, 21 subtests** (los 2
 saltados son la prueba opcional con un modelo real); corre la suite tú
 mismo antes de confiar en este número. `scripts\run_coverage.ps1` genera el
 reporte de cobertura (usa `.venv`). Las pruebas
