@@ -27,6 +27,8 @@ import sys
 from dataclasses import dataclass, field
 from typing import BinaryIO, Dict, List, Optional, Tuple
 
+from . import strings_es as S
+
 GGUF_MAGIC = b"GGUF"
 
 # Tipos de valor de GGUF (ver la especificacion de ggml).
@@ -56,7 +58,7 @@ class GGUFError(ValueError):
 def _read_exact(f: BinaryIO, n: int) -> bytes:
     data = f.read(n)
     if len(data) != n:
-        raise GGUFError("El archivo GGUF esta truncado (termino antes de lo esperado).")
+        raise GGUFError(S.GGUF_TRUNCADO)
     return data
 
 
@@ -68,7 +70,7 @@ def _read_scalar(f: BinaryIO, value_type: int):
 def _read_string(f: BinaryIO) -> str:
     (length,) = struct.unpack("<Q", _read_exact(f, 8))
     if length > 64 * 1024 * 1024:
-        raise GGUFError("Cadena GGUF de tamaño inválido.")
+        raise GGUFError(S.GGUF_CADENA_INVALIDA)
     return _read_exact(f, length).decode("utf-8", errors="replace")
 
 
@@ -98,21 +100,21 @@ def _read_value(f: BinaryIO, value_type: int, keep_array_items: int):
             for _ in range(count):
                 _read_value(f, item_type, 0)
         return {"array_length": count}
-    raise GGUFError(f"Tipo de valor GGUF desconocido: {value_type}")
+    raise GGUFError(S.GGUF_TIPO_DESCONOCIDO.format(value_type=value_type))
 
 
 def read_gguf_metadata(path: str, keep_array_items: int = 16) -> Dict[str, object]:
     """Pares clave/valor de la cabecera de un GGUF. Lanza GGUFError si no lo es."""
     with open(path, "rb") as f:
         if f.read(4) != GGUF_MAGIC:
-            raise GGUFError("El archivo no es un modelo GGUF (firma invalida).")
+            raise GGUFError(S.GGUF_FIRMA_INVALIDA)
         (version,) = struct.unpack("<I", _read_exact(f, 4))
         if version == 1:
             _tensors, kv_count = struct.unpack("<II", _read_exact(f, 8))
         else:
             _tensors, kv_count = struct.unpack("<QQ", _read_exact(f, 16))
         if kv_count > 100_000:
-            raise GGUFError("Cabecera GGUF invalida.")
+            raise GGUFError(S.GGUF_CABECERA_INVALIDA)
         metadata: Dict[str, object] = {"gguf.version": version}
         for _ in range(kv_count):
             key = _read_string(f)

@@ -598,3 +598,39 @@ PALABRAS_EN_CAPITULOS = "{words:,} palabras en {chapters} capítulos"
 
 # ---- app/task_runner.py ----
 EL_CONTEXTO_ES_DEMASIADO_GRANDE = "El contexto es demasiado grande para este modelo:\n\n{exc}"
+
+
+# --- Mensajes del backend (engine, project, gguf, export, prompts) que llegan a la UI ---
+ARCHIVO_NO_ES_PROYECTO = 'El archivo no contiene un proyecto de StoryForge (se esperaba un objeto JSON).'
+CACHE_KV_DESCONOCIDA = 'Tipo de caché KV desconocido: {kv_cache_type}'
+CACHE_KV_REQUIERE_FLASH_ATTENTION = 'La caché KV {kv_cache_type} requiere flash attention: actívala o usa f16.'
+CAPITULO_DEMASIADO_LARGO = 'Capítulo {number}: el contenido tiene {words:,} palabras, más que el máximo recomendado ({maximum:,}).'
+CAPITULO_INVALIDO = 'capítulo inválido'
+CAPITULO_NO_CABE_PARA_REFINAR = 'El capítulo no cabe completo en la ventana de contexto del modelo ({n_ctx:,} tokens) y ni siquiera hay espacio para refinarlo por partes. Carga el modelo con un n_ctx mayor en la pestaña Modelo.'
+CONTEXTO_NO_CABE = 'El contexto necesario ({prompt_tokens:,} tokens) no cabe en la ventana de contexto del modelo ({n_ctx:,} tokens) junto con el espacio reservado para la respuesta ({max_tokens:,} tokens).'
+CONTEXTO_NO_CABE_NI_REDUCIDO = 'Incluso reduciendo al mínimo el contexto (plot, personajes, setting y resumen previo), el prompt sigue sin caber en la ventana de contexto de este modelo. Prueba con un plot, personajes o setting más cortos, un objetivo de palabras menor, o carga el modelo con un n_ctx mayor si tu hardware lo permite.'
+DEBE_SER_ENTERO_POSITIVO = '{name} debe ser un entero mayor a 0.'
+ENTRADA_LOREBOOK_INVALIDA = 'entrada de lorebook inválida'
+ESQUEMA_FORMATO_INESPERADO = 'La respuesta del modelo no tiene el formato de esquema esperado ("Chapter 1: <título>" seguido de sus eventos).'
+FALTA_LLAMA_CPP = "El paquete 'llama-cpp-python' no está instalado. Instala las dependencias con: pip install -r requirements.txt"
+FALTA_PYTHON_DOCX = "El paquete 'python-docx' no está instalado. Instala las dependencias con: pip install -r requirements.txt"
+GGUF_CABECERA_INVALIDA = 'Cabecera GGUF inválida.'
+GGUF_CADENA_INVALIDA = 'Cadena GGUF de tamaño inválido.'
+GGUF_FIRMA_INVALIDA = 'El archivo no es un modelo GGUF (firma inválida).'
+GGUF_TIPO_DESCONOCIDO = 'Tipo de valor GGUF desconocido: {value_type}'
+GGUF_TRUNCADO = 'El archivo GGUF está truncado (terminó antes de lo esperado).'
+LLAMA_CPP_SIN_LIBRERIA = 'llama-cpp-python está instalado, pero no se pudo cargar su librería nativa (llama.dll o alguna de las DLLs que necesita). Si instalaste la versión con CUDA, instala también las DLLs de runtime (pip install nvidia-cuda-runtime nvidia-cublas, ver README > Rendimiento / GPU) o vuelve a la versión solo-CPU.\n\nDetalle: {exc}'
+MAXIMO_DE_CAPITULOS = 'No se pueden tener más de {maximum} capítulos.'
+MAXIMO_DE_ENTRADAS_LOREBOOK = 'No se pueden tener más de {maximum} entradas de lorebook.'
+MODELO_FALTAN_PARTES = 'Este modelo está partido en varios archivos y faltan las partes {parts} en la carpeta. Descarga todas las partes y ponlas juntas; se carga la parte 00001.'
+MODELO_NO_ENCONTRADO = 'No se encontró el modelo en: {model_path}'
+NO_HAY_TEXTO_SELECCIONADO = 'No hay texto seleccionado.'
+NO_SE_PUDO_GENERAR_SECCION = 'No fue posible generar esta sección del capítulo: {exc}'
+N_CTX_NEGATIVO = 'n_ctx no puede ser negativo (0 = el contexto entrenado del modelo).'
+REFINAR_PARTE_VACIA = 'El modelo devolvió un texto vacío al refinar la parte {part} de {total} del capítulo. No se modificó el capítulo; inténtalo de nuevo.'
+NO_HAY_MODELO_CARGADO = 'No hay un modelo cargado. Carga un archivo .gguf primero.'
+OPERACION_DETENIDA_POR_EL_USUARIO = 'Operación detenida por el usuario.'
+# Motivo por el que una entrada del Lorebook entro al prompt (prompts.LoreMatch.reason_es).
+LORE_MOTIVO_SIEMPRE = 'siempre incluida'
+LORE_MOTIVO_VIA = '"{keyword}" (mencionada en la entrada "{via}")'
+LORE_MOTIVO_KEYWORD = '"{keyword}"'

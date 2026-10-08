@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
+from . import strings_es as S
 from .project import Chapter, LoreEntry, Project
 
 
@@ -317,10 +318,10 @@ class LoreMatch:
 
     def reason_es(self) -> str:
         if self.entry.constant and not self.keyword:
-            return "siempre incluida"
+            return S.LORE_MOTIVO_SIEMPRE
         if self.via:
-            return f"\"{self.keyword}\" (mencionada en la entrada \"{self.via}\")"
-        return f"\"{self.keyword}\""
+            return S.LORE_MOTIVO_VIA.format(keyword=self.keyword, via=self.via)
+        return S.LORE_MOTIVO_KEYWORD.format(keyword=self.keyword)
 
 
 def _last_keyword_hit(entry: LoreEntry, text: str) -> Tuple[str, int]:
@@ -802,8 +803,7 @@ def parse_outline_response(text: str, expected_chapters: int) -> List[Tuple[str,
         if not text.strip():
             return []
         raise OutlineParseError(
-            "La respuesta del modelo no tiene el formato de esquema esperado "
-            "(\"Chapter 1: <titulo>\" seguido de sus eventos).",
+            S.ESQUEMA_FORMATO_INESPERADO,
             raw_text=text,
         )
     return results[:expected_chapters]

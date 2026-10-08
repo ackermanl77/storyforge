@@ -20,6 +20,9 @@ APP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 UI_MODULES = sorted(
     ["gui.py", "task_runner.py"] + [os.path.basename(p) for p in glob.glob(os.path.join(APP_DIR, "ui_*.py"))]
 )
+# Backend modules whose user-facing messages (raised errors, load warnings, the
+# lorebook match reason) also come from app/strings_es.py.
+BACKEND_MODULES = ["engine.py", "export.py", "gguf.py", "project.py", "prompts.py"]
 # Checked for accents/tú (backend messages that can reach the user too).
 UI_FILES = UI_MODULES + ["strings_es.py", "project.py", "gguf.py", "engine.py"]
 LOG_METHODS = {"debug", "info", "warning", "error", "exception", "critical"}
@@ -141,10 +144,30 @@ class TestSpanishStrings(unittest.TestCase):
         ]
         self.assertEqual(problems, [], "move these texts to app/strings_es.py")
 
+    def test_backend_messages_come_from_strings_es(self):
+        """The first argument of every `raise X(...)` and load-warning append in the
+        backend is an S.* text, not a literal (a technical value like a stray
+        f-string with only an expression would still be caught here)."""
+        problems = []
+        for name in BACKEND_MODULES:
+            with open(os.path.join(APP_DIR, name), encoding="utf-8") as handle:
+                tree = ast.parse(handle.read())
+            for node in ast.walk(tree):
+                message = None
+                if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call) and node.exc.args:
+                    message = node.exc.args[0]
+                elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "append"
+                      and "warning" in ast.unparse(node.func.value).lower() and node.args):
+                    message = node.args[0]
+                if isinstance(message, (ast.Constant, ast.JoinedStr)) and not (
+                        isinstance(message, ast.Constant) and not isinstance(message.value, str)):
+                    problems.append(f"{name}:{message.lineno}: {ast.unparse(message)[:70]}")
+        self.assertEqual(problems, [], "move these messages to app/strings_es.py")
+
     def test_every_referenced_text_exists_and_is_formatted_with_its_fields(self):
         problems = []
         formatter = string.Formatter()
-        for name in UI_MODULES:
+        for name in UI_MODULES + BACKEND_MODULES:
             for line, attr, call in _strings_es_references(name):
                 value = getattr(strings_es, attr, None)
                 if value is None:

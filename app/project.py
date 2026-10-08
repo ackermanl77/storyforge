@@ -75,6 +75,11 @@ CHAPTER_PURPOSES = [
     "Epilogo",
 ]
 
+# Aqui y no arriba: strings_es importa WRITING_STYLES/CHAPTER_PURPOSES de este
+# modulo, asi que tienen que existir antes (funciona en cualquier orden de import:
+# los mensajes S.* se leen recien al usarlos).
+from . import strings_es as S  # noqa: E402
+
 DEFAULT_PROJECT_NAME = "Historia sin título"
 CHAPTER_HEADING_CHOICES = ["Chapter", "Capítulo", ""]
 
@@ -264,7 +269,7 @@ class Chapter:
     @staticmethod
     def from_dict(d: dict, where: str = "") -> "Chapter":
         if not isinstance(d, dict):
-            raise ValueError("capítulo inválido")
+            raise ValueError(S.CAPITULO_INVALIDO)
         chapter = Chapter(
             title=_str_field(d, "title", "", where),
             target_words=max(1, min(_int_field(d, "target_words", 2000, where), MAX_WORDS_PER_CHAPTER)),
@@ -344,7 +349,7 @@ class LoreEntry:
     @staticmethod
     def from_dict(d: dict, where: str = "") -> "LoreEntry":
         if not isinstance(d, dict):
-            raise ValueError("entrada de lorebook invalida")
+            raise ValueError(S.ENTRADA_LOREBOOK_INVALIDA)
         return LoreEntry(
             name=_str_field(d, "name", "", where),
             keywords=_str_field(d, "keywords", "", where),
@@ -480,8 +485,7 @@ class Project:
         for i, ch in enumerate(self.chapters, start=1):
             if ch.word_count() > MAX_WORDS_PER_CHAPTER:
                 warnings.append(
-                    f"Capítulo {i}: el contenido tiene {ch.word_count():,} palabras, "
-                    f"más que el máximo recomendado ({MAX_WORDS_PER_CHAPTER:,})."
+                    S.CAPITULO_DEMASIADO_LARGO.format(number=i, words=ch.word_count(), maximum=MAX_WORDS_PER_CHAPTER)
                 )
         return warnings
 
@@ -490,7 +494,7 @@ class Project:
 
     def add_chapter(self, title: str = "", target_words: int = 2000, outline: str = "") -> Chapter:
         if not self.can_add_chapter():
-            raise ValueError(f"No se pueden tener más de {MAX_CHAPTERS} capítulos.")
+            raise ValueError(S.MAXIMO_DE_CAPITULOS.format(maximum=MAX_CHAPTERS))
         target_words = min(int(target_words), MAX_WORDS_PER_CHAPTER)
         chapter = Chapter(
             title=title or f"Capítulo {len(self.chapters) + 1}",
@@ -509,7 +513,7 @@ class Project:
 
     def add_lore_entry(self, name: str = "", keywords: str = "", text: str = "") -> LoreEntry:
         if not self.can_add_lore_entry():
-            raise ValueError(f"No se pueden tener más de {MAX_LORE_ENTRIES} entradas de lorebook.")
+            raise ValueError(S.MAXIMO_DE_ENTRADAS_LOREBOOK.format(maximum=MAX_LORE_ENTRIES))
         entry = LoreEntry(name=name, keywords=keywords, text=text)
         self.lore_entries.append(entry)
         return entry
@@ -549,7 +553,7 @@ class Project:
     @staticmethod
     def from_dict(data: Any) -> "Project":
         if not isinstance(data, dict):
-            raise ValueError("El archivo no contiene un proyecto de StoryForge (se esperaba un objeto JSON).")
+            raise ValueError(S.ARCHIVO_NO_ES_PROYECTO)
         data = migrate(data)
         name = _str_field(data, "name", DEFAULT_PROJECT_NAME).strip() or DEFAULT_PROJECT_NAME
         proj = Project(

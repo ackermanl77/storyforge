@@ -17,6 +17,7 @@ from collections import OrderedDict
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple, Union
 
+from . import strings_es as S
 from .chat_format import (
     CHAT_FORMAT_AUTO,
     ChatFormatter,
@@ -372,18 +373,18 @@ class LocalStoryEngine:
         cuantizada sin ella).
         """
         if kv_cache_type not in KV_CACHE_TYPES:
-            raise ValueError(f"Tipo de cache KV desconocido: {kv_cache_type}")
+            raise ValueError(S.CACHE_KV_DESCONOCIDA.format(kv_cache_type=kv_cache_type))
         if flash_attn is None:
             flash_attn = n_gpu_layers != 0
         if kv_cache_type != "f16" and not flash_attn:
             raise ValueError(
-                f"La cache KV {kv_cache_type} requiere flash attention: activala o usa f16."
+                S.CACHE_KV_REQUIERE_FLASH_ATTENTION.format(kv_cache_type=kv_cache_type)
             )
         for name, value in (("n_batch", n_batch), ("n_ubatch", n_ubatch)):
             if value is not None and value <= 0:
-                raise ValueError(f"{name} debe ser un entero mayor a 0.")
+                raise ValueError(S.DEBE_SER_ENTERO_POSITIVO.format(name=name))
         if n_ctx < 0:
-            raise ValueError("n_ctx no puede ser negativo (0 = el contexto entrenado del modelo).")
+            raise ValueError(S.N_CTX_NEGATIVO)
         if chat_format is not None:
             self.set_chat_format(chat_format)
         try:
@@ -391,8 +392,7 @@ class LocalStoryEngine:
             from llama_cpp import Llama
         except ImportError as exc:  # pragma: no cover - environment dependent
             raise RuntimeError(
-                "El paquete 'llama-cpp-python' no está instalado. "
-                "Instala las dependencias con: pip install -r requirements.txt"
+                S.FALTA_LLAMA_CPP
             ) from exc
         except Exception as exc:
             # Un build de llama-cpp-python con CUDA cuyas DLLs de runtime
@@ -401,21 +401,15 @@ class LocalStoryEngine:
             # desde el propio import -- antes eso llegaba al usuario como un
             # mensaje crudo en ingles sin pista de como resolverlo.
             raise RuntimeError(
-                "llama-cpp-python está instalado, pero no se pudo cargar su librería nativa "
-                "(llama.dll o alguna de las DLLs que necesita). Si instalaste la versión con "
-                "CUDA, instala también las DLLs de runtime (pip install nvidia-cuda-runtime "
-                "nvidia-cublas, ver README > Rendimiento / GPU) o vuelve a la versión "
-                f"solo-CPU.\n\nDetalle: {exc}"
+                S.LLAMA_CPP_SIN_LIBRERIA.format(exc=exc)
             ) from exc
 
         if not os.path.isfile(model_path):
-            raise FileNotFoundError(f"No se encontró el modelo en: {model_path}")
+            raise FileNotFoundError(S.MODELO_NO_ENCONTRADO.format(model_path=model_path))
         missing = missing_shards(model_path)
         if missing:
             raise RuntimeError(
-                "Este modelo está partido en varios archivos y faltan las partes "
-                f"{', '.join(map(str, missing))} en la carpeta. Descarga todas las partes "
-                "y ponlas juntas; se carga la parte 00001."
+                S.MODELO_FALTAN_PARTES.format(parts=', '.join(map(str, missing)))
             )
         info = model_info(model_path)
         if n_ctx == 0 and not info.trained_context:
@@ -648,7 +642,7 @@ class LocalStoryEngine:
         parcial de un resumen/refinado/esquema no sirve)."""
         result = self._complete_ex(prompt, max_tokens, stop, on_token, cancel_check, task=task)
         if result.finish_reason == "cancelled":
-            raise OperationCancelled("Operación detenida por el usuario.")
+            raise OperationCancelled(S.OPERACION_DETENIDA_POR_EL_USUARIO)
         return result.text.strip()
 
     def _is_cancelled(self, cancel_check: Optional[Callable[[], bool]]) -> bool:
@@ -683,7 +677,7 @@ class LocalStoryEngine:
         "Detener" corta a mitad de la respuesta.
         """
         if self._llm is None:
-            raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
+            raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
         self._ensure_prompt_cache()
 
         text_prompt = self.render_prompt(prompt)
@@ -691,9 +685,7 @@ class LocalStoryEngine:
         available = self._available_context(max_tokens)
         if prompt_tokens > available:
             raise ContextOverflowError(
-                f"El contexto necesario ({prompt_tokens:,} tokens) no cabe en la ventana de "
-                f"contexto del modelo ({self._n_ctx:,} tokens) junto con el espacio reservado "
-                f"para la respuesta ({max_tokens:,} tokens)."
+                S.CONTEXTO_NO_CABE.format(prompt_tokens=prompt_tokens, n_ctx=self._n_ctx, max_tokens=max_tokens)
             )
         if self._is_cancelled(cancel_check):
             self.last_finish_reason = "cancelled"
@@ -790,7 +782,7 @@ class LocalStoryEngine:
             prompt_for_budget, max_tokens, on_token, cancel_check, stop, task=task,
         )
         if result.finish_reason == "cancelled":
-            raise OperationCancelled("Operación detenida por el usuario.")
+            raise OperationCancelled(S.OPERACION_DETENIDA_POR_EL_USUARIO)
         return result.text.strip()
 
     def _complete_with_shrinking_budget_ex(
@@ -820,11 +812,7 @@ class LocalStoryEngine:
                 last_error = exc
                 continue
         raise ContextOverflowError(
-            "Incluso reduciendo al mínimo el contexto (plot, personajes, setting y "
-            "resumen previo), el prompt sigue sin caber en la ventana de contexto de "
-            "este modelo. Prueba con un plot, personajes o setting más cortos, un "
-            "objetivo de palabras menor, o carga el modelo con un n_ctx mayor si tu "
-            "hardware lo permite."
+            S.CONTEXTO_NO_CABE_NI_REDUCIDO
         ) from last_error
 
     def generate_outline(
@@ -842,7 +830,7 @@ class LocalStoryEngine:
         los pedidos; ver complete_outline()).
         """
         if self._llm is None:
-            raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
+            raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
 
         self.begin_operation("Esquema")
         num_chapters = max(1, min(int(num_chapters), MAX_CHAPTERS))
@@ -880,7 +868,7 @@ class LocalStoryEngine:
         capitulos nuevos (a lo sumo num_chapters - len(existing)).
         """
         if self._llm is None:
-            raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
+            raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
         num_chapters = max(1, min(int(num_chapters), MAX_CHAPTERS))
         missing = num_chapters - len(existing)
         if missing <= 0:
@@ -1090,7 +1078,7 @@ class LocalStoryEngine:
                 )
             except ContextOverflowError as exc:
                 raise ContextOverflowError(
-                    f"No fue posible generar esta sección del capítulo: {exc}"
+                    S.NO_SE_PUDO_GENERAR_SECCION.format(exc=exc)
                 ) from exc
 
             last_finish = result.finish_reason
@@ -1150,7 +1138,7 @@ class LocalStoryEngine:
         cubre el mismo objetivo (que cualquier capitulo quepa) al final.
         """
         if self._llm is None:
-            raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
+            raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
         self.begin_operation("Resumen")
         try:
             return self._summarize(text, max_words, cancel_check, progress_callback)
@@ -1215,7 +1203,7 @@ class LocalStoryEngine:
         cabria en la ventana de contexto. Lanza OperationCancelled si se detiene.
         """
         if self._llm is None:
-            raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
+            raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
 
         self.begin_operation("Expandir con IA")
         try:
@@ -1254,7 +1242,7 @@ class LocalStoryEngine:
         nada, asi que detener (OperationCancelled) deja el original intacto.
         """
         if self._llm is None:
-            raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
+            raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
         self.begin_operation(f"Refinar capítulo {chapter_index + 1}")
         try:
             return self._refine_chapter(project, chapter_index, instruction, cancel_check, progress_callback, on_token)
@@ -1288,8 +1276,7 @@ class LocalStoryEngine:
             if not out.strip():
                 # Unir las demas partes sin esta perderia texto del capitulo.
                 raise RuntimeError(
-                    f"El modelo devolvió un texto vacío al refinar la parte {i} de {len(parts)} "
-                    "del capítulo. No se modificó el capítulo; inténtalo de nuevo."
+                    S.REFINAR_PARTE_VACIA.format(part=i, total=len(parts))
                 )
             revised.append(out.strip())
         return "\n\n".join(revised)
@@ -1308,9 +1295,9 @@ class LocalStoryEngine:
         reemplazar la seleccion.
         """
         if self._llm is None:
-            raise ModelNotLoadedError("No hay un modelo cargado. Carga un archivo .gguf primero.")
+            raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
         if not selection.strip():
-            raise ValueError("No hay texto seleccionado.")
+            raise ValueError(S.NO_HAY_TEXTO_SELECCIONADO)
         self.begin_operation("Reescribir selección")
         try:
             words = count_words(selection)
@@ -1340,9 +1327,7 @@ class LocalStoryEngine:
 
         if not fits(" ".join(["word"] * 20)):
             raise ContextOverflowError(
-                "El capítulo no cabe completo en la ventana de contexto del modelo "
-                f"({self._n_ctx:,} tokens) y ni siquiera hay espacio para refinarlo por partes. "
-                "Carga el modelo con un n_ctx mayor en la pestaña Modelo."
+                S.CAPITULO_NO_CABE_PARA_REFINAR.format(n_ctx=self._n_ctx)
             )
         return self._split_text_to_fit(content, fits)
 

@@ -27,6 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Tuple
 
+from . import strings_es as S
 from .fileutil import atomic_write_bytes, atomic_write_text, atomic_write_with
 from .project import Chapter, Project
 
@@ -163,8 +164,7 @@ def export_docx(project: Project, path: str | Path) -> None:
         from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
     except ImportError as exc:
         raise RuntimeError(
-            "El paquete 'python-docx' no está instalado. "
-            "Instala las dependencias con: pip install -r requirements.txt"
+            S.FALTA_PYTHON_DOCX
         ) from exc
 
     doc = Document()
