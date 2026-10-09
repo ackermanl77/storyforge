@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>StoryForge en el celular</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    body { padding-bottom: 24px; }
+    main { max-width: 640px; }
+    #qr { display: flex; justify-content: center; background: #fff; padding: 16px; border-radius: 12px; margin: 12px auto; width: max-content; }
+    #url { word-break: break-all; font-family: Consolas, monospace; background: var(--bg); padding: 10px; border-radius: 8px; }
+    ol { padding-left: 20px; }
+    li { margin: 6px 0; }
+  </style>
+</head>
+<body>
+  <header class="top"><div class="brand">StoryForge en el celular</div></header>
+  <main>
+    <div class="card">
+      <h2>Escanea este código con el celular</h2>
+      <div id="qr"></div>
+      <p id="qr-fallback" class="muted small hidden">No se pudo dibujar el código QR (hace falta internet en la PC para cargarlo). Escribe el enlace de abajo en el navegador del celular.</p>
+      <p class="muted small">O abre este enlace en el celular:</p>
+      <p id="url"></p>
+      <button id="copy" class="btn small">Copiar enlace</button>
+    </div>
+    <div class="card">
+      <h2>Cómo usarlo</h2>
+      <ol>
+        <li>El celular tiene que estar conectado a la <strong>misma red Wi-Fi</strong> que esta PC.</li>
+        <li>Si Windows pregunta si StoryForge puede usar la red, permítelo en <strong>redes privadas</strong>.</li>
+        <li>En el celular, usa "Agregar a la pantalla de inicio" del navegador para abrirlo como una app.</li>
+        <li>El enlace lleva una clave de acceso: no lo compartas. Sirve también después de reiniciar el servidor.</li>
+        <li>Deja esta PC encendida mientras escribes: el modelo corre aquí.</li>
+      </ol>
+      <p id="folder" class="muted small"></p>
+      <p class="muted small">No abras el mismo proyecto a la vez en la ventana de StoryForge y en el celular: cada uno guardaría encima de los cambios del otro.</p>
+    </div>
+    <div class="card">
+      <button id="stop" class="btn danger block">Detener el servidor</button>
+    </div>
+  </main>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script>
+    "use strict";
+    (async function () {
+      const info = await (await fetch("/api/conexion")).json();
+      document.getElementById("url").textContent = info.url;
+      document.getElementById("folder").textContent = "Proyectos del servidor: " + info.carpeta;
+      if (window.QRCode) {
+        new QRCode(document.getElementById("qr"), { text: info.url, width: 240, height: 240, correctLevel: QRCode.CorrectLevel.M });
+      } else {
+        document.getElementById("qr").classList.add("hidden");
+        document.getElementById("qr-fallback").classList.remove("hidden");
+      }
+      document.getElementById("copy").addEventListener("click", () => navigator.clipboard.writeText(info.url));
+      document.getElementById("stop").addEventListener("click", async () => {
+        if (!confirm("¿Detener el servidor? El celular dejará de poder usar StoryForge.")) return;
+        await fetch("/api/apagar", { method: "POST" });
+        document.querySelector("main").innerHTML = '<div class="card">Servidor detenido. Ya puedes cerrar esta página.</div>';
+      });
+    })();
+  </script>
+</body>
+</html>

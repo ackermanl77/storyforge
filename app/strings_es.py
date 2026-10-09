@@ -63,6 +63,7 @@ HISTORY_SOURCE_LABELS: Dict[str, str] = {
     "rewrite": "reescribir selección",
     "replace": "reemplazar texto",
     "retry": "reintentar",
+    "phone-edit": "editar desde el celular",
 }
 
 assert set(STYLE_LABELS) == set(WRITING_STYLES)
@@ -634,3 +635,41 @@ OPERACION_DETENIDA_POR_EL_USUARIO = 'Operación detenida por el usuario.'
 LORE_MOTIVO_SIEMPRE = 'siempre incluida'
 LORE_MOTIVO_VIA = '"{keyword}" (mencionada en la entrada "{via}")'
 LORE_MOTIVO_KEYWORD = '"{keyword}"'
+
+
+# ---- app/web_server.py (StoryForge en el celular) ----
+WEB_TAREA_CARGAR_MODELO = "Cargando {name}"
+WEB_TAREA_ESQUEMA = "Esquema"
+WEB_TAREA_CAPITULO = "Capítulo {number}"
+WEB_TAREA_RESUMEN = "Resumen del capítulo {number}"
+WEB_MODELO_CARGADO = "Modelo cargado: {name} (contexto {n_ctx:,} tokens)."
+WEB_ESQUEMA_LISTO = "Esquema generado: {have} de {wanted} capítulos."
+WEB_TAREA_DETENIDA = "Detenido: no se cambió nada."
+WEB_RESUMEN_LISTO = "Resumen actualizado."
+WEB_HAY_UNA_TAREA = "Ya hay una tarea en curso ({label}). Espera a que termine o detenla."
+WEB_SIN_PROYECTO = "No hay un proyecto abierto. Abre o crea uno en Proyectos."
+WEB_PROYECTO_NO_ENCONTRADO = "No se encontró el proyecto {name}."
+WEB_PROYECTO_NO_SE_PUDO_ABRIR = "No se pudo abrir el proyecto {name}: {exc}"
+WEB_NOMBRE_VACIO = "Escribe un nombre para el proyecto."
+WEB_MODELO_NO_DISPONIBLE = "Ese modelo no está en la carpeta de modelos."
+WEB_CAPITULO_NO_EXISTE = "No existe el capítulo {number}."
+WEB_CAMPO_INVALIDO = "Valor inválido para {name}."
+WEB_FORMATO_DESCONOCIDO = "Formato de exportación desconocido: {fmt}"
+WEB_SOLICITUD_INVALIDA = "Solicitud inválida."
+WEB_NO_AUTORIZADO = "Acceso no autorizado. Abre de nuevo el enlace que muestra StoryForge en la PC."
+WEB_SOLO_DESDE_LA_PC = "Esta página solo se puede abrir desde la PC donde corre StoryForge."
+WEB_NO_ENCONTRADO = "No encontrado."
+WEB_PUERTO_OCUPADO = "No se pudo usar el puerto {port}: {exc}. ¿Ya hay otro StoryForge en modo servidor? Prueba con --puerto."
+WEB_SERVIDOR_LISTO = (
+    "StoryForge en el celular está listo.\n"
+    "  En la PC:      {local_url}\n"
+    "  En el celular: {phone_url}\n"
+    "  (el celular tiene que estar en la misma red Wi-Fi que la PC)\n"
+    "  Proyectos en:  {projects_dir}\n"
+    "Ctrl+C para detener el servidor."
+)
+WEB_AYUDA_SERVIDOR = "Usa StoryForge desde el celular: inicia un servidor web en la red local en vez de la ventana."
+WEB_AYUDA_PUERTO = "Puerto del servidor (por defecto {port})."
+WEB_AYUDA_CARPETA = "Carpeta de proyectos del servidor (se recuerda para la próxima vez)."
+WEB_AYUDA_MODELOS = "Carpeta extra donde buscar modelos .gguf (se recuerda para la próxima vez)."
+WEB_AYUDA_SIN_NAVEGADOR = "No abrir la página de conexión en el navegador de la PC."

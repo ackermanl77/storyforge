@@ -144,6 +144,9 @@ with open(VERSION_FILE, "w", encoding="utf-8") as _f:
 if os.path.isdir("nltk_data"):
     datas.append(("nltk_data", "nltk_data"))
 
+# La pagina de "StoryForge en el celular" (app/web_server.py sirve app/web/).
+datas.append(("app/web", "app/web"))
+
 # Icono de la ventana (app/gui.py::window_icon_path); el del .exe va en EXE(icon=).
 datas.append(("assets/icon.ico", "assets"))
 

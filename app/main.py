@@ -42,11 +42,35 @@ def _log_uncaught_exception(exc_type, exc, tb) -> None:
     logging.getLogger("storyforge").critical("Error no capturado", exc_info=(exc_type, exc, tb))
 
 
-def main() -> None:
+def _parse_args(argv):
+    import argparse
+
+    from . import strings_es as S
+    from .web_server import DEFAULT_PORT
+
+    parser = argparse.ArgumentParser(prog="StoryForge")
+    parser.add_argument("--servidor", action="store_true", help=S.WEB_AYUDA_SERVIDOR)
+    parser.add_argument("--puerto", type=int, default=DEFAULT_PORT, help=S.WEB_AYUDA_PUERTO.format(port=DEFAULT_PORT))
+    parser.add_argument("--carpeta", default=None, help=S.WEB_AYUDA_CARPETA)
+    parser.add_argument("--modelos", default=None, help=S.WEB_AYUDA_MODELOS)
+    parser.add_argument("--sin-navegador", action="store_true", help=S.WEB_AYUDA_SIN_NAVEGADOR)
+    # parse_known_args: un argumento ajeno (p.ej. un archivo soltado sobre el .exe) no impide abrir la app.
+    return parser.parse_known_args(argv)[0]
+
+
+def main(argv=None) -> int:
     _configure_logging()
     sys.excepthook = _log_uncaught_exception
+    args = _parse_args(sys.argv[1:] if argv is None else argv)
+    if args.servidor:
+        # StoryForge en el celular (app/web_server.py): sin ventana.
+        from .web_server import serve
+
+        return serve(port=args.puerto, projects_dir=args.carpeta, open_browser=not args.sin_navegador,
+                     models_dir=args.modelos)
     from .gui import run
     run()
+    return 0
 
 
 if __name__ == "__main__":

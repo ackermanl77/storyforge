@@ -67,6 +67,7 @@ Source: "..\models\README.txt"; DestDir: "{app}\models"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
+Name: "{autoprograms}\{#AppName} en el celular"; Filename: "{app}\{#AppExe}"; Parameters: "--servidor"; Comment: "Usa StoryForge desde el navegador del celular (misma red Wi-Fi)"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 
 [Run]

@@ -1,0 +1,14 @@
+{
+  "name": "StoryForge",
+  "short_name": "StoryForge",
+  "description": "Escribe historias con el modelo de IA de tu PC.",
+  "lang": "es",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#1a1d23",
+  "theme_color": "#1a1d23",
+  "icons": [
+    {"src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any"}
+  ]
+}

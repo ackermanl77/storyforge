@@ -56,6 +56,10 @@ correspondiente mas abajo.
   una vez descargados sus datos).
 - Guardar/abrir proyecto (.storyforge.json) y exportar la historia a Word
   (.docx, con portada y un capítulo por página), EPUB, Markdown o texto plano.
+- **StoryForge en el celular**: `StoryForge.exe --servidor` (o el acceso
+  directo "StoryForge Local en el celular") sirve una página web en tu red
+  local para escribir desde el navegador del celular mientras el modelo corre
+  en la PC; se conecta escaneando un QR. Ver la guía de usuario.
 
 ## Historial de cambios
 
@@ -433,6 +437,8 @@ storyforge/
                      y piezas comunes (ui_common)
     strings_es.py    Todos los textos visibles de la interfaz
     task_runner.py   Tareas del modelo en segundo plano (ocupado, Detener, errores)
+    web_server.py    StoryForge en el celular: servidor web local (--servidor), API JSON
+    web/             La página del celular (index.html, app.js, style.css) y la de conexión con QR
     main.py          Punto de entrada
   assets/             Icono de la app (icon.ico, icon.png)
   installer/          Instalador de Inno Setup (StoryForge.iss)

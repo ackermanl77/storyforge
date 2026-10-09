@@ -9,6 +9,10 @@ nltk_data/
 # generacion larga); no es el proyecto guardado explicitamente por el usuario.
 autosave/
 
+# Proyectos del modo servidor (StoryForge en el celular) en desarrollo:
+# user_data_dir()/proyectos, que sin empaquetar es la carpeta del repo.
+proyectos/
+
 # Empaquetado con PyInstaller. dist/ y build/ son carpetas de trabajo de
 # PyInstaller (se regeneran en cada build); StoryForge-App/ es una copia
 # limpia de dist/StoryForge/, en una ubicacion fija y facil de encontrar

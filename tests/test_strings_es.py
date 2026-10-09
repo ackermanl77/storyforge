@@ -22,7 +22,7 @@ UI_MODULES = sorted(
 )
 # Backend modules whose user-facing messages (raised errors, load warnings, the
 # lorebook match reason) also come from app/strings_es.py.
-BACKEND_MODULES = ["engine.py", "export.py", "gguf.py", "project.py", "prompts.py"]
+BACKEND_MODULES = ["engine.py", "export.py", "gguf.py", "project.py", "prompts.py", "web_server.py"]
 # Checked for accents/tú (backend messages that can reach the user too).
 UI_FILES = UI_MODULES + ["strings_es.py", "project.py", "gguf.py", "engine.py"]
 LOG_METHODS = {"debug", "info", "warning", "error", "exception", "critical"}

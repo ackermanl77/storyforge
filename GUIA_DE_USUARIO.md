@@ -23,6 +23,7 @@ rendimiento/GPU, limitaciones) y [docs/](docs/PROJECT_STATUS.md)
    - [Reducir repetición / Reporte de repetición](#reducir-repetición--reporte-de-repetición)
 5. [Guardar, abrir y exportar](#guardar-abrir-y-exportar)
 6. [Autoguardado y recuperación](#autoguardado-y-recuperación)
+   - [Usar StoryForge desde el celular](#usar-storyforge-desde-el-celular)
 7. [Límites y validaciones](#límites-y-validaciones)
 8. [Convenciones de formato del texto generado](#convenciones-de-formato-del-texto-generado)
 9. [Preguntas frecuentes / solución de problemas](#preguntas-frecuentes--solución-de-problemas)
@@ -513,6 +514,50 @@ Todo desde el menú **Archivo**:
 
 Ninguna exportación incluye el esquema ni las versiones
 anteriores — solo el título y contenido final de cada capítulo.
+
+## Usar StoryForge desde el celular
+
+Puedes escribir desde el navegador del celular mientras el modelo sigue
+corriendo en tu PC (no hace falta instalar nada en el celular).
+
+1. En la PC, abre **"StoryForge Local en el celular"** desde el menú Inicio
+   (o ejecuta `StoryForge.exe --servidor`; sin empaquetar:
+   `python storyforge.py --servidor`). En lugar de la ventana de siempre se
+   abre en el navegador de la PC una página con un **código QR**.
+2. Si Windows pregunta si StoryForge puede usar la red, permítelo en
+   **redes privadas**.
+3. Con el celular conectado a la **misma red Wi-Fi**, escanea el QR (o
+   escribe el enlace que aparece debajo). En el menú del navegador,
+   "Agregar a la pantalla de inicio" lo deja como una app.
+4. En **Inicio** carga el modelo (se usan los mismos ajustes que guardaste
+   para ese modelo en la pestaña Modelo: capas en GPU, contexto...) y crea o
+   abre un proyecto. Después: **Historia** (plot, personajes, setting, tipo
+   de escritura), **Esquema**, **Capítulos** (Generar / Continuar / Detener,
+   con el texto apareciendo en vivo) y **Exportar** (Word, EPUB, Markdown o
+   texto, descargado al celular).
+
+Cosas a tener en cuenta:
+
+- El enlace lleva una **clave de acceso**: quien lo tenga y esté en tu red
+  puede usar StoryForge. No lo compartas. Sigue sirviendo después de
+  reiniciar el servidor.
+- Los proyectos del modo celular viven en su propia carpeta (la página del
+  QR la muestra; `--carpeta <ruta>` la cambia y se recuerda). Para seguir en
+  el celular un proyecto empezado en la PC, cópialo a esa carpeta, y al
+  revés: el archivo `.storyforge.json` es el mismo formato.
+- No abras el mismo proyecto a la vez en la ventana de StoryForge y en el
+  celular: cada uno guardaría encima de los cambios del otro. Tampoco
+  conviene tener la ventana y el servidor con un modelo cargado al mismo
+  tiempo (serían dos copias del modelo en memoria).
+- Cada cambio se guarda en el momento. Mientras el modelo trabaja, el
+  proyecto no se puede editar (los botones quedan desactivados).
+- Al generar un capítulo, los resúmenes faltantes o desactualizados de los
+  capítulos anteriores se regeneran antes, sin preguntar (son su contexto).
+- En el celular están las funciones principales; Lorebook, refinar,
+  reescribir una selección, versiones anteriores y reducir repetición
+  siguen en la ventana de la PC.
+- Para apagarlo: botón **"Detener el servidor"** en la página del QR (o
+  Ctrl+C en la consola).
 
 ## Autoguardado y recuperación
 
