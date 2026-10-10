@@ -56,6 +56,9 @@ correspondiente mas abajo.
   una vez descargados sus datos).
 - Guardar/abrir proyecto (.storyforge.json) y exportar la historia a Word
   (.docx, con portada y un capítulo por página), EPUB, Markdown o texto plano.
+- **Prompt propio por capítulo**: cada capítulo puede generarse con un prompt
+  escrito por ti entero (con marcadores como `{plot}` o `{anterior}`) en vez
+  del prompt automático. Ver la guía de usuario.
 - **StoryForge en el celular**: `StoryForge.exe --servidor` (o el acceso
   directo "StoryForge Local en el celular") sirve una página web en tu red
   local para escribir desde el navegador del celular mientras el modelo corre

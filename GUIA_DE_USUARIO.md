@@ -17,6 +17,7 @@ rendimiento/GPU, limitaciones) y [docs/](docs/PROJECT_STATUS.md)
    - [Tipo de escritura](#tipo-de-escritura)
    - [Generar un capítulo](#generar-un-capítulo)
    - [Propósito de capítulo](#propósito-de-capítulo)
+   - [Prompt propio de un capítulo](#prompt-propio-de-un-capítulo)
    - [Refinar un capítulo](#refinar-un-capítulo)
    - [Versiones anteriores](#versiones-anteriores)
    - [Expandir con IA / Importar desde archivo](#expandir-con-ia--importar-desde-archivo)
@@ -373,6 +374,42 @@ rol narrativo cumple **ese capítulo específico**:
 "(Capítulo regular)" — la opción por defecto — no agrega ninguna
 instrucción especial. Tú decides qué capítulo es cuál; la app no valida que
 tenga sentido con la posición del capítulo en la historia.
+
+### Prompt propio de un capítulo
+
+Cada capítulo puede tener **su propio prompt**, escrito por ti entero. Con el
+botón **"Prompt propio"** (junto a la nota del autor del capítulo; en el
+celular, el apartado "Prompt propio" del capítulo) se abre el cuadro:
+
+- **Vacío** (lo normal): StoryForge arma el prompt automático de siempre con
+  el plot, los personajes, el setting, el esquema, los resúmenes, el
+  propósito, la nota del autor y sus reglas de estilo.
+- **Con texto**: el capítulo se genera **solo con lo que escribiste**. No se
+  agrega nada automáticamente (ni el plot, ni los personajes, ni el esquema,
+  ni las reglas de formato), y el propósito y la nota del autor del capítulo
+  se ignoran. El botón muestra "Prompt propio ●" mientras hay uno.
+
+Puedes traer datos del proyecto donde quieras con estos marcadores, que se
+reemplazan al generar:
+
+| Marcador | Se reemplaza por |
+|---|---|
+| `{plot}`, `{personajes}`, `{setting}` | Esos campos del proyecto |
+| `{esquema}` | El esquema de este capítulo |
+| `{anterior}` | Lo que pasó antes: resumen del capítulo anterior, sus últimas líneas y los resúmenes previos |
+| `{título}`, `{capítulo}`, `{palabras}` | Título, número y objetivo de palabras del capítulo |
+| `{nota_autor}` | La nota del autor de este capítulo |
+
+**"Insertar plantilla"** pone un prompt de ejemplo que usa todos los
+marcadores: es un buen punto de partida para editar. Recuerda que el texto
+de la historia se pide en inglés, así que conviene escribir el prompt en
+inglés.
+
+Un capítulo largo se escribe por partes de unas 900 palabras: en las
+siguientes partes se vuelve a enviar tu prompt y, como único agregado, el
+final del texto ya escrito para que el modelo siga desde ahí. **Ver prompt**
+(barra de estado) muestra exactamente lo que se envió. El resumen para
+continuidad se sigue generando igual al terminar.
 
 ### Refinar un capítulo
 

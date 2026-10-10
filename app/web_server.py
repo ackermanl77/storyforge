@@ -56,6 +56,7 @@ from .project import (
     count_words,
     portable_model_path,
 )
+from .prompts import CUSTOM_PROMPT_TEMPLATE
 from .settings import (
     get_chat_format_for_model,
     get_last_model,
@@ -340,11 +341,13 @@ class StoryForgeService:
                        + [{"valor": k, "etiqueta": S.style_label(k)} for k in WRITING_STYLES],
             "propositos": [{"valor": "", "etiqueta": S.purpose_label("")}]
                           + [{"valor": k, "etiqueta": S.purpose_label(k)} for k in CHAPTER_PURPOSES],
+            "plantilla_prompt": CUSTOM_PROMPT_TEMPLATE,
             "max_capitulos": MAX_CHAPTERS,
             "max_palabras_capitulo": MAX_WORDS_PER_CHAPTER,
             "capitulos": [
                 {"indice": i, "titulo": ch.title, "objetivo": ch.target_words, "palabras": ch.word_count(),
                  "esquema": ch.outline, "proposito": ch.purpose, "tiene_resumen": bool(ch.summary.strip()),
+                 "prompt_propio": bool(ch.custom_prompt.strip()),
                  "resumen_desactualizado": ch.summary_is_stale()}
                 for i, ch in enumerate(project.chapters)
             ],
@@ -375,7 +378,7 @@ class StoryForgeService:
         ch = self._chapter(index)
         return {"indice": index, "titulo": ch.title, "objetivo": ch.target_words, "texto": ch.content,
                 "palabras": ch.word_count(), "esquema": ch.outline, "proposito": ch.purpose,
-                "nota_autor": ch.author_note, "resumen": ch.summary,
+                "nota_autor": ch.author_note, "prompt": ch.custom_prompt, "resumen": ch.summary,
                 "resumen_desactualizado": ch.summary_is_stale(), "versiones": len(ch.history)}
 
     def update_chapter(self, index: int, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -383,7 +386,8 @@ class StoryForgeService:
         ch = self._chapter(index)
         project = self._require_project()
         with self._lock:
-            for key, attr in (("titulo", "title"), ("esquema", "outline"), ("nota_autor", "author_note")):
+            for key, attr in (("titulo", "title"), ("esquema", "outline"), ("nota_autor", "author_note"),
+                              ("prompt", "custom_prompt")):
                 if key in data:
                     if not isinstance(data[key], str):
                         raise ApiError(HTTPStatus.BAD_REQUEST, S.WEB_CAMPO_INVALIDO.format(name=key))

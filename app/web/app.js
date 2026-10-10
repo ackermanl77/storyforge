@@ -258,6 +258,7 @@ function renderChapterList(p) {
     let note = "";
     if (ch.palabras && !ch.tiene_resumen) note = " · sin resumen";
     else if (ch.resumen_desactualizado) note = " · resumen desactualizado";
+    if (ch.prompt_propio) note += " · prompt propio";
     li.innerHTML = `<div><div class="title"></div><div class="meta"></div></div><span class="muted">›</span>`;
     li.querySelector(".title").textContent = `${ch.indice + 1}. ${ch.titulo || "(sin título)"}`;
     li.querySelector(".meta").textContent = `${fmt(ch.palabras)} / ${fmt(ch.objetivo)} palabras${note}`;
@@ -284,6 +285,8 @@ function fillChapter(ch) {
   purpose.value = ch.proposito;
   $("ch-esquema").value = ch.esquema;
   $("ch-nota").value = ch.nota_autor;
+  $("ch-prompt").value = ch.prompt || "";
+  updatePromptState();
   $("ch-texto").value = ch.texto;
   $("ch-resumen").textContent = ch.resumen || "(todavía no hay resumen)";
   $("ch-summary-state").textContent = ch.resumen_desactualizado ? "(desactualizado)" : "";
@@ -305,7 +308,20 @@ async function openChapter(index) {
   }
 }
 
-["ch-titulo", "ch-objetivo", "ch-proposito", "ch-esquema", "ch-nota", "ch-texto"].forEach((id) => {
+function updatePromptState() {
+  $("ch-prompt-state").textContent = $("ch-prompt").value.trim() ? "● activo" : "";
+}
+
+$("ch-prompt").addEventListener("input", updatePromptState);
+
+$("ch-prompt-template").addEventListener("click", () => {
+  if ($("ch-prompt").value.trim() && !confirm("¿Reemplazar el prompt propio de este capítulo por la plantilla?")) return;
+  $("ch-prompt").value = state.project.plantilla_prompt;
+  state.chapterDirty = true;
+  updatePromptState();
+});
+
+["ch-titulo", "ch-objetivo", "ch-proposito", "ch-esquema", "ch-nota", "ch-prompt", "ch-texto"].forEach((id) => {
   $(id).addEventListener("input", () => { state.chapterDirty = true; updateChapterWords(); });
 });
 
@@ -316,6 +332,7 @@ function chapterBody(includeText) {
     proposito: $("ch-proposito").value,
     esquema: $("ch-esquema").value,
     nota_autor: $("ch-nota").value,
+    prompt: $("ch-prompt").value,
   };
   if (includeText) body.texto = $("ch-texto").value;
   return body;

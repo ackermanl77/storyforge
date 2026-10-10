@@ -131,6 +131,12 @@
           <label for="ch-nota">Nota del autor (este capítulo)</label>
           <textarea id="ch-nota" rows="2"></textarea>
         </details>
+        <details id="ch-prompt-box">
+          <summary>Prompt propio <span id="ch-prompt-state" class="muted small"></span></summary>
+          <p class="muted small">Si escribes algo aquí, este capítulo se genera SOLO con este texto: StoryForge no agrega el plot, los personajes, el setting, el esquema ni los resúmenes. Tráelos donde quieras con {plot}, {personajes}, {setting}, {esquema}, {anterior}, {título}, {capítulo}, {palabras} y {nota_autor}. Vacío = prompt automático.</p>
+          <textarea id="ch-prompt" rows="10"></textarea>
+          <button id="ch-prompt-template" class="btn small">Insertar plantilla</button>
+        </details>
         <div class="row actions">
           <button id="ch-generate" class="btn primary">Generar</button>
           <button id="ch-continue" class="btn">Continuar</button>

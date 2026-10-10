@@ -458,6 +458,17 @@ INSTRUCCION_DE_REFINAMIENTO_EJ_HAZLO = (
 )
 APLICAR_REFINAMIENTO = "Aplicar refinamiento"
 MOSTRAR_RESUMEN = "Mostrar resumen"
+PROMPT_PROPIO = "Prompt propio"
+PROMPT_PROPIO_ACTIVO = "Prompt propio ●"
+INSERTAR_PLANTILLA = "Insertar plantilla"
+PROMPT_PROPIO_AYUDA = (
+    "Si escribes algo aquí, este capítulo se genera SOLO con este texto: StoryForge no agrega el plot, "
+    "los personajes, el setting, el esquema, los resúmenes ni sus reglas de estilo, y el propósito y la "
+    "nota del autor de este capítulo se ignoran. Puedes traerlos donde quieras con {plot}, {personajes}, "
+    "{setting}, {esquema}, {anterior} (lo que pasó antes), {título}, {capítulo}, {palabras} y {nota_autor}. "
+    "Déjalo vacío para usar el prompt automático."
+)
+REEMPLAZAR_PROMPT_CON_PLANTILLA = "¿Reemplazar el prompt propio de este capítulo por la plantilla?"
 REGENERAR_RESUMEN = "Regenerar resumen"
 OCULTAR_RESUMEN = "Ocultar resumen"
 MENOS_HERRAMIENTAS = "Menos herramientas ▴"

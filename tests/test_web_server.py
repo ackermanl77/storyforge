@@ -129,6 +129,16 @@ class TestService(unittest.TestCase):
         self.assertEqual(chapter.history[-1], "Draft one.")
         self.assertEqual(chapter.history_meta[-1]["source"], "phone-edit")
 
+    def test_a_chapters_custom_prompt_is_saved_and_listed(self):
+        self.service.create_project("X")
+        self.service.add_chapter({})
+        view = self.service.update_chapter(0, {"prompt": "Write {plot}"})
+        self.assertEqual(view["prompt"], "Write {plot}")
+        self.assertEqual(self.saved().chapters[0].custom_prompt, "Write {plot}")
+        project = self.service.project_view()
+        self.assertTrue(project["capitulos"][0]["prompt_propio"])
+        self.assertIn("{anterior}", project["plantilla_prompt"])
+
     def test_outline_fills_existing_chapters_and_adds_the_rest(self):
         self.service.create_project("X")
         self.service.add_chapter({"titulo": "Old"})

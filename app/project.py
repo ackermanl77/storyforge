@@ -28,6 +28,10 @@ MAX_CHAPTERS = 10
 MAX_WORDS_PER_CHAPTER = 10_000
 MAX_OUTLINE_WORDS_PER_CHAPTER = 800
 MAX_AUTHOR_NOTE_WORDS = 150
+# Prompt propio de un capitulo (Chapter.custom_prompt): lo escribe el usuario
+# entero, asi que el limite es generoso; lo que de verdad manda es la
+# ventana de contexto del modelo.
+MAX_CUSTOM_PROMPT_WORDS = 4000
 # Cuantas versiones anteriores de chapter.content se conservan por defecto
 # (la mas vieja se descarta al llegar al limite) cada vez que se regenera,
 # refina, reescribe o restaura un capitulo -- ver Chapter.push_history(). Se
@@ -168,6 +172,11 @@ class Chapter:
     # prompt de este capitulo (ver prompts.build_author_note_block), donde
     # pesa mas que las reglas del principio de un prompt largo.
     author_note: str = ""
+    # Prompt propio (opcional): si no esta vacio, el capitulo se genera SOLO con
+    # este texto en vez del prompt que arma la app (ver
+    # prompts.build_custom_chapter_chat); puede incluir marcadores como {plot}
+    # o {anterior} (prompts.CUSTOM_PROMPT_PLACEHOLDERS).
+    custom_prompt: str = ""
     # versiones anteriores de `content`, mas vieja primero, acotado al limite
     # de historial (ver push_history()) -- permite recuperar el texto de antes
     # de un regenerar/refinar sin depender solo de la confirmacion previa al
@@ -261,6 +270,7 @@ class Chapter:
             "outline": self.outline,
             "purpose": self.purpose,
             "author_note": self.author_note,
+            **({"custom_prompt": self.custom_prompt} if self.custom_prompt.strip() else {}),
             "history": self.history_entries(),
             **({"alternatives": {"texts": list(self.alternatives), "index": self.alt_index}}
                if self.alternatives else {}),
@@ -278,6 +288,7 @@ class Chapter:
             outline=_str_field(d, "outline", "", where),
             purpose=_str_field(d, "purpose", "", where),
             author_note=_str_field(d, "author_note", "", where),
+            custom_prompt=_str_field(d, "custom_prompt", "", where),
         )
         for item in _list_field(d, "history", where):
             # Formato 1: lista de textos. Formato 2: {"text", "source", "at"}.
@@ -454,6 +465,11 @@ class Project:
                 errors.append(
                     f"Capítulo {i}: el esquema tiene {ch.outline_words():,} palabras "
                     f"(máximo {MAX_OUTLINE_WORDS_PER_CHAPTER:,})."
+                )
+            if count_words(ch.custom_prompt) > MAX_CUSTOM_PROMPT_WORDS:
+                errors.append(
+                    f"Capítulo {i}: el prompt propio tiene {count_words(ch.custom_prompt):,} palabras "
+                    f"(máximo {MAX_CUSTOM_PROMPT_WORDS:,})."
                 )
             if count_words(ch.author_note) > MAX_AUTHOR_NOTE_WORDS:
                 errors.append(

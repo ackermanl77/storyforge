@@ -177,6 +177,19 @@ class TestSelectionRewriteF7(_Base):
         self.assertEqual(self.app.project.author_note, "Grim tone.")
 
 
+    def test_custom_prompt_syncs_and_marks_its_button(self):
+        panel = self._chapter()
+        self.assertEqual(panel.custom_prompt_btn.cget("text"), "Prompt propio")
+        panel._toggle_custom_prompt()
+        panel._insert_prompt_template()
+        panel._refresh_custom_prompt_btn()
+        self.assertEqual(panel.custom_prompt_btn.cget("text"), "Prompt propio ●")
+        self.app._sync_all()
+        self.assertTrue(panel.chapter.custom_prompt.startswith("Write chapter {capítulo}"))
+        panel.custom_prompt_box.delete("1.0", "end")
+        self.app._sync_all()
+        self.assertEqual(panel.chapter.custom_prompt, "")
+
 class TestRetryAlternatives(_Base):
     def test_retry_adds_alternatives_and_cycles(self):
         panel = self._chapter()

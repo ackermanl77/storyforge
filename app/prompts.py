@@ -633,6 +633,8 @@ def build_chapter_start_chat(
 ) -> ChatPrompt:
     """Primera seccion de un capitulo (todavia no hay texto escrito). `hints`:
     lineas extra, como el alcance de la seccion (build_section_scope_hint)."""
+    if project.chapters[chapter_index].custom_prompt.strip():
+        return build_custom_chapter_chat(project, chapter_index, budget)
     bible, task, step_blocks = _chapter_prompt_parts(project, chapter_index, **_chapter_budget_kwargs(budget))
     step_blocks += [h for h in (hints or []) if h]
     note = build_author_note(project, project.chapters[chapter_index])
@@ -672,6 +674,8 @@ def build_chapter_continuation_chat(
     oracion) en vez de "contestar" una instruccion. `hints` son lineas extra
     (avance por beats, "todavia no termines", "esta es la ultima parte").
     """
+    if project.chapters[chapter_index].custom_prompt.strip():
+        return build_custom_chapter_chat(project, chapter_index, budget, already_written, tail_words)
     bible, task, step_blocks = _chapter_prompt_parts(
         project, chapter_index, recent_text=already_written, **_chapter_budget_kwargs(budget),
     )
@@ -708,6 +712,84 @@ def build_chapter_continuation_chat(
         prefill=prefill,
         raw=f"{bible}{task}\n\n{cont}\n",
     )
+
+
+# ---------------- prompt propio de un capitulo ----------------
+# Marcadores que el usuario puede escribir en Chapter.custom_prompt; cada uno se
+# reemplaza por el dato del proyecto (recortado al presupuesto de contexto, como
+# en el prompt automatico). Un {texto} que no es un marcador queda tal cual.
+# Se aceptan con y sin acento ({título} / {titulo}).
+CUSTOM_PROMPT_PLACEHOLDERS = (
+    "plot", "personajes", "setting", "esquema", "anterior", "título", "capítulo", "palabras", "nota_autor",
+)
+_PLACEHOLDER_ALIASES = {"titulo": "título", "capitulo": "capítulo"}
+_PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
+
+# Punto de partida que ofrece el boton "Insertar plantilla" (en ingles, como la
+# prosa que se pide).
+CUSTOM_PROMPT_TEMPLATE = (
+    "Write chapter {capítulo} of a novel, titled \"{título}\". Write about {palabras} words of "
+    "prose in English, in the third person and past tense.\n\n"
+    "Story so far:\n{anterior}\n\n"
+    "Characters:\n{personajes}\n\n"
+    "Setting:\n{setting}\n\n"
+    "What happens in this chapter:\n{esquema}\n\n"
+    "Output only the chapter's prose, without a heading or notes."
+)
+
+CUSTOM_PROMPT_SO_FAR = "The chapter written so far ends like this (your reply continues it seamlessly):"
+
+
+def render_custom_prompt(
+    project: Project, chapter_index: int, max_plot_words: Optional[int] = None,
+    max_characters_words: Optional[int] = None, max_setting_words: Optional[int] = None,
+    max_previous_words: int = 500, max_outline_words: Optional[int] = None, **_unused,
+) -> str:
+    """El prompt propio del capitulo con sus marcadores reemplazados."""
+    chapter = project.chapters[chapter_index]
+
+    def trimmed(text: str, limit: Optional[int]) -> str:
+        text = (text or "").strip()
+        return _trim_words(text, limit) if limit else text
+
+    values = {
+        "plot": lambda: trimmed(project.plot, max_plot_words),
+        "personajes": lambda: trimmed(project.characters, max_characters_words),
+        "setting": lambda: trimmed(project.setting, max_setting_words),
+        "esquema": lambda: trimmed(chapter.outline, max_outline_words),
+        "anterior": lambda: build_previous_context(project, chapter_index, max_previous_words),
+        "título": lambda: chapter.title.strip(),
+        "capítulo": lambda: str(chapter_index + 1),
+        "palabras": lambda: str(chapter.target_words),
+        "nota_autor": lambda: chapter.author_note.strip(),
+    }
+
+    def substitute(match: "re.Match[str]") -> str:
+        key = _PLACEHOLDER_ALIASES.get(match.group(1).lower(), match.group(1).lower())
+        value = values.get(key)
+        return value() if value else match.group(0)
+
+    return _PLACEHOLDER_RE.sub(substitute, chapter.custom_prompt).strip()
+
+
+def build_custom_chapter_chat(
+    project: Project, chapter_index: int, budget: dict, already_written: str = "", tail_words: int = 0,
+) -> ChatPrompt:
+    """
+    Prompt de un capitulo con prompt propio: el texto del usuario, sin turno de
+    sistema ni nada que agregue la app. Un capitulo se escribe por secciones;
+    en las siguientes, el final de lo ya escrito va pre-llenado en la respuesta
+    (el modelo sigue escribiendo desde ahi) y lo anterior a eso, como unico
+    agregado, al final del mensaje, para que sepa donde va.
+    """
+    user = render_custom_prompt(project, chapter_index, **_chapter_budget_kwargs(budget))
+    if not already_written.strip():
+        return ChatPrompt(system="", user=user, raw=f"{user}\n\n")
+    recent = tail_preserving_format(already_written, tail_words)
+    prefill = tail_preserving_format(already_written, min(tail_words, CONTINUATION_PREFILL_WORDS))
+    earlier = recent[: len(recent) - len(prefill)].rstrip() if recent.endswith(prefill) else ""
+    chat_user = f"{user}\n\n{CUSTOM_PROMPT_SO_FAR}\n\n{earlier}" if earlier else user
+    return ChatPrompt(system="", user=chat_user, prefill=prefill, raw=f"{user}\n\n{recent}")
 
 
 def _chapter_budget_kwargs(budget: dict) -> dict:

@@ -22,7 +22,7 @@ from .project import (
     content_hash,
     count_words,
 )
-from .prompts import REWRITE_MODE_LABELS
+from .prompts import CUSTOM_PROMPT_TEMPLATE, REWRITE_MODE_LABELS
 from .repetition import reduce_repetition, repetition_report
 from .strings_es import (
     history_source_label,
@@ -104,6 +104,28 @@ class ChapterPanel(ctk.CTkFrame):
         )
         self.author_note_entry.insert(0, chapter.author_note)
         self.author_note_entry.grid(row=0, column=3, sticky="ew")
+
+        # Prompt propio: reemplaza el prompt automatico de este capitulo
+        # (prompts.build_custom_chapter_chat). Oculto hasta que se pide; el
+        # boton lleva un punto mientras hay uno escrito.
+        self.custom_prompt_btn = ctk.CTkButton(purpose_row, text=S.PROMPT_PROPIO, width=130,
+                                               command=self._toggle_custom_prompt)
+        self.custom_prompt_btn.grid(row=0, column=4, padx=(8, 0))
+        self.custom_prompt_frame = ctk.CTkFrame(purpose_row, fg_color="transparent")
+        self.custom_prompt_frame.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(self.custom_prompt_frame, text=S.PROMPT_PROPIO_AYUDA, text_color=COLOR_MUTED,
+                     wraplength=760, justify="left").grid(row=0, column=0, sticky="w", pady=(4, 2))
+        self.insert_template_btn = ctk.CTkButton(self.custom_prompt_frame, text=S.INSERTAR_PLANTILLA, width=140,
+                                                 command=self._insert_prompt_template)
+        self.insert_template_btn.grid(row=0, column=1, sticky="ne", padx=(8, 0), pady=(4, 2))
+        self.custom_prompt_box = ctk.CTkTextbox(self.custom_prompt_frame, height=140, wrap="word",
+                                                **UNDO_TEXTBOX_OPTIONS)
+        self.custom_prompt_box.grid(row=1, column=0, columnspan=2, sticky="ew")
+        self.custom_prompt_box.insert("1.0", chapter.custom_prompt)
+        self.custom_prompt_box.edit_reset()
+        self.custom_prompt_box.bind("<KeyRelease>", lambda _e=None: self._refresh_custom_prompt_btn())
+        self.custom_prompt_visible = False
+        self._refresh_custom_prompt_btn()
 
         # Barra de acciones compacta: las acciones principales a la vista y
         # las demas en "Más herramientas" (se despliega debajo).
@@ -256,6 +278,7 @@ class ChapterPanel(ctk.CTkFrame):
         self.chapter.content = self.content_box.get("1.0", "end-1c")
         self.chapter.purpose = purpose_key(self.purpose_menu.get())
         self.chapter.author_note = self.author_note_entry.get().strip()
+        self.chapter.custom_prompt = self.custom_prompt_box.get("1.0", "end-1c").strip()
         # Un resumen editado a mano se considera al dia con el texto actual.
         summary_text = self.summary_box.get("1.0", "end-1c")
         if summary_text.strip() != self.chapter.summary.strip():
@@ -278,6 +301,29 @@ class ChapterPanel(ctk.CTkFrame):
         else:
             self.summary_frame.grid_remove()
             self.summary_toggle_btn.configure(text=S.MOSTRAR_RESUMEN)
+
+    def custom_prompt_text(self) -> str:
+        return self.custom_prompt_box.get("1.0", "end-1c").strip()
+
+    def _refresh_custom_prompt_btn(self) -> None:
+        self.custom_prompt_btn.configure(
+            text=S.PROMPT_PROPIO_ACTIVO if self.custom_prompt_text() else S.PROMPT_PROPIO,
+        )
+
+    def _toggle_custom_prompt(self) -> None:
+        self.custom_prompt_visible = not self.custom_prompt_visible
+        if self.custom_prompt_visible:
+            self.custom_prompt_frame.grid(row=1, column=0, columnspan=5, sticky="ew", pady=(4, 2))
+            self.custom_prompt_box.focus_set()
+        else:
+            self.custom_prompt_frame.grid_remove()
+
+    def _insert_prompt_template(self) -> None:
+        if self.custom_prompt_text() and not messagebox.askyesno(APP_TITLE, S.REEMPLAZAR_PROMPT_CON_PLANTILLA):
+            return
+        self.custom_prompt_box.delete("1.0", "end")
+        self.custom_prompt_box.insert("1.0", CUSTOM_PROMPT_TEMPLATE)
+        self._refresh_custom_prompt_btn()
 
     def _toggle_tools(self) -> None:
         self.tools_visible = not self.tools_visible
@@ -303,6 +349,7 @@ class ChapterPanel(ctk.CTkFrame):
     def focus_order_widgets(self):
         return [
             self.title_entry, self.target_entry, self.purpose_menu, self.author_note_entry,
+            self.custom_prompt_btn, self.insert_template_btn, self.custom_prompt_box,
             self.generate_btn, self.continue_btn, self.continue_cursor_btn, self.retry_btn,
             self.prev_alt_btn, self.next_alt_btn, self.cancel_btn, self.history_btn, self.more_btn,
             self.reduce_btn, self.report_btn, self.find_btn, self.remove_btn,

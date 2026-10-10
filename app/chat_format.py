@@ -99,9 +99,10 @@ class Llama3Formatter(ChatFormatter):
 
     def _render(self, prompt: ChatPrompt) -> str:
         # Sin <|begin_of_text|>: llama.cpp agrega el BOS por su cuenta.
+        # Un prompt sin sistema (prompt propio de un capitulo) no lleva ese turno.
+        system = f"<|start_header_id|>system<|end_header_id|>\n\n{prompt.system}<|eot_id|>" if prompt.system else ""
         return (
-            "<|start_header_id|>system<|end_header_id|>\n\n"
-            f"{prompt.system}<|eot_id|>"
+            f"{system}"
             "<|start_header_id|>user<|end_header_id|>\n\n"
             f"{prompt.user}<|eot_id|>"
             "<|start_header_id|>assistant<|end_header_id|>\n\n"
@@ -114,8 +115,9 @@ class ChatMLFormatter(ChatFormatter):
     stop = ["<|im_end|>"]
 
     def _render(self, prompt: ChatPrompt) -> str:
+        system = f"<|im_start|>system\n{prompt.system}<|im_end|>\n" if prompt.system else ""
         return (
-            f"<|im_start|>system\n{prompt.system}<|im_end|>\n"
+            f"{system}"
             f"<|im_start|>user\n{prompt.user}<|im_end|>\n"
             f"<|im_start|>assistant\n{prompt.prefill}"
         )
@@ -127,7 +129,8 @@ class MistralFormatter(ChatFormatter):
 
     def _render(self, prompt: ChatPrompt) -> str:
         # Mistral no tiene turno de sistema: va al principio del turno de usuario.
-        return f"[INST] {prompt.system}\n\n{prompt.user} [/INST]{prompt.prefill}"
+        system = f"{prompt.system}\n\n" if prompt.system else ""
+        return f"[INST] {system}{prompt.user} [/INST]{prompt.prefill}"
 
 
 class AlpacaFormatter(ChatFormatter):
@@ -135,9 +138,8 @@ class AlpacaFormatter(ChatFormatter):
     stop = ["### Instruction:"]
 
     def _render(self, prompt: ChatPrompt) -> str:
-        return (
-            f"{prompt.system}\n\n### Instruction:\n{prompt.user}\n\n### Response:\n{prompt.prefill}"
-        )
+        system = f"{prompt.system}\n\n" if prompt.system else ""
+        return f"{system}### Instruction:\n{prompt.user}\n\n### Response:\n{prompt.prefill}"
 
 
 class JinjaTemplateFormatter(ChatFormatter):
@@ -178,15 +180,18 @@ class JinjaTemplateFormatter(ChatFormatter):
         )
 
     def _render(self, prompt: ChatPrompt) -> str:
-        try:
-            text = self._render_messages([
-                {"role": "system", "content": prompt.system},
-                {"role": "user", "content": prompt.user},
-            ])
-        except Exception:  # noqa: BLE001 - plantilla sin rol system
-            text = self._render_messages([
-                {"role": "user", "content": f"{prompt.system}\n\n{prompt.user}"},
-            ])
+        if not prompt.system:
+            text = self._render_messages([{"role": "user", "content": prompt.user}])
+        else:
+            try:
+                text = self._render_messages([
+                    {"role": "system", "content": prompt.system},
+                    {"role": "user", "content": prompt.user},
+                ])
+            except Exception:  # noqa: BLE001 - plantilla sin rol system
+                text = self._render_messages([
+                    {"role": "user", "content": f"{prompt.system}\n\n{prompt.user}"},
+                ])
         if self._bos and text.startswith(self._bos):
             text = text[len(self._bos):]
         return text + prompt.prefill
