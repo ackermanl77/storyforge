@@ -43,6 +43,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from . import strings_es as S
+from .error_text import describe_exception
 from .engine import ContextOverflowError, ModelNotLoadedError, OperationCancelled, supports_gpu_offload
 from .export import build_epub_bytes, build_markdown, build_txt, export_docx
 from .gguf import list_model_entries
@@ -318,7 +319,7 @@ class StoryForgeService:
             project = Project.load(path)
         except (OSError, ValueError) as exc:
             raise ApiError(HTTPStatus.BAD_REQUEST,
-                           S.WEB_PROYECTO_NO_SE_PUDO_ABRIR.format(name=os.path.basename(path), exc=exc)) from exc
+                           S.WEB_PROYECTO_NO_SE_PUDO_ABRIR.format(name=os.path.basename(path), exc=describe_exception(exc))) from exc
         with self._lock:
             self.project = project
             self.project_file = os.path.basename(path)
@@ -459,7 +460,7 @@ class StoryForgeService:
                 job.status, job.message = "error", S.EL_CONTEXTO_ES_DEMASIADO_GRANDE.format(exc=exc)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Error en la tarea '%s'", label)
-                job.status, job.message = "error", S.ERROR_GENERICO.format(exc=exc)
+                job.status, job.message = "error", S.ERROR_GENERICO.format(exc=describe_exception(exc))
             finally:
                 job.finished = time.time()
 
@@ -820,7 +821,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._error(exc.status, exc.message)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error en %s %s", self.command, path)
-            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, S.ERROR_GENERICO.format(exc=exc))
+            self._error(HTTPStatus.INTERNAL_SERVER_ERROR, S.ERROR_GENERICO.format(exc=describe_exception(exc)))
 
     def _api(self, path: str, query: Dict[str, List[str]]) -> None:
         if path == "/api/conexion":
@@ -901,7 +902,7 @@ def serve(port: int = DEFAULT_PORT, projects_dir: Optional[str] = None, open_bro
     try:
         server = create_server(LocalStoryEngine(), folder, port)
     except OSError as exc:
-        _show(S.WEB_PUERTO_OCUPADO.format(port=port, exc=exc), error=True)
+        _show(S.WEB_PUERTO_OCUPADO.format(port=port, exc=describe_exception(exc)), error=True)
         return 1
     message = S.WEB_SERVIDOR_LISTO.format(local_url=server.local_url, phone_url=server.phone_url,
                                           projects_dir=server.service.projects_dir)

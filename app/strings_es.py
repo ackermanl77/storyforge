@@ -63,6 +63,7 @@ HISTORY_SOURCE_LABELS: Dict[str, str] = {
     "rewrite": "reescribir selección",
     "replace": "reemplazar texto",
     "retry": "reintentar",
+    "retry-section": "reintentar la última sección",
     "phone-edit": "editar desde el celular",
 }
 
@@ -442,6 +443,7 @@ GENERAR = "Generar"
 CONTINUAR = "Continuar"
 DESDE_EL_CURSOR = "Desde el cursor"
 REINTENTAR = "Reintentar"
+REINTENTAR_SECCION = "Últ. sección"
 CANCELAR = "Cancelar"
 VERSIONES_ANTERIORES_0 = "Versiones anteriores (0)"
 MAS_HERRAMIENTAS = "Más herramientas ▾"
@@ -684,3 +686,31 @@ WEB_AYUDA_PUERTO = "Puerto del servidor (por defecto {port})."
 WEB_AYUDA_CARPETA = "Carpeta de proyectos del servidor (se recuerda para la próxima vez)."
 WEB_AYUDA_MODELOS = "Carpeta extra donde buscar modelos .gguf (se recuerda para la próxima vez)."
 WEB_AYUDA_SIN_NAVEGADOR = "No abrir la página de conexión en el navegador de la PC."
+
+# Errores de Python, del sistema y de llama.cpp explicados en español
+# (app/error_text.describe_exception: lo que se muestra en vez del texto en inglés).
+ERR_ARCHIVO_NO_ENCONTRADO = "No se encontró el archivo o la carpeta: {path}"
+ERR_SIN_PERMISO = (
+    "No hay permiso para usar {path}. Puede estar abierto en otro programa, ser de solo lectura o estar "
+    "sincronizándose con OneDrive; ciérralo o elige otra carpeta."
+)
+ERR_ES_CARPETA = "{path} es una carpeta, no un archivo."
+ERR_NO_ES_CARPETA = "Parte de la ruta {path} no es una carpeta."
+ERR_DISCO_LLENO = "No queda espacio en el disco para guardar {path}."
+ERR_RUTA_DEMASIADO_LARGA = "El nombre o la ruta es demasiado largo: {path}"
+ERR_JSON_INVALIDO = "El archivo no tiene un formato válido (JSON roto en la línea {line}, columna {col}). ¿Se cortó al guardarse?"
+ERR_CODIFICACION = "El archivo no es texto UTF-8 (¿es un documento de Word u otro formato?). Guárdalo como texto UTF-8."
+ERR_SIN_MEMORIA = "La computadora se quedó sin memoria RAM. Cierra otros programas o usa un modelo más chico."
+ERR_SIN_VRAM = (
+    "La tarjeta gráfica se quedó sin memoria (VRAM). Baja \"Capas en GPU\" o el contexto en la pestaña "
+    "Modelo, o usa un modelo más chico."
+)
+ERR_MODELO_NO_CARGA = (
+    "llama.cpp no pudo cargar el modelo. El archivo puede estar incompleto o dañado (vuelve a descargarlo), "
+    "o ser de una arquitectura que esta versión de llama.cpp no conoce."
+)
+ERR_CONTEXTO_LLAMA = "El texto pedido no entra en la ventana de contexto del modelo. Sube \"Contexto\" en la pestaña Modelo."
+ERR_LLAMA_INTERNO = "llama.cpp devolvió un error interno al generar. Vuelve a intentarlo; si se repite, recarga el modelo."
+ERR_TIEMPO_AGOTADO = "La operación tardó demasiado y se canceló."
+ERR_CONEXION = "Se cortó la conexión."
+ERR_DETALLE = "{message}\n(detalle técnico: {detail})"

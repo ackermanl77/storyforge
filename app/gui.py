@@ -27,6 +27,7 @@ import customtkinter as ctk
 
 from . import __version__
 from . import strings_es as S
+from .error_text import describe_exception
 from .engine import (
     ContextOverflowError,  # noqa: F401 - reexportado para las pruebas
     LocalStoryEngine,
@@ -254,7 +255,7 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         try:
             messagebox.showerror(
                 APP_TITLE,
-                S.ERROR_INESPERADO.format(where=where, error_type=exc_type.__name__, exc=exc,
+                S.ERROR_INESPERADO.format(where=where, error_type=exc_type.__name__, exc=describe_exception(exc),
                                           log_location=log_location()),
             )
         finally:
@@ -280,7 +281,7 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
             os.makedirs(folder, exist_ok=True)
             os.startfile(folder)  # type: ignore[attr-defined]  # solo Windows
         except Exception as exc:  # noqa: BLE001
-            messagebox.showinfo(APP_TITLE, S.LA_CARPETA_DE_REGISTROS_ES.format(folder=folder, exc=exc))
+            messagebox.showinfo(APP_TITLE, S.LA_CARPETA_DE_REGISTROS_ES.format(folder=folder, exc=describe_exception(exc)))
 
     def show_about(self) -> None:
         TextViewerDialog(self, S.ACERCA_DE.format(APP_TITLE=APP_TITLE), about_text(self.engine))
@@ -477,7 +478,7 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         self._autosave_error_reported = True
         messagebox.showwarning(
             APP_TITLE,
-            S.NO_SE_PUDO_ESCRIBIR_EL.format(autosave_path=self.autosave_path, exc=exc),
+            S.NO_SE_PUDO_ESCRIBIR_EL.format(autosave_path=self.autosave_path, exc=describe_exception(exc)),
         )
 
     def _discard_autosave(self) -> None:
@@ -588,15 +589,15 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
             backup = path + ".bak"
             if not os.path.isfile(backup) or not messagebox.askyesno(
                 APP_TITLE,
-                S.NO_SE_PUDO_ABRIR_EL.format(exc=exc, backup=os.path.basename(backup)),
+                S.NO_SE_PUDO_ABRIR_EL.format(exc=describe_exception(exc), backup=os.path.basename(backup)),
             ):
-                messagebox.showerror(APP_TITLE, S.NO_SE_PUDO_ABRIR_PROYECTO.format(exc=exc))
+                messagebox.showerror(APP_TITLE, S.NO_SE_PUDO_ABRIR_PROYECTO.format(exc=describe_exception(exc)))
                 return False
             try:
                 project = Project.load(backup)
                 from_backup = True
             except Exception as exc2:  # noqa: BLE001
-                messagebox.showerror(APP_TITLE, S.TAMPOCO_SE_PUDO_ABRIR_LA.format(exc2=exc2))
+                messagebox.showerror(APP_TITLE, S.TAMPOCO_SE_PUDO_ABRIR_LA.format(exc2=describe_exception(exc2)))
                 return False
         self.project = project
         # La copia .bak se abre sin destino: "Guardar" pregunta donde, para
@@ -657,7 +658,7 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         except Exception as exc:  # noqa: BLE001
             # Project.save() es atomico: el archivo anterior (si existia) sigue intacto.
             logger.exception("No se pudo guardar el proyecto en %s", path)
-            messagebox.showerror(APP_TITLE, S.NO_SE_PUDO_GUARDAR.format(path=path, exc=exc))
+            messagebox.showerror(APP_TITLE, S.NO_SE_PUDO_GUARDAR.format(path=path, exc=describe_exception(exc)))
             return False
         self.current_path = path
         # La copia de autoguardado quedaria obsoleta.
@@ -680,7 +681,7 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
             messagebox.showinfo(APP_TITLE, S.EXPORTADO_A.format(path=path))
         except Exception as exc:  # noqa: BLE001
             logger.exception("Error al exportar a %s", path)
-            messagebox.showerror(APP_TITLE, S.ERROR_AL_EXPORTAR.format(exc=exc))
+            messagebox.showerror(APP_TITLE, S.ERROR_AL_EXPORTAR.format(exc=describe_exception(exc)))
 
     def export_word(self) -> None:
         self._export(S.EXPORTAR_A_WORD, ".docx", S.WORD, export_docx)

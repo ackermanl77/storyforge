@@ -206,6 +206,39 @@ class TestRetryAlternatives(_Base):
         self.assertIn("1/2", panel.alt_label.cget("text"))
 
 
+class TestRetryLastSection(_Base):
+    def test_retry_section_keeps_the_text_before_the_last_section(self):
+        panel = self._chapter()
+        calls = []
+
+        def generate_chapter(project, chapter_index, progress_callback=None, cancel_check=None, resume_from=None):
+            calls.append(resume_from)
+            if resume_from is None:
+                self.engine.last_section_start = len("Part one. ")
+                return "Part one. Part two."
+            self.engine.last_section_start = len(resume_from.rstrip())
+            return resume_from.rstrip() + " Another ending."
+
+        self.engine.generate_chapter = generate_chapter
+        self.assertEqual(panel.retry_section_btn.cget("state"), "disabled")
+        panel._on_generate()
+        self.app.update()
+        self.assertEqual(panel.retry_section_btn.cget("state"), "normal")
+        panel._on_retry_section()
+        self.app.update()
+        self.assertEqual(calls, [None, "Part one."])  # handed over like Continuar: trailing space trimmed
+        self.assertEqual(panel.chapter.content, "Part one. Another ending.")
+        self.assertEqual(panel.alternatives, ["Part one. Part two.", "Part one. Another ending."])
+        self.assertEqual(panel.chapter.history_entries()[-1]["source"], "retry-section")
+        # Whole-run Retry still starts from the original point (scratch), not from the prefix.
+        panel._on_retry()
+        self.app.update()
+        self.assertIsNone(calls[-1])
+        # Another alternative on screen: the offset belongs to the newest result only.
+        panel._cycle_alternative(-1)
+        self.assertEqual(panel.retry_section_btn.cget("state"), "disabled")
+
+
 class TestFindReplaceF5(_Base):
     def test_chapter_replace_all_pushes_history(self):
         panel = self._chapter("Ana met Ana.")

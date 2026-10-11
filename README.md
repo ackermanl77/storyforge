@@ -66,6 +66,15 @@ correspondiente mas abajo.
 
 ## Historial de cambios
 
+**Reintentar la última sección y errores en español (2026-10-11):**
+- **"Últ. sección"** junto a Reintentar: vuelve a escribir solo la última sección de la última
+  ejecución (el motor recuerda dónde empezó, `engine.last_section_start`) y la suma como
+  alternativa; lo anterior no se toca.
+- **Errores en español**: los mensajes de Python, del sistema y de llama.cpp que llegaban en inglés
+  ("No such file or directory", "Expecting value", "Failed to load model", "CUDA error: out of
+  memory"...) se explican en español (`app/error_text.py`), con el texto original como detalle
+  técnico cuando viene de llama.cpp. Los registros conservan el original.
+
 **Capítulos más largos y limitaciones cerradas (2026-10-07/08):**
 - **Los capítulos llegan cerca de su objetivo.** Con Llama 3 8B un capítulo de 3000 palabras salía
   con ~550: la primera sección recibía todo el esquema y escribía un final, y al continuar el modelo

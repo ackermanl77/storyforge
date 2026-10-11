@@ -25,6 +25,7 @@ from tkinter import messagebox
 from typing import Any, Callable, Optional
 
 from . import strings_es as S
+from .error_text import describe_exception
 from .engine import ContextOverflowError, ModelNotLoadedError, OperationCancelled
 from .strings_es import APP_NAME
 
@@ -121,7 +122,8 @@ class EngineTaskRunner:
                         message = S.EL_CONTEXTO_ES_DEMASIADO_GRANDE.format(exc=exc)
                     else:
                         logger.exception("Error en '%s'", label)
-                        message = f"{error_prefix}{exc}" if error_prefix else S.ERROR_GENERICO.format(exc=exc)
+                        shown = describe_exception(exc)
+                        message = f"{error_prefix}{shown}" if error_prefix else S.ERROR_GENERICO.format(exc=shown)
                 if message:
                     show_error(message)
             finally:

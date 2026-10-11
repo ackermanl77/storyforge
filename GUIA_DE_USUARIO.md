@@ -204,6 +204,12 @@ deshabilitados se saltan).
   `<` y `>` las recorren. Las alternativas se guardan con el proyecto (las
   10 más recientes), así que al reabrirlo siguen ahí; editar el texto a mano
   las descarta. "Reintentar" en sí vale solo en la sesión en que generaste.
+- **Últ. sección** (al lado de Reintentar) vuelve a escribir solo la
+  **última sección** de la última ejecución: lo de antes queda igual y el
+  modelo continúa desde ahí con otra semilla. Sirve cuando el capítulo iba
+  bien y solo el final no te gusta. El resultado es otra alternativa más
+  (`<` `>`). Se activa mientras se ve el resultado de esa ejecución (no
+  después de cambiar de alternativa o editar a mano).
 - **Clic derecho sobre texto seleccionado**: Reescribir, Expandir,
   Describir o Acortar solo ese fragmento (o con una instrucción propia). Ves
   una vista previa con diferencias antes de aceptar.

@@ -151,6 +151,20 @@ class TestEngineGenerationLoop(unittest.TestCase):
         # 400 objetivo deberian tomar 3 llamadas o menos.
         self.assertLessEqual(engine._llm.calls, 4)
 
+    def test_records_where_the_last_section_starts(self):
+        engine = LocalStoryEngine()
+        engine._llm = FakeLlama()
+        project = make_project(target_words=400)
+        result = engine.generate_chapter(project, 0)
+        start = engine.last_section_start
+        self.assertIsNotNone(start)
+        self.assertTrue(0 < start < len(result))
+        # Continuing from that prefix regenerates only the last section: the prefix stays as it was.
+        prefix = result[:start]
+        again = engine.generate_chapter(project, 0, resume_from=prefix)
+        self.assertTrue(again.startswith(prefix.rstrip()))
+        self.assertEqual(engine.last_section_start, len(prefix.rstrip()))
+
     def test_respects_max_sections_cap(self):
         engine = LocalStoryEngine()
 

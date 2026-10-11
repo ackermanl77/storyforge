@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, List, Optional
 import customtkinter as ctk
 
 from . import strings_es as S
+from .error_text import describe_exception
 from .engine import OperationCancelled
 from .project import (
     CHAPTER_PURPOSES,
@@ -142,6 +143,10 @@ class ChapterPanel(ctk.CTkFrame):
         self.continue_cursor_btn.pack(side="left", padx=4, pady=4)
         self.retry_btn = ctk.CTkButton(btn_frame, text=S.REINTENTAR, width=85, state="disabled", command=self._on_retry)
         self.retry_btn.pack(side="left", padx=4, pady=4)
+        # Reintenta solo la ultima seccion de la ultima ejecucion: lo anterior queda igual.
+        self.retry_section_btn = ctk.CTkButton(btn_frame, text=S.REINTENTAR_SECCION, width=90, state="disabled",
+                                               command=self._on_retry_section)
+        self.retry_section_btn.pack(side="left", padx=(0, 4), pady=4)
         self.prev_alt_btn = ctk.CTkButton(btn_frame, text="<", width=28, state="disabled",
                                           command=lambda: self._cycle_alternative(-1))
         self.prev_alt_btn.pack(side="left", padx=(4, 0), pady=4)
@@ -548,6 +553,30 @@ class ChapterPanel(ctk.CTkFrame):
             self.alternatives = []  # el texto cambio desde la ultima ejecucion
         self._start_generation(resume_from=self._last_run["resume_from"], regenerate=[], retry=True)
 
+    def _section_retry_prefix(self) -> Optional[str]:
+        """El texto anterior a la ultima seccion de la ultima ejecucion, si lo
+        que se ve sigue siendo su resultado (si no, None: otra alternativa o
+        una edicion a mano)."""
+        run = self._last_run
+        if run is None or run.get("section_start") is None or run.get("result") is None:
+            return None
+        if self.content_box.get("1.0", "end-1c") != run["result"]:
+            return None
+        return run["result"][: run["section_start"]]
+
+    def _on_retry_section(self) -> None:
+        """Como Reintentar, pero solo la ultima seccion: continua desde el texto
+        que habia antes de ella (con otra semilla) y agrega el resultado como
+        otra alternativa. Si la ejecucion fue de una sola seccion desde cero,
+        equivale a Reintentar."""
+        prefix = self._section_retry_prefix()
+        if prefix is None or not self._can_start_engine_task():
+            return
+        if not self._validate_before_generation():
+            return
+        self._start_generation(resume_from=prefix if prefix.strip() else None, regenerate=[], retry=True,
+                               section_retry=True)
+
     def _cycle_alternative(self, step: int) -> None:
         if not self.alternatives or self.app.busy:
             return
@@ -572,6 +601,9 @@ class ChapterPanel(ctk.CTkFrame):
 
     def _refresh_retry_controls(self, busy: bool) -> None:
         self.retry_btn.configure(state="disabled" if busy or self._last_run is None else "normal")
+        self.retry_section_btn.configure(
+            state="disabled" if busy or self._section_retry_prefix() is None else "normal"
+        )
         many = len(self.alternatives) > 1 and not busy
         self.prev_alt_btn.configure(state="normal" if many else "disabled")
         self.next_alt_btn.configure(state="normal" if many else "disabled")
@@ -579,8 +611,14 @@ class ChapterPanel(ctk.CTkFrame):
             text=f"{self.alt_index + 1}/{len(self.alternatives)}" if len(self.alternatives) > 1 else ""
         )
 
-    def _start_generation(self, resume_from: Optional[str], regenerate: list[int], retry: bool = False) -> None:
-        if retry:
+    def _start_generation(self, resume_from: Optional[str], regenerate: list[int], retry: bool = False,
+                          section_retry: bool = False) -> None:
+        # Reintentar (todo, o la ultima seccion) vuelve a partir de lo mismo
+        # que la ejecucion original: se conserva su punto de partida.
+        run_resume_from = self._last_run["resume_from"] if section_retry and self._last_run else resume_from
+        if section_retry:
+            source = "retry-section"
+        elif retry:
             source = "retry"
         else:
             source = "continue" if resume_from else "generate"
@@ -682,7 +720,10 @@ class ChapterPanel(ctk.CTkFrame):
             self.content_box.see("end")
             if summary_text is not None:
                 self._show_summary_text(self.chapter.summary)
-            self._last_run = {"resume_from": resume_from}
+            section_start = getattr(engine, "last_section_start", None)
+            if not isinstance(section_start, int) or not 0 <= section_start <= len(result):
+                section_start = None
+            self._last_run = {"resume_from": run_resume_from, "section_start": section_start, "result": result}
             texts = previous_alternatives + [result]
             self.chapter.set_alternatives(texts, len(texts) - 1)
             if result.strip() and not cancelled():
@@ -732,7 +773,7 @@ class ChapterPanel(ctk.CTkFrame):
 
         def on_error(exc) -> Optional[str]:
             logger.exception("No se pudo regenerar el resumen del capítulo %d", self.index + 1, exc_info=exc)
-            return S.NO_SE_PUDO_GENERAR_RESUMEN.format(exc=exc)
+            return S.NO_SE_PUDO_GENERAR_RESUMEN.format(exc=describe_exception(exc))
 
         self.app.task_runner.run(
             S.RESUMEN, work, on_success=on_success, on_cancel=on_cancel, on_error=on_error,

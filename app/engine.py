@@ -324,6 +324,10 @@ class LocalStoryEngine:
         self.sampling = SamplingConfig()
         # Semilla usada por la ultima operacion (la elegida o la aleatoria).
         self.last_seed: Optional[int] = None
+        # Donde empezo la ultima seccion del ultimo generate_chapter() (posicion
+        # en el texto devuelto; lo anterior es prefijo intacto), o None si no se
+        # escribio ninguna. "Reintentar última sección" continua desde ahi.
+        self.last_section_start: Optional[int] = None
         self._op_seed: Optional[int] = None
         # "Detener" global: cualquier llamada en curso lo revisa en cada token.
         self._stop_event = threading.Event()
@@ -1037,6 +1041,7 @@ class LocalStoryEngine:
         """
         chapter = project.chapters[chapter_index]
         target = chapter.target_words
+        self.last_section_start = None
 
         full_text = (resume_from or "").rstrip()
         if full_text and count_words(full_text) >= target:
@@ -1190,6 +1195,7 @@ class LocalStoryEngine:
             else:
                 raw_joiner = "\n\n"
             full_text = f"{base_text}{joiner}{piece}" if base_text else piece
+            self.last_section_start = len(base_text)
             section += 1
             nudge = False
             self.stats.words_written = count_words(full_text)
@@ -1208,6 +1214,8 @@ class LocalStoryEngine:
             trimmed, was_trimmed = self._trim_dangling_sentence(full_text)
             if was_trimmed:
                 full_text = trimmed
+                if self.last_section_start is not None:
+                    self.last_section_start = min(self.last_section_start, len(full_text))
                 if progress_callback:
                     progress_callback(full_text, count_words(full_text), target)
         return full_text

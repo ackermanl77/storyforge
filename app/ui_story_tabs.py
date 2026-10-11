@@ -10,6 +10,7 @@ from tkinter import filedialog, messagebox
 import customtkinter as ctk
 
 from . import strings_es as S
+from .error_text import describe_exception
 from .project import (
     CHAPTER_HEADING_CHOICES,
     DEFAULT_PROJECT_NAME,
@@ -136,7 +137,7 @@ class StoryTabsMixin:
         try:
             text = Path(path).read_text(encoding="utf-8", errors="replace")
         except OSError as exc:
-            messagebox.showerror(APP_TITLE, S.NO_SE_PUDO_LEER_ARCHIVO.format(exc=exc))
+            messagebox.showerror(APP_TITLE, S.NO_SE_PUDO_LEER_ARCHIVO.format(exc=describe_exception(exc)))
             return
         if box.get().strip() and not messagebox.askyesno(
             APP_TITLE, S.ESTO_REEMPLAZARA_EL_CONTENIDO_ACTUAL

@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 import customtkinter as ctk
 
 from . import strings_es as S
+from .error_text import describe_exception
 from .chat_format import (
     CHAT_FORMAT_AUTO,
     CHAT_FORMAT_CHOICES,
@@ -518,7 +519,7 @@ class ModelTabMixin:
 
         def on_error(exc) -> str:
             logger.error("No se pudo cargar el modelo %s: %s", path, exc)
-            message = S.ERROR_GENERICO.format(exc=exc)
+            message = S.ERROR_GENERICO.format(exc=describe_exception(exc))
             self.after(0, lambda: self.model_status.configure(text=message, text_color=COLOR_ERROR))
             return ""  # el error queda en la pestana, sin ventana extra
 

@@ -10,6 +10,7 @@ from typing import Optional
 import customtkinter as ctk
 
 from . import strings_es as S
+from .error_text import describe_exception
 from .project import (
     MAX_CHAPTERS,
     MAX_OUTLINE_WORDS_PER_CHAPTER,
@@ -237,7 +238,7 @@ class OutlineTabMixin:
             if len(snippet) > 800:
                 snippet = snippet[:800] + " [...]"
             self.after(0, lambda: self.outline_status.configure(text="", text_color=COLOR_MUTED))
-            return (S.NO_SE_MODIFICO_EL_ESQUEMA.format(exc=exc, snippet=snippet))
+            return (S.NO_SE_MODIFICO_EL_ESQUEMA.format(exc=describe_exception(exc), snippet=snippet))
         return None
 
     def _apply_outline(self, outline_items: list[tuple[str, str]]) -> None:
