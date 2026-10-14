@@ -88,6 +88,8 @@ ruff check app tests
 
 ## Known Limitations
 
+- **The story settings are only as strong as the model's instruction following** (measured 2026-10-13, same chapter, fixed seeds, `tests/test_real_model.py::TestRealModelStorySettings` keeps the countable part). Point of view works on both models tried: first person gave 60-85 % first-person narration pronouns and second person 59-77 % "you" (the rest are other characters), on daredevil-8b and NemoReRemix-12B, held through the whole chapter. Dialogue balance moves the 8B in order (share of words inside quotes: "Casi todo narración" 0.05-0.10, no setting 0.16-0.22, "Más diálogo" 0.23-0.34, "Casi todo diálogo" 0.32-0.37 -- never the three quarters asked for) but barely moves the 12B (0.22 vs 0.16 for "Casi todo diálogo", within its run-to-run noise). Tone shifts the wording (dark: "musty", "whispers of memories long buried"; light: "a warm hug", nostalgia) more than the events. What made the difference: the setting repeated in the task sentence and in a reminder right before writing, and formatting rules that no longer said "third-person narration is the default"; a dialogue line among the FORMATTING RULES was also tried and did not help, so it was left out. GPU runs of the same seed are not bit-repeatable, so compare settings over several seeds.
+
 See the README's "Limitaciones reales que debes conocer" section for the user-facing version. Code-level ones:
 
 - **Nothing since the P1 round has been run against a real GGUF.** Chat templates, sampling parameters (`min_p`, `seed`, presence/frequency penalties), `flash_attn`/`n_batch`/`type_k`/`type_v` and the tokens/s numbers are exercised with fakes only; run `tests/test_real_model.py` with a small model, and check output quality and VRAM use by hand.

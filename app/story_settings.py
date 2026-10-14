@@ -61,13 +61,20 @@ SUGGESTIONS = {
 # Equilibrio narración / diálogo: claves guardadas (sin acentos, como las de
 # WRITING_STYLES) -> instrucción. "" = sin instrucción.
 DIALOGUE_BALANCES = ("mucha_narracion", "mas_narracion", "equilibrado", "mas_dialogo", "mucho_dialogo")
+# Con proporciones concretas: medido con daredevil-8b (2026-10-13), "mostly dialogue" a secas
+# solo llevaba el dialogo de 11 % a 22 % de las palabras.
 DIALOGUE_INSTRUCTIONS = {
-    "mucha_narracion": "Mostly narration: use dialogue sparingly, only for key moments.",
-    "mas_narracion": "More narration than dialogue.",
-    "equilibrado": "Balance narration and dialogue roughly evenly.",
-    "mas_dialogo": "More dialogue than narration: let scenes unfold through what characters say.",
-    "mucho_dialogo": "Mostly dialogue: tell the story through conversation, with brief narration between lines.",
+    "mucha_narracion": ("Mostly narration: at most a few short spoken lines in the whole passage (under a tenth "
+                        "of the words); report conversations in summary instead of quoting them."),
+    "mas_narracion": "More narration than dialogue: spoken lines should be well under a quarter of the words.",
+    "equilibrado": "Balance narration and dialogue: roughly a third to half of the words as spoken lines.",
+    "mas_dialogo": ("More dialogue than narration: over half of the words should be spoken lines in quotation "
+                    "marks, with short narration between them."),
+    "mucho_dialogo": ("Mostly dialogue: about three quarters of the words should be spoken lines in quotation "
+                      "marks; narration only as brief beats of a sentence or two between lines."),
 }
+TONE_INSTRUCTION = ("let word choice, imagery, pacing and the way the characters speak carry this tone "
+                    "throughout, even in quiet moments")
 
 BUILTIN_PRESETS: Dict[str, Dict[str, str]] = {
     "Thriller": {"genre": "Thriller", "theme": "Poder y corrupción", "tone": "Tenso y de suspenso",
@@ -118,10 +125,13 @@ def clean_settings(data: dict) -> Dict[str, str]:
 def build_story_settings_block(project) -> str:
     """El bloque STORY SETTINGS del prompt (vacío si no hay ningún ajuste)."""
     lines: List[str] = []
-    for field, label in (("genre", "Genre"), ("theme", "Theme"), ("tone", "Tone")):
+    for field, label in (("genre", "Genre"), ("theme", "Theme")):
         value = english_value(field, getattr(project, field, ""))
         if value:
             lines.append(f"{label}: {value}")
+    tone = english_value("tone", getattr(project, "tone", ""))
+    if tone:
+        lines.append(f"Tone: {tone} -- {TONE_INSTRUCTION}.")
     pov = english_value("point_of_view", getattr(project, "point_of_view", ""))
     if pov:
         lines.append(f"Point of view: {pov}. Keep this point of view consistently.")
@@ -131,6 +141,55 @@ def build_story_settings_block(project) -> str:
     if not lines:
         return ""
     return "STORY SETTINGS (follow them throughout):\n" + "\n".join(lines) + "\n\n"
+
+
+# El mismo pedido, en pocas palabras, para la oracion principal de la tarea ("Now write
+# Chapter N..."): medido con daredevil-8b, el bloque y el recordatorio solos no movian el
+# dialogo; la orden misma tiene que decirlo.
+DIALOGUE_TASK_PHRASES = {
+    "mucha_narracion": "mostly as narration, with very little dialogue",
+    "mas_narracion": "with more narration than dialogue",
+    "equilibrado": "balancing narration and dialogue",
+    "mas_dialogo": "with more dialogue than narration",
+    "mucho_dialogo": "mostly as dialogue between the characters",
+}
+
+
+def pov_short(project) -> str:
+    """El punto de vista en pocas palabras ('first person ("I")'), o ""."""
+    pov = english_value("point_of_view", getattr(project, "point_of_view", ""))
+    return pov.split(":")[0].split(", ")[0].strip() if pov else ""
+
+
+def task_directive(project) -> str:
+    """'Write it in first person ("I"), mostly as dialogue between the characters.' o ""."""
+    parts = []
+    pov = pov_short(project)
+    if pov:
+        parts.append(f"in {pov}")
+    dialogue = DIALOGUE_TASK_PHRASES.get(getattr(project, "dialogue_balance", ""), "")
+    if dialogue:
+        parts.append(dialogue)
+    return f"Write it {', '.join(parts)}." if parts else ""
+
+
+def build_story_settings_reminder(project) -> str:
+    """Recordatorio corto de punto de vista, diálogo y tono para el final del
+    prompt (junto a la nota del autor: lo último que lee el modelo antes de
+    escribir pesa más que el bloque del principio). Vacío si no hay ninguno."""
+    parts: List[str] = []
+    pov = english_value("point_of_view", getattr(project, "point_of_view", ""))
+    if pov:
+        parts.append(f"write in {pov}")
+    dialogue = DIALOGUE_INSTRUCTIONS.get(getattr(project, "dialogue_balance", ""), "")
+    if dialogue:
+        parts.append(dialogue[0].lower() + dialogue[1:].rstrip("."))
+    tone = english_value("tone", getattr(project, "tone", ""))
+    if tone:
+        parts.append(f"keep the tone {tone}")
+    if not parts:
+        return ""
+    return "STORY SETTINGS REMINDER: " + "; ".join(parts) + "."
 
 
 # ---------------- presets ----------------

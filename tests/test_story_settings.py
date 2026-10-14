@@ -138,3 +138,38 @@ class PhoneServerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PromptPlacementTests(unittest.TestCase):
+    """What a real model was measured to follow (2026-10-13): the setting stated in the
+    task sentence and repeated right before writing, and formatting rules that don't
+    contradict the chosen point of view."""
+
+    def test_the_task_sentence_and_the_closing_reminder_repeat_pov_and_dialogue(self):
+        project = _project(point_of_view="Primera persona", dialogue_balance="mucho_dialogo", tone="Épico")
+        prompt = build_chapter_start_chat(project, 0, BUDGET)
+        self.assertIn('Write it in first person ("I"), mostly as dialogue between the characters.', prompt.user)
+        reminder = prompt.user[prompt.user.index("STORY SETTINGS REMINDER:"):]
+        self.assertIn("about three quarters of the words should be spoken lines", reminder)
+        self.assertIn("keep the tone epic and grand", reminder)
+        from app.prompts import build_chapter_continuation_chat
+
+        cont = build_chapter_continuation_chat(project, 0, BUDGET, "Ana looked at the sea.", 300, 100)
+        self.assertIn("STORY SETTINGS REMINDER:", cont.user)
+        self.assertEqual(ss.task_directive(_project()), "")
+        self.assertEqual(ss.build_story_settings_reminder(_project()), "")
+
+    def test_formatting_rules_follow_the_chosen_point_of_view(self):
+        from app.prompts import STYLE_GUIDE, style_guide_for
+
+        self.assertIs(style_guide_for(_project()), STYLE_GUIDE)
+        first = style_guide_for(_project(point_of_view="Primera persona"))
+        self.assertNotIn("Third-person narration is the default", first)
+        self.assertIn('- Narration is in first person ("I"), as set in STORY SETTINGS', first)
+        self.assertIn('second person ("you"), use it only inside dialogue', first)
+        second = style_guide_for(_project(point_of_view="Segunda persona"))
+        self.assertNotIn("use it only inside dialogue", second)
+        own = style_guide_for(_project(point_of_view="like a diary"))
+        self.assertIn("- Narration is in like a diary, as set in STORY SETTINGS", own)
+        prompt = build_chapter_start_chat(_project(point_of_view="Segunda persona"), 0, BUDGET)
+        self.assertNotIn("Third-person narration is the default", prompt.system)

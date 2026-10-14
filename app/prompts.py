@@ -143,6 +143,29 @@ FORMATTING RULES (follow strictly):
 """
 
 
+_DEFAULT_POV_RULE = "- Third-person narration is the default body text: plain prose, past tense.\n"
+_SECOND_PERSON_RULE = (
+    "- If a character addresses the reader or another character directly in\n"
+    "  second person (\"you\"), use it only inside dialogue, in quotation marks.\n"
+)
+
+
+def style_guide_for(project: Project) -> str:
+    """STYLE_GUIDE, salvo que el proyecto elija un punto de vista: entonces la regla
+    "tercera persona por defecto" (y, en segunda persona, la que limita el "you" al
+    dialogo) cede ante el de STORY SETTINGS, en vez de contradecirlo."""
+    from .story_settings import pov_short
+
+    pov = pov_short(project)
+    if not pov:
+        return STYLE_GUIDE
+    guide = STYLE_GUIDE.replace(
+        _DEFAULT_POV_RULE, f"- Narration is in {pov}, as set in STORY SETTINGS: plain prose.\n")
+    if pov.startswith("second person"):
+        guide = guide.replace(_SECOND_PERSON_RULE, "")
+    return guide
+
+
 def _trim_words(text: str, max_words: int) -> str:
     """Conserva el INICIO del texto (para plot/personajes/setting/resumenes:
     lo mas importante suele estar planteado al principio)."""
@@ -515,12 +538,15 @@ def _chapter_prompt_parts(
         f"{outline_block}"
         f"{purpose_instruction}"
         f"{style_emphasis}"
-        f"{STYLE_GUIDE}\n"
+        f"{style_guide_for(project)}\n"
     )
     task = (
         f"Now write Chapter {chapter_index + 1}, titled \"{chapter.title}\". "
         f"Target length: approximately {chapter.target_words} words. "
     )
+    directive = task_directive(project)
+    if directive:
+        task += f"{directive} "
     blocks = [lore_block.rstrip()] if lore_block else []
     return bible, task, blocks
 
@@ -621,6 +647,8 @@ def build_author_note(project: Project, chapter: Chapter) -> str:
     return "AUTHOR'S NOTE (apply this to the passage you write now): " + " ".join(notes)
 
 
+from .story_settings import build_story_settings_reminder, task_directive  # noqa: E402
+
 STEP_CONTEXT_HEADER = "STEP-SPECIFIC CONTEXT (closest to the passage you are writing now):"
 
 
@@ -640,6 +668,9 @@ def build_chapter_start_chat(
         return build_custom_chapter_chat(project, chapter_index, budget)
     bible, task, step_blocks = _chapter_prompt_parts(project, chapter_index, **_chapter_budget_kwargs(budget))
     step_blocks += [h for h in (hints or []) if h]
+    reminder = build_story_settings_reminder(project)
+    if reminder:
+        step_blocks.append(reminder)
     note = build_author_note(project, project.chapters[chapter_index])
     if note:
         step_blocks.append(note)
@@ -686,7 +717,8 @@ def build_chapter_continuation_chat(
     note = build_author_note(project, project.chapters[chapter_index])
     # Orden de los bloques variables: lorebook, largo, pistas y al final la
     # nota del autor -- lo ultimo que lee el modelo antes de escribir.
-    tail_blocks = hints + ([note] if note else [])
+    reminder = build_story_settings_reminder(project)
+    tail_blocks = hints + ([reminder] if reminder else []) + ([note] if note else [])
     step_context = _step_context_block(step_blocks + [f"Write about {remaining_words} more words."] + tail_blocks)
     # Solo el ultimo parrafo (~CONTINUATION_PREFILL_WORDS) va pre-llenado en la
     # respuesta; el resto de la cola va en el mensaje como contexto. Con toda la
@@ -1057,7 +1089,7 @@ def build_refine_chapter_prompt(
         f"EDITING INSTRUCTION: {instruction.strip()}\n\n"
         f"{part_note}"
         f"{style_emphasis}"
-        f"{STYLE_GUIDE}\n"
+        f"{style_guide_for(project)}\n"
         f"CURRENT CHAPTER TEXT:\n{content}\n\n"
         "Revised chapter:"
     )
@@ -1164,11 +1196,11 @@ def build_refine_chapter_chat(
     marker = "EDITING INSTRUCTION:"
     cut = raw.find(marker)
     system = raw[:cut].rstrip() if cut > 0 else "You are editing an already-written chapter of a longer story."
-    style = f"{build_writing_style_instruction(project)}{STYLE_GUIDE}".rstrip()
+    style = f"{build_writing_style_instruction(project)}{style_guide_for(project)}".rstrip()
     user = raw[cut:] if cut > 0 else raw
     # En chat las reglas de estilo van en el turno de sistema, no en medio
     # del pedido del usuario.
-    user = user.replace(f"{build_writing_style_instruction(project)}{STYLE_GUIDE}\n", "")
+    user = user.replace(f"{build_writing_style_instruction(project)}{style_guide_for(project)}\n", "")
     if user.endswith("Revised chapter:"):
         user = user[: -len("Revised chapter:")].rstrip()
     return ChatPrompt(system=f"{system}\n\n{style}", user=user, raw=raw)
@@ -1252,7 +1284,7 @@ def build_rewrite_span_chat(
         "You are editing one passage of an already-written chapter of a longer story. "
         "Output only the replacement passage -- no notes, no quotes around it, no "
         "commentary, and no text from before or after the passage.\n\n"
-        f"{style_emphasis}{STYLE_GUIDE}".rstrip()
+        f"{style_emphasis}{style_guide_for(project)}".rstrip()
     )
     user = (
         f"Chapter {chapter_index + 1}: \"{chapter.title}\".\n\n"

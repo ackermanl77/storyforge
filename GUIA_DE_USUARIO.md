@@ -318,6 +318,14 @@ Vacíos (o "(Sin indicar)"), no cambian nada: el prompt queda igual que
 antes. El punto de vista elegido se le pide al modelo que lo mantenga en
 toda la historia.
 
+Qué tanto se nota depende del modelo. Medido con los modelos de la carpeta
+models: el **punto de vista** se cumple muy bien (8B y 12B). El **diálogo**
+mueve bastante al modelo 8B (de un 5 % de texto entre comillas con "Casi
+todo narración" a un 35 % con "Casi todo diálogo") y poco al 12B; ningún
+modelo llega a "tres cuartas partes de diálogo". El **tono** cambia sobre
+todo el vocabulario y el ambiente. Si un ajuste no se nota, súmale una nota
+del autor más directa o prueba otro modelo.
+
 **Presets**: guardan juntos estos cinco ajustes y el **Tipo de escritura**.
 Elige uno en "Preset" y pulsa **Aplicar**; **Guardar como…** guarda los
 ajustes actuales con un nombre (si ya existe, lo reemplaza) y **Borrar**
