@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import gc
 import glob
+import logging
 import os
 import random
 import re
@@ -27,6 +28,7 @@ from .chat_format import (
 )
 from .gguf import KV_CACHE_TYPES, friendly_load_error, list_model_entries, missing_shards, model_info
 from .project import MAX_CHAPTERS, MAX_WORDS_PER_CHAPTER, Project, count_words
+from .output_guard import clean_section
 from .prompts import (
     FINAL_SECTION_HINT,
     NOT_OVER_NUDGE,
@@ -60,6 +62,9 @@ PromptLike = Union[str, ChatPrompt]
 # Valores de type_k/type_v de llama.cpp (enum ggml_type) para la cache KV.
 GGML_KV_TYPES = {"f16": 1, "q8_0": 8, "q4_0": 2}
 DEFAULT_N_BATCH = 512
+
+
+logger = logging.getLogger(__name__)
 
 
 class OperationCancelled(RuntimeError):
@@ -328,6 +333,9 @@ class LocalStoryEngine:
         # en el texto devuelto; lo anterior es prefijo intacto), o None si no se
         # escribio ninguna. "Reintentar última sección" continua desde ahi.
         self.last_section_start: Optional[int] = None
+        # Secciones del ultimo generate_chapter() a las que output_guard les quito
+        # algo (eco del prompt, cercas de codigo...): la UI sugiere revisar el formato de chat.
+        self.cleaned_sections = 0
         self._op_seed: Optional[int] = None
         # "Detener" global: cualquier llamada en curso lo revisa en cada token.
         self._stop_event = threading.Event()
@@ -1042,6 +1050,7 @@ class LocalStoryEngine:
         chapter = project.chapters[chapter_index]
         target = chapter.target_words
         self.last_section_start = None
+        self.cleaned_sections = 0
 
         full_text = (resume_from or "").rstrip()
         if full_text and count_words(full_text) >= target:
@@ -1174,6 +1183,13 @@ class LocalStoryEngine:
                 ) from exc
 
             piece = result.text.rstrip() if prefilled and not new_paragraph else result.text.strip()
+            # Code fences, echoed instructions and the already-written ending copied back
+            # (a model in the wrong chat format "answers" instead of continuing): app/output_guard.py.
+            piece, removed = clean_section(piece, base_text)
+            if removed:
+                logger.warning("Capítulo %d, sección %d: se quitó %s de la respuesta del modelo (¿formato de chat?)",
+                               chapter_index + 1, section + 1, ", ".join(removed))
+                self.cleaned_sections += 1
             if not piece.strip():
                 if result.finish_reason == "cancelled" or empty_retries >= MAX_EMPTY_SECTION_RETRIES:
                     break
