@@ -39,6 +39,11 @@
       <p class="muted small">No abras el mismo proyecto a la vez en la ventana de StoryForge y en el celular: cada uno guardaría encima de los cambios del otro.</p>
     </div>
     <div class="card">
+      <h2>Generador de historias</h2>
+      <p class="muted small">Una historia completa de una vez, sin proyecto, en esta PC.</p>
+      <a id="generator" class="btn small" href="/generador">Abrir el generador</a>
+    </div>
+    <div class="card">
       <button id="stop" class="btn danger block">Detener el servidor</button>
     </div>
   </main>
@@ -48,6 +53,7 @@
     (async function () {
       const info = await (await fetch("/api/conexion")).json();
       document.getElementById("url").textContent = info.url;
+      document.getElementById("generator").href = "/generador" + new URL(info.url).search;
       document.getElementById("folder").textContent = "Proyectos del servidor: " + info.carpeta;
       if (window.QRCode) {
         new QRCode(document.getElementById("qr"), { text: info.url, width: 240, height: 240, correctLevel: QRCode.CorrectLevel.M });

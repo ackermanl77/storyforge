@@ -55,6 +55,7 @@ A single `Llama` instance is not safe for concurrent inference calls. `StoryForg
 | Chat-template rendering (GGUF Jinja, presets, raw) | `app/chat_format.py` |
 | Explicit Tab / Shift+Tab order for panels and dialogs | `app/ui_focus.py` (`apply_tab_order()`) |
 | Where models, `nltk_data`, autosave, log and settings live (source vs `.exe`, `STORYFORGE_USER_DATA_DIR`) | `app/paths.py` |
+| Story generator page (`/generador`, `--generador`): form -> prompt, history, saved, presets | `app/generator.py`, `app/web/generador.*`, `StoryForgeService.start_story()` |
 | Desktop build / installer | `build.bat`, `storyforge.spec`, `installer/StoryForge.iss` |
 | CI (lint, tests with coverage, `cpu`/`cuda13` builds, tag release) | `.github/workflows/build-exe.yml` |
 | Local coverage report | `scripts/run_coverage.ps1` |
@@ -103,6 +104,8 @@ See the README's "Limitaciones reales que debes conocer" section for the user-fa
 - **The last verified local `.exe` builds (2026-10-01, see "Release") predate the final icon, the Tab order and the prompt-layout change**, and no `StoryForge-App\` build is currently present: run `build.bat` and launch it before relying on the current code as an `.exe` (CI builds the zips but doesn't launch them).
 
 ## Recently Fixed
+
+- **Story generator page** (2026-10-14). A separate browser page, `/generador` (`StoryForge.exe --generador`, an installer shortcut, a link on the QR page), for one-shot stories: plot, characters, setting, genre, theme, point of view, tone, additional context, purpose, format (prose/screenplay/stage play/poetry), length and dialogue balance. `app/generator.py` validates the form and builds one English prompt; `StoryForgeService.start_story()` runs it through `engine.generate_chapter()` on a temporary one-chapter project with a custom prompt (sections, streaming, Stop, `output_guard`), user braces neutralised so they aren't placeholders. History (200 unsaved entries; saved ones are kept), saved stories and user presets live in `user_data_dir()/generador.json`. Tests: `tests/test_generator.py`. Idea taken from an online story generator's form; own design.
 
 - **Story settings and presets** (2026-10-13). `Project.genre/theme/tone/point_of_view/dialogue_balance` (saved in the project; old projects load with them empty) and `app/story_settings.py`: suggestions mapped to precise English instructions, the STORY SETTINGS prompt block (added in front of the writing-style emphasis by `prompts.build_writing_style_instruction()`, so the chapter, continuation, outline and refine prompts all get it; empty settings leave every prompt byte-identical, as the snapshot tests confirm), and presets (seven built in, user ones in settings.json under `story_presets`). Plot tab row, phone-server fields (`genero`, `tema`, `tono`, `punto_de_vista`, `dialogo`, plus suggestions and presets in the project view) and four new custom-prompt placeholders. Idea taken from an online story generator's form (genre, theme, tone, point of view, dialogue balance, presets).
 

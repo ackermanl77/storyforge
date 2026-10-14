@@ -744,3 +744,7 @@ DIALOGUE_LABELS: Dict[str, str] = {
     "mas_dialogo": "Más diálogo",
     "mucho_dialogo": "Casi todo diálogo",
 }
+
+# Generador de historias (/generador, app/generator.py).
+GENERADOR_TAREA = "Generar historia"
+WEB_AYUDA_GENERADOR = "Abre el generador de historias en el navegador (una historia de una vez, sin proyecto)."

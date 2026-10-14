@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Generador de historias · StoryForge</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/generador.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/icon.svg" alt="" width="28" height="28">
+      <div>
+        <h1>Generador de historias</h1>
+        <p class="sub">StoryForge · con tu modelo local, sin internet</p>
+      </div>
+    </div>
+    <div class="model">
+      <select id="model-select" aria-label="Modelo"></select>
+      <button id="load-model" class="btn">Cargar modelo</button>
+      <span id="model-status" class="pill muted">Sin modelo</span>
+    </div>
+  </header>
+
+  <p id="auth-warning" class="banner hidden">Abre esta página desde el acceso directo «StoryForge - Generador de historias» (o <code>StoryForge.exe --generador</code>): el enlace trae la clave de acceso.</p>
+
+  <main class="layout">
+    <!-- ===== formulario ===== -->
+    <section class="card form" aria-label="Datos de la historia">
+      <div class="row preset-row">
+        <select id="preset-select" aria-label="Cargar preset"><option value="">Cargar preset…</option></select>
+        <button id="save-preset" class="btn ghost small" type="button">Guardar preset</button>
+        <button id="delete-preset" class="btn ghost small" type="button" title="Borrar el preset elegido (solo los tuyos)">Borrar</button>
+        <button id="clear-form" class="btn ghost small" type="button">Limpiar</button>
+      </div>
+
+      <label class="field">
+        <span class="label">Trama de la historia <em>*</em><small data-count="plot"></small></span>
+        <textarea id="plot" rows="5" data-field="plot" placeholder="¿Qué pasa en la historia? Una idea o un resumen detallado."></textarea>
+      </label>
+      <label class="field">
+        <span class="label">Personajes<small data-count="characters"></small></span>
+        <textarea id="characters" rows="3" data-field="characters" placeholder="Nombres, rasgos, relaciones…"></textarea>
+      </label>
+      <label class="field">
+        <span class="label">Ambientación<small data-count="setting"></small></span>
+        <textarea id="setting" rows="2" data-field="setting" placeholder="Dónde y cuándo ocurre."></textarea>
+      </label>
+
+      <div class="grid2">
+        <label class="field"><span class="label">Género</span>
+          <input id="genre" data-field="genre" list="dl-genre" placeholder="p. ej. Ciencia ficción"></label>
+        <label class="field"><span class="label">Tema</span>
+          <input id="theme" data-field="theme" list="dl-theme" placeholder="p. ej. Redención"></label>
+        <label class="field"><span class="label">Punto de vista</span>
+          <input id="point_of_view" data-field="point_of_view" list="dl-point_of_view" placeholder="p. ej. Primera persona"></label>
+        <label class="field"><span class="label">Tono</span>
+          <input id="tone" data-field="tone" list="dl-tone" placeholder="p. ej. Oscuro y misterioso"></label>
+      </div>
+      <datalist id="dl-genre"></datalist><datalist id="dl-theme"></datalist>
+      <datalist id="dl-point_of_view"></datalist><datalist id="dl-tone"></datalist>
+
+      <label class="field">
+        <span class="label">Contexto adicional<small data-count="context"></small></span>
+        <textarea id="context" rows="2" data-field="context" placeholder="Cualquier otra indicación: público, estilo, cosas que deben o no pasar…"></textarea>
+      </label>
+
+      <fieldset class="field">
+        <legend class="label">Propósito</legend>
+        <div id="purpose" class="chips" role="radiogroup"></div>
+      </fieldset>
+      <fieldset class="field">
+        <legend class="label">Formato</legend>
+        <div id="format" class="chips" role="radiogroup"></div>
+      </fieldset>
+
+      <div class="grid2">
+        <label class="field"><span class="label">Largo</span><select id="length"></select></label>
+        <label class="field"><span class="label">Idioma</span>
+          <select id="language" disabled><option>English</option></select></label>
+      </div>
+
+      <div class="field">
+        <span class="label">Equilibrio de diálogo
+          <label class="inline"><input type="checkbox" id="dialogue-on"> indicar</label></span>
+        <div class="slider-row">
+          <span class="muted small">Narración</span>
+          <input type="range" id="dialogue" min="0" max="100" step="5" value="50" disabled aria-label="Equilibrio entre narración y diálogo">
+          <span class="muted small">Diálogo</span>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="generate" class="btn primary big">✨ Generar</button>
+        <button id="stop" class="btn danger hidden">Detener</button>
+      </div>
+      <p id="form-error" class="error hidden" role="alert"></p>
+    </section>
+
+    <!-- ===== resultados ===== -->
+    <section class="card results" aria-label="Resultados">
+      <nav class="tabs" role="tablist">
+        <button class="tab active" data-tab="outputs" role="tab">Resultados</button>
+        <button class="tab" data-tab="history" role="tab">Historial</button>
+        <button class="tab" data-tab="saved" role="tab">Guardados</button>
+      </nav>
+      <div id="progress" class="progress hidden" aria-live="polite">
+        <div class="bar"><div id="progress-fill"></div></div>
+        <span id="progress-text" class="small muted"></span>
+      </div>
+      <div id="tab-outputs" class="tab-body">
+        <div id="live" class="story live hidden"><pre id="live-text"></pre></div>
+        <div id="outputs"></div>
+        <p id="outputs-empty" class="empty">Completa el formulario y pulsa <b>Generar</b>. Las historias aparecen aquí y quedan en el Historial.</p>
+      </div>
+      <div id="tab-history" class="tab-body hidden"><div id="history"></div></div>
+      <div id="tab-saved" class="tab-body hidden"><div id="saved"></div></div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast hidden" role="status"></div>
+  <script src="/generador.js"></script>
+</body>
+</html>

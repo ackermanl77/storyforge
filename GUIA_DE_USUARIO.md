@@ -26,6 +26,7 @@ rendimiento/GPU, limitaciones) y [docs/](docs/PROJECT_STATUS.md)
 5. [Guardar, abrir y exportar](#guardar-abrir-y-exportar)
 6. [Autoguardado y recuperación](#autoguardado-y-recuperación)
    - [Usar StoryForge desde el celular](#usar-storyforge-desde-el-celular)
+   - [Generador de historias](#generador-de-historias)
 7. [Límites y validaciones](#límites-y-validaciones)
 8. [Convenciones de formato del texto generado](#convenciones-de-formato-del-texto-generado)
 9. [Preguntas frecuentes / solución de problemas](#preguntas-frecuentes--solución-de-problemas)
@@ -641,6 +642,43 @@ Cosas a tener en cuenta:
   siguen en la ventana de la PC.
 - Para apagarlo: botón **"Detener el servidor"** en la página del QR (o
   Ctrl+C en la consola).
+
+## Generador de historias
+
+Una página del navegador para escribir **una historia de una vez**, sin
+crear un proyecto ni capítulos. Ábrela con el acceso directo **"StoryForge -
+Generador de historias"** (o `StoryForge.exe --generador`): arranca el
+servidor local y abre la página con la clave de acceso ya puesta. También hay
+un enlace en la página del QR.
+
+1. Arriba a la derecha elige un modelo y pulsa **Cargar modelo** (si ya hay
+   uno cargado, se muestra al lado).
+2. Llena el formulario. Solo la **trama** es obligatoria; personajes,
+   ambientación, género, tema, punto de vista, tono y contexto adicional son
+   opcionales (los cuatro campos cortos tienen sugerencias, pero aceptan
+   cualquier texto).
+3. Elige el **propósito** (historia completa, comienzo, capítulo, escena
+   climática, final o epílogo), el **formato** (prosa, guion de cine, obra de
+   teatro o poesía) y el **largo**. Marca "indicar" en **Equilibrio de
+   diálogo** si quieres mover el control entre narración y diálogo.
+4. Pulsa **✨ Generar**. El texto aparece mientras se escribe; **Detener**
+   corta y guarda lo escrito hasta ese momento.
+
+La historia se escribe en inglés (como el resto de StoryForge), aunque
+llenes el formulario en español.
+
+Cada historia queda en **Historial** (las últimas 200) con sus botones:
+**Copiar**, **☆ Guardar** (pasa a **Guardados** y nunca se borra sola),
+**Descargar .txt**, **Regenerar** (otra versión con los mismos ajustes) y
+**Usar estos ajustes** (los vuelve a poner en el formulario).
+
+**Presets:** "Cargar preset…" trae cuatro ejemplos completos y los tuyos.
+**Guardar preset** guarda el formulario actual con un nombre; **Borrar**
+quita el preset elegido (solo los tuyos). El formulario también se recuerda
+entre visitas.
+
+No generes en el generador mientras la ventana de StoryForge o el celular
+usan el mismo servidor: el modelo hace una tarea a la vez.
 
 ## Autoguardado y recuperación
 

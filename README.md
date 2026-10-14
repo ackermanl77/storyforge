@@ -66,6 +66,20 @@ correspondiente mas abajo.
 
 ## Historial de cambios
 
+**Generador de historias (2026-10-14):**
+- Una página aparte, **/generador**, para escribir una historia de una vez sin proyecto ni
+  capítulos: trama, personajes, ambientación, género, tema, punto de vista, tono y contexto
+  adicional; propósito (historia completa, comienzo, capítulo, escena climática, final, epílogo),
+  formato (prosa, guion de cine, obra de teatro, poesía), largo (~300 a ~6.000 palabras) y
+  equilibrio de diálogo. La historia se escribe en inglés con el mismo motor de los capítulos
+  (secciones, Detener, limpieza de texto filtrado) y se ve mientras se escribe.
+- Resultados / Historial / Guardados: Copiar, ☆ Guardar, Descargar .txt, Regenerar y "Usar estos
+  ajustes". Presets: cuatro ejemplos y los tuyos (Guardar preset / Borrar). Todo queda en
+  `generador.json` de la carpeta de datos del usuario.
+- Se abre con `StoryForge.exe --generador` o el acceso directo **"StoryForge - Generador de
+  historias"** del instalador. Idea tomada del formulario de un generador de historias en línea
+  (diseño propio).
+
 **Ajustes de la historia y presets (2026-10-13):**
 - En la pestaña Plot: **género, tema, tono, punto de vista** (texto libre con sugerencias) y el
   **equilibrio narración/diálogo**, que van al prompt de cada capítulo y del esquema como un bloque
@@ -460,7 +474,9 @@ storyforge/
     strings_es.py    Todos los textos visibles de la interfaz
     task_runner.py   Tareas del modelo en segundo plano (ocupado, Detener, errores)
     web_server.py    StoryForge en el celular: servidor web local (--servidor), API JSON
-    web/             La página del celular (index.html, app.js, style.css) y la de conexión con QR
+    generator.py     Generador de historias: formulario -> prompt, historial, guardados y presets
+    web/             La página del celular (index.html, app.js, style.css), la de conexión con QR
+                     y el generador de historias (generador.html/.js/.css)
     main.py          Punto de entrada
   assets/             Icono de la app (icon.ico, icon.png)
   installer/          Instalador de Inno Setup (StoryForge.iss)

@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
-from . import story_settings
+from . import generator, story_settings
 from . import strings_es as S
 from .error_text import describe_exception
 from .engine import ContextOverflowError, ModelNotLoadedError, OperationCancelled, supports_gpu_offload
@@ -620,6 +620,43 @@ class StoryForgeService:
 
         return self._start("chapter", S.WEB_TAREA_CAPITULO.format(number=index + 1), work, chapter=index)
 
+    # ---------------- generador de historias (/generador, app/generator.py) ----------------
+    def start_story(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Escribe una historia del formulario del generador con el motor de los
+        capítulos (un proyecto temporal de un capítulo con prompt propio) y la
+        guarda en el historial del generador."""
+        self._require_idle()
+        if not self.engine.is_loaded:
+            raise ApiError(HTTPStatus.CONFLICT, S.NO_HAY_MODELO_CARGADO)
+        try:
+            form = generator.clean_form(data)
+        except generator.GeneratorError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        story = Project(name="Generador", plot=form["plot"], characters=form["characters"], setting=form["setting"])
+        chapter = story.add_chapter("Story", target_words=min(generator.target_words(form), MAX_WORDS_PER_CHAPTER))
+        # Las llaves del usuario no son marcadores del prompt propio ({plot}...): un espacio de ancho cero
+        # las separa (prompts._PLACEHOLDER_RE solo reconoce {palabra}).
+        chapter.custom_prompt = generator.build_prompt(form).replace("{", "{\u200b")
+        engine = self.engine
+
+        def work(job: Job) -> str:
+            job.target = chapter.target_words
+            started = time.time()
+
+            def progress(text: str, words: int, target: int) -> None:
+                job.text, job.words, job.target = text, words, target
+
+            result = engine.generate_chapter(story, 0, progress_callback=progress, cancel_check=job.cancel.is_set)
+            job.text, job.words = result, count_words(result)
+            if result.strip():
+                generator.add_to_history(form, result, time.time() - started, getattr(engine, "last_seed", None))
+            if job.cancel.is_set():
+                return S.WEB_TAREA_DETENIDA
+            seed = getattr(engine, "last_seed", None)
+            return S.LISTO_SEMILLA.format(seed=seed) if seed is not None else S.LISTO
+
+        return self._start("story", S.GENERADOR_TAREA, work)
+
     def start_summary(self, index: int) -> Dict[str, Any]:
         """Regenerar resumen de un capitulo."""
         self._require_idle()
@@ -759,6 +796,52 @@ def _r_outline(svc, m, body, q):
     return svc.start_outline(body.get("capitulos"))
 
 
+@route("GET", r"/api/generador")
+def _r_generator_options(svc, m, body, q):
+    return generator.options()
+
+
+@route("POST", r"/api/generador/generar")
+def _r_generator_start(svc, m, body, q):
+    return svc.start_story(body)
+
+
+@route("GET", r"/api/generador/historial")
+def _r_generator_history(svc, m, body, q):
+    return generator.history()
+
+
+@route("POST", r"/api/generador/historial/([0-9a-f]{12})/guardar")
+def _r_generator_save(svc, m, body, q):
+    entry = generator.set_saved(m.group(1), bool(body.get("guardado", True)))
+    if entry is None:
+        raise ApiError(HTTPStatus.NOT_FOUND, S.WEB_NO_ENCONTRADO)
+    return entry
+
+
+@route("DELETE", r"/api/generador/historial/([0-9a-f]{12})")
+def _r_generator_delete(svc, m, body, q):
+    if not generator.delete_entry(m.group(1)):
+        raise ApiError(HTTPStatus.NOT_FOUND, S.WEB_NO_ENCONTRADO)
+    return {}
+
+
+@route("POST", r"/api/generador/presets")
+def _r_generator_preset_save(svc, m, body, q):
+    try:
+        name = generator.save_preset(str(body.get("nombre", "")), generator.clean_form(body.get("formulario")))
+    except generator.GeneratorError as exc:
+        raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+    return {"nombre": name, "presets": generator.presets()}
+
+
+@route("POST", r"/api/generador/presets/borrar")
+def _r_generator_preset_delete(svc, m, body, q):
+    if not generator.delete_preset(str(body.get("nombre", ""))):
+        raise ApiError(HTTPStatus.NOT_FOUND, S.WEB_NO_ENCONTRADO)
+    return {"presets": generator.presets()}
+
+
 @route("POST", r"/api/detener")
 def _r_stop(svc, m, body, q):
     svc.stop()
@@ -873,6 +956,8 @@ class _Handler(BaseHTTPRequestHandler):
     def _static(self, path: str) -> None:
         if path in ("/", ""):
             path = "/index.html"
+        elif path == "/generador":
+            path = "/generador.html"
         elif path == "/conectar":
             if not self._is_local():
                 raise ApiError(HTTPStatus.FORBIDDEN, S.WEB_SOLO_DESDE_LA_PC)
@@ -900,6 +985,7 @@ class StoryForgeHTTPServer(ThreadingHTTPServer):
         port = self.server_address[1]
         self.local_url = f"http://127.0.0.1:{port}/conectar"
         self.phone_url = f"http://{lan_ip()}:{port}/?t={token}"
+        self.generator_url = f"http://127.0.0.1:{port}/generador?t={token}"
 
 
 def create_server(engine, projects_dir: str, port: int = DEFAULT_PORT, host: str = "0.0.0.0",
@@ -909,7 +995,7 @@ def create_server(engine, projects_dir: str, port: int = DEFAULT_PORT, host: str
 
 
 def serve(port: int = DEFAULT_PORT, projects_dir: Optional[str] = None, open_browser: bool = True,
-          models_dir: Optional[str] = None) -> int:
+          models_dir: Optional[str] = None, generator_page: bool = False) -> int:
     """Punto de entrada de `storyforge.py --servidor`."""
     from .engine import LocalStoryEngine
 
@@ -929,7 +1015,8 @@ def serve(port: int = DEFAULT_PORT, projects_dir: Optional[str] = None, open_bro
     if open_browser:
         import webbrowser
 
-        webbrowser.open(server.local_url)
+        # El generador se abre en esta PC con la clave en el enlace (la página la guarda y la quita).
+        webbrowser.open(server.generator_url if generator_page else server.local_url)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

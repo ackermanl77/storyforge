@@ -50,6 +50,7 @@ def _parse_args(argv):
 
     parser = argparse.ArgumentParser(prog="StoryForge")
     parser.add_argument("--servidor", action="store_true", help=S.WEB_AYUDA_SERVIDOR)
+    parser.add_argument("--generador", action="store_true", help=S.WEB_AYUDA_GENERADOR)
     parser.add_argument("--puerto", type=int, default=DEFAULT_PORT, help=S.WEB_AYUDA_PUERTO.format(port=DEFAULT_PORT))
     parser.add_argument("--carpeta", default=None, help=S.WEB_AYUDA_CARPETA)
     parser.add_argument("--modelos", default=None, help=S.WEB_AYUDA_MODELOS)
@@ -62,12 +63,12 @@ def main(argv=None) -> int:
     _configure_logging()
     sys.excepthook = _log_uncaught_exception
     args = _parse_args(sys.argv[1:] if argv is None else argv)
-    if args.servidor:
+    if args.servidor or args.generador:
         # StoryForge en el celular (app/web_server.py): sin ventana.
         from .web_server import serve
 
         return serve(port=args.puerto, projects_dir=args.carpeta, open_browser=not args.sin_navegador,
-                     models_dir=args.modelos)
+                     models_dir=args.modelos, generator_page=args.generador)
     from .gui import run
     run()
     return 0
