@@ -239,6 +239,33 @@ class TestRetryLastSection(_Base):
         self.assertEqual(panel.retry_section_btn.cget("state"), "disabled")
 
 
+class TestStorySettings(_Base):
+    def test_plot_tab_settings_presets_and_sync(self):
+        app = self.app
+        app.story_setting_boxes["genre"].set("Western")
+        app.story_setting_boxes["point_of_view"].set("Primera persona")
+        app.dialogue_menu.set("Más diálogo")
+        app._sync_all()
+        self.assertEqual((app.project.genre, app.project.point_of_view, app.project.dialogue_balance),
+                         ("Western", "Primera persona", "mas_dialogo"))
+        self.assertTrue(app.apply_selected_preset("Terror"))
+        self.assertEqual(app.story_setting_boxes["tone"].get(), "Inquietante")
+        self.assertEqual(app.preset_menu.get(), "Terror")
+        self.assertEqual(app.writing_style_menu.get(), "Descriptiva")
+        app._sync_all()
+        self.assertEqual((app.project.genre, app.project.writing_style), ("Terror", "Descriptiva"))
+        self.assertEqual(app.save_story_preset("Mi terror"), "Mi terror")
+        self.assertEqual(app.preset_menu.get(), "Mi terror")
+        self.assertTrue(app.delete_story_preset())
+        self.assertNotIn("Mi terror", app.preset_menu.cget("values"))
+        # Opening another project shows its own settings.
+        other = Project(genre="Romance")
+        app.project = other
+        app._load_into_ui()
+        self.assertEqual(app.story_setting_boxes["genre"].get(), "Romance")
+        self.assertEqual(app.dialogue_menu.get(), "(Sin indicar)")
+
+
 class TestFindReplaceF5(_Base):
     def test_chapter_replace_all_pushes_history(self):
         panel = self._chapter("Ana met Ana.")

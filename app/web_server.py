@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
+from . import story_settings
 from . import strings_es as S
 from .error_text import describe_exception
 from .engine import ContextOverflowError, ModelNotLoadedError, OperationCancelled, supports_gpu_offload
@@ -84,6 +85,11 @@ EXPORT_FORMATS = {
     "md": "text/markdown; charset=utf-8",
     "txt": "text/plain; charset=utf-8",
 }
+
+
+# Ajustes de la historia en la API (nombre en la API -> atributo de Project).
+_STORY_FIELDS = {"genero": "genre", "tema": "theme", "tono": "tone", "punto_de_vista": "point_of_view",
+                 "dialogo": "dialogue_balance"}
 
 
 class ApiError(Exception):
@@ -336,6 +342,15 @@ class StoryForgeService:
             "personajes": project.characters,
             "setting": project.setting,
             "estilo": project.writing_style,
+            "genero": project.genre,
+            "tema": project.theme,
+            "tono": project.tone,
+            "punto_de_vista": project.point_of_view,
+            "dialogo": project.dialogue_balance,
+            "sugerencias": {key: list(story_settings.SUGGESTIONS[field]) for key, field in _STORY_FIELDS.items()
+                            if field in story_settings.SUGGESTIONS},
+            "dialogos": [{"valor": k, "etiqueta": v} for k, v in S.DIALOGUE_LABELS.items()],
+            "presets": story_settings.all_presets(),
             "nota_autor": project.author_note,
             "palabras": project.total_words(),
             "estilos": [{"valor": "", "etiqueta": S.style_label("")}]
@@ -358,7 +373,7 @@ class StoryForgeService:
         self._require_idle()
         project = self._require_project()
         fields = {"nombre": "name", "autor": "author", "plot": "plot", "personajes": "characters",
-                  "setting": "setting", "estilo": "writing_style", "nota_autor": "author_note"}
+                  "setting": "setting", "estilo": "writing_style", "nota_autor": "author_note", **_STORY_FIELDS}
         with self._lock:
             for key, attr in fields.items():
                 if key not in data:
@@ -368,6 +383,10 @@ class StoryForgeService:
                     raise ApiError(HTTPStatus.BAD_REQUEST, S.WEB_CAMPO_INVALIDO.format(name=key))
                 if key == "estilo" and value and value not in WRITING_STYLES:
                     raise ApiError(HTTPStatus.BAD_REQUEST, S.WEB_CAMPO_INVALIDO.format(name=key))
+                if key == "dialogo" and value and value not in story_settings.DIALOGUE_BALANCES:
+                    raise ApiError(HTTPStatus.BAD_REQUEST, S.WEB_CAMPO_INVALIDO.format(name=key))
+                if key in _STORY_FIELDS:
+                    value = value.strip()[: story_settings.MAX_SETTING_CHARS]
                 if key == "nombre":
                     value = value.strip() or project.name
                 setattr(project, attr, value)

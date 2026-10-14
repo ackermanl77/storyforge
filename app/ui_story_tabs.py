@@ -6,9 +6,11 @@ from __future__ import annotations
 
 from pathlib import Path
 from tkinter import filedialog, messagebox
+from typing import Optional
 
 import customtkinter as ctk
 
+from . import story_settings
 from . import strings_es as S
 from .error_text import describe_exception
 from .project import (
@@ -19,14 +21,16 @@ from .project import (
     MAX_PLOT_WORDS,
     HISTORY_LIMIT_RANGE,
     MAX_SETTING_WORDS,
+    WRITING_STYLES,
     count_words,
 )
-from .strings_es import CHAPTER_HEADING_LABELS
+from .strings_es import CHAPTER_HEADING_LABELS, style_key, style_label
 from .task_runner import call_supported
 from .ui_common import (
     APP_TITLE,
     LimitedTextBox,
 )
+from .ui_dialogs import COLOR_MUTED
 from .ui_focus import apply_tab_order
 
 #: Opciones del menu "Versiones guardadas por capitulo" (Project.history_limit).
@@ -40,7 +44,7 @@ class StoryTabsMixin:
     def _build_plot_tab(self) -> None:
         tab = self.tab_plot
         tab.grid_columnconfigure(0, weight=1)
-        tab.grid_rowconfigure(2, weight=1)
+        tab.grid_rowconfigure(3, weight=1)
         meta = ctk.CTkFrame(tab, fg_color="transparent")
         meta.grid(row=0, column=0, sticky="ew", padx=10, pady=(10, 0))
         meta.grid_columnconfigure(1, weight=2)
@@ -72,13 +76,110 @@ class StoryTabsMixin:
             on_expand=lambda: self._expand_field(self.plot_box, "plot", S.TAB_PLOT, MAX_PLOT_WORDS),
             on_import=lambda: self._import_field(self.plot_box),
         )
-        self.plot_box.grid(row=2, column=0, sticky="nsew", padx=10, pady=10)
+        self.plot_box.grid(row=3, column=0, sticky="nsew", padx=10, pady=10)
+        self._build_story_settings_row(tab)
         apply_tab_order(
             tab,
             self.story_title_entry, self.author_entry, self.heading_menu, self.project_note_entry,
-            self.history_limit_menu, self.plot_box.focus_order_widgets(),
+            self.history_limit_menu, *self.story_setting_widgets(), self.preset_menu, self.apply_preset_btn,
+            self.save_preset_btn, self.delete_preset_btn, self.plot_box.focus_order_widgets(),
         )
         self._load_project_meta_into_ui()
+
+    # ---- ajustes de la historia y presets (app/story_settings.py) ----
+    def _build_story_settings_row(self, tab) -> None:
+        box = ctk.CTkFrame(tab)
+        box.grid(row=2, column=0, sticky="ew", padx=10, pady=(8, 0))
+        for column in (1, 3, 5, 7):
+            box.grid_columnconfigure(column, weight=1)
+        self.story_setting_boxes = {}
+        fields = (
+            ("genre", S.GENERO), ("theme", S.TEMA), ("tone", S.TONO), ("point_of_view", S.PUNTO_DE_VISTA),
+        )
+        for i, (field, label) in enumerate(fields):
+            ctk.CTkLabel(box, text=label).grid(row=0, column=2 * i, padx=(8, 4), pady=6, sticky="e")
+            combo = ctk.CTkComboBox(box, values=list(story_settings.SUGGESTIONS[field]), width=150)
+            combo.set("")
+            combo.grid(row=0, column=2 * i + 1, padx=(0, 4), pady=6, sticky="ew")
+            self.story_setting_boxes[field] = combo
+        presets = ctk.CTkFrame(box, fg_color="transparent")
+        presets.grid(row=1, column=0, columnspan=8, sticky="ew", padx=4, pady=(0, 6))
+        ctk.CTkLabel(presets, text=S.DIALOGO_EQUILIBRIO).pack(side="left", padx=(4, 4))
+        self.dialogue_menu = ctk.CTkOptionMenu(presets, values=list(S.DIALOGUE_LABELS.values()), width=170)
+        self.dialogue_menu.pack(side="left", padx=(0, 16))
+        ctk.CTkLabel(presets, text=S.PRESET).pack(side="left", padx=(0, 4))
+        self.preset_menu = ctk.CTkOptionMenu(presets, values=self._preset_names() or [""], width=170)
+        self.preset_menu.pack(side="left", padx=(0, 4))
+        self.apply_preset_btn = ctk.CTkButton(presets, text=S.APLICAR_PRESET, width=70, command=self.apply_selected_preset)
+        self.apply_preset_btn.pack(side="left", padx=2)
+        self.save_preset_btn = ctk.CTkButton(presets, text=S.GUARDAR_PRESET, width=110, command=self.save_story_preset)
+        self.save_preset_btn.pack(side="left", padx=2)
+        self.delete_preset_btn = ctk.CTkButton(presets, text=S.BORRAR_PRESET, width=70, command=self.delete_story_preset)
+        self.delete_preset_btn.pack(side="left", padx=2)
+        self.preset_status = ctk.CTkLabel(presets, text="", text_color=COLOR_MUTED)
+        self.preset_status.pack(side="left", padx=(8, 0))
+
+    def story_setting_widgets(self) -> list:
+        return [*self.story_setting_boxes.values(), self.dialogue_menu]
+
+    @staticmethod
+    def _preset_names() -> list:
+        return list(story_settings.all_presets())
+
+    def _refresh_preset_menu(self, select: str = "") -> None:
+        names = self._preset_names()
+        self.preset_menu.configure(values=names or [""])
+        self.preset_menu.set(select if select in names else (names[0] if names else ""))
+
+    def _load_story_settings_into_ui(self) -> None:
+        for field, combo in self.story_setting_boxes.items():
+            combo.set(getattr(self.project, field, ""))
+        self.dialogue_menu.set(story_settings.dialogue_label(self.project.dialogue_balance))
+
+    def sync_story_settings(self) -> None:
+        for field, combo in self.story_setting_boxes.items():
+            setattr(self.project, field, combo.get().strip()[: story_settings.MAX_SETTING_CHARS])
+        self.project.dialogue_balance = story_settings.dialogue_key(self.dialogue_menu.get())
+
+    def apply_selected_preset(self, name: str = "") -> bool:
+        name = name or self.preset_menu.get()
+        preset = story_settings.all_presets().get(name)
+        if preset is None:
+            return False
+        story_settings.apply_preset(self.project, preset)
+        self.preset_menu.set(name)
+        self._load_story_settings_into_ui()
+        self.writing_style_menu.set(style_label(
+            self.project.writing_style if self.project.writing_style in WRITING_STYLES else ""))
+        self.preset_status.configure(text=S.PRESET_APLICADO.format(name=name))
+        self.schedule_dirty_check()
+        return True
+
+    def save_story_preset(self, name: Optional[str] = None) -> Optional[str]:
+        if name is None:
+            dialog = ctk.CTkInputDialog(text=S.NOMBRE_DEL_PRESET, title=S.AJUSTES_DE_LA_HISTORIA)
+            name = (dialog.get_input() or "").strip()
+            if not name:
+                return None
+        self.sync_story_settings()
+        self.project.writing_style = style_key(self.writing_style_menu.get())
+        try:
+            saved = story_settings.save_user_preset(name, story_settings.preset_from_project(self.project))
+        except ValueError as exc:
+            messagebox.showwarning(APP_TITLE, str(exc))
+            return None
+        self._refresh_preset_menu(saved)
+        self.preset_status.configure(text=S.PRESET_GUARDADO.format(name=saved))
+        return saved
+
+    def delete_story_preset(self) -> bool:
+        name = self.preset_menu.get()
+        if not story_settings.delete_user_preset(name):
+            self.preset_status.configure(text=S.PRESET_INCORPORADO_NO_SE_BORRA)
+            return False
+        self._refresh_preset_menu()
+        self.preset_status.configure(text=S.PRESET_BORRADO.format(name=name))
+        return True
 
     def _load_project_meta_into_ui(self) -> None:
         self._set_entry(self.story_title_entry, self.project.name if self.project.name != DEFAULT_PROJECT_NAME else "")
@@ -91,6 +192,7 @@ class StoryTabsMixin:
         if limit not in HISTORY_LIMIT_CHOICES:
             self.history_limit_menu.configure(values=sorted({*HISTORY_LIMIT_CHOICES, limit}, key=int))
         self.history_limit_menu.set(limit)
+        self._load_story_settings_into_ui()
 
     def _history_limit_from_ui(self) -> int:
         lo, hi = HISTORY_LIMIT_RANGE

@@ -66,6 +66,16 @@ correspondiente mas abajo.
 
 ## Historial de cambios
 
+**Ajustes de la historia y presets (2026-10-13):**
+- En la pestaña Plot: **género, tema, tono, punto de vista** (texto libre con sugerencias) y el
+  **equilibrio narración/diálogo**, que van al prompt de cada capítulo y del esquema como un bloque
+  STORY SETTINGS (las sugerencias se traducen a instrucciones precisas en inglés). Sin ajustes, el
+  prompt queda igual que antes.
+- **Presets** que guardan esos ajustes y el tipo de escritura: siete incorporados (Thriller,
+  Romance, Terror, Fantasía épica, Misterio policial, Ciencia ficción, Cuento infantil) y los
+  tuyos (Guardar como… / Borrar), también elegibles desde el celular.
+- Nuevos marcadores para el prompt propio: `{género}`, `{tema}`, `{tono}`, `{punto_de_vista}`.
+
 **Reintentar la última sección y errores en español (2026-10-11):**
 - **"Últ. sección"** junto a Reintentar: vuelve a escribir solo la última sección de la última
   ejecución (el motor recuerda dónde empezó, `engine.last_section_start`) y la suma como

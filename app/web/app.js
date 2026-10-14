@@ -196,6 +196,19 @@ function renderStory(p) {
   const estilo = $("p-estilo");
   estilo.innerHTML = "";
   for (const s of p.estilos) estilo.add(new Option(s.etiqueta, s.valor));
+  const dialogo = $("p-dialogo");
+  dialogo.innerHTML = "";
+  for (const d of p.dialogos || []) dialogo.add(new Option(d.etiqueta, d.valor));
+  for (const [key, values] of Object.entries(p.sugerencias || {})) {
+    const list = $(`dl-${key}`);
+    if (!list) continue;
+    list.innerHTML = "";
+    for (const v of values) list.appendChild(new Option(v));
+  }
+  const presets = $("p-preset");
+  presets.innerHTML = "";
+  state.presets = p.presets || {};
+  for (const name of Object.keys(state.presets)) presets.add(new Option(name, name));
   document.querySelectorAll("#view-historia [data-field]").forEach((el) => { el.value = p[el.dataset.field] || ""; });
   updateCounts();
 }
@@ -206,6 +219,19 @@ function updateCounts() {
   });
 }
 document.querySelectorAll("#view-historia textarea").forEach((el) => el.addEventListener("input", updateCounts));
+
+// Un preset solo llena el formulario; "Guardar" lo aplica al proyecto.
+const PRESET_FIELDS = { genre: "genero", theme: "tema", tone: "tono", point_of_view: "punto_de_vista",
+  dialogue_balance: "dialogo", writing_style: "estilo" };
+$("apply-preset").addEventListener("click", () => {
+  const preset = (state.presets || {})[$("p-preset").value];
+  if (!preset) return;
+  for (const [field, key] of Object.entries(PRESET_FIELDS)) {
+    const el = document.querySelector(`#view-historia [data-field="${key}"]`);
+    if (el) el.value = preset[field] || "";
+  }
+  toast("Preset aplicado: toca Guardar para usarlo.", "ok");
+});
 
 $("save-story").addEventListener("click", () => run(async () => {
   const body = {};

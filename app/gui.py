@@ -505,6 +505,7 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         self.project.chapter_heading = next(
             (k for k, v in CHAPTER_HEADING_LABELS.items() if v == heading_label), "Chapter")
         self.project.writing_style = style_key(self.writing_style_menu.get())
+        self.sync_story_settings()
         self.project.history_limit = self._history_limit_from_ui()
         self._sync_sampling()
         for panel in self.outline_panels:

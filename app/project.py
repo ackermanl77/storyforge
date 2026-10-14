@@ -407,6 +407,13 @@ class Project:
     context_size: Optional[int] = None
     # Uno de WRITING_STYLES, o "" para no aplicar ningun enfasis adicional.
     writing_style: str = ""
+    # Ajustes de la historia (app/story_settings.py): texto libre o una sugerencia;
+    # dialogue_balance es una clave de story_settings.DIALOGUE_BALANCES o "".
+    genre: str = ""
+    theme: str = ""
+    tone: str = ""
+    point_of_view: str = ""
+    dialogue_balance: str = ""
     # Lorebook / World Info -- ver LoreEntry arriba.
     lore_entries: List[LoreEntry] = field(default_factory=list)
     author: str = ""
@@ -547,6 +554,11 @@ class Project:
             "model_path": self.model_path,
             "context_size": self.context_size,
             "writing_style": self.writing_style,
+            "genre": self.genre,
+            "theme": self.theme,
+            "tone": self.tone,
+            "point_of_view": self.point_of_view,
+            "dialogue_balance": self.dialogue_balance,
             "author_note": self.author_note,
             "sampling": self.sampling.to_dict(),
             "chapter_heading": self.chapter_heading,
@@ -581,6 +593,11 @@ class Project:
             writing_style=_str_field(data, "writing_style", ""),
             author_note=_str_field(data, "author_note", ""),
         )
+        from .story_settings import clean_settings  # aqui: story_settings importa strings_es
+
+        for key, value in clean_settings(data).items():
+            if key != "writing_style":
+                setattr(proj, key, value)
         model_path = data.get("model_path")
         proj.model_path = model_path if isinstance(model_path, str) and model_path.strip() else None
         context_size = data.get("context_size")

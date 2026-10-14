@@ -467,7 +467,8 @@ PROMPT_PROPIO_AYUDA = (
     "Si escribes algo aquí, este capítulo se genera SOLO con este texto: StoryForge no agrega el plot, "
     "los personajes, el setting, el esquema, los resúmenes ni sus reglas de estilo, y el propósito y la "
     "nota del autor de este capítulo se ignoran. Puedes traerlos donde quieras con {plot}, {personajes}, "
-    "{setting}, {esquema}, {anterior} (lo que pasó antes), {título}, {capítulo}, {palabras} y {nota_autor}. "
+    "{setting}, {esquema}, {anterior} (lo que pasó antes), {título}, {capítulo}, {palabras}, {nota_autor}, "
+    "{género}, {tema}, {tono} y {punto_de_vista}. "
     "Déjalo vacío para usar el prompt automático."
 )
 REEMPLAZAR_PROMPT_CON_PLANTILLA = "¿Reemplazar el prompt propio de este capítulo por la plantilla?"
@@ -714,3 +715,32 @@ ERR_LLAMA_INTERNO = "llama.cpp devolvió un error interno al generar. Vuelve a i
 ERR_TIEMPO_AGOTADO = "La operación tardó demasiado y se canceló."
 ERR_CONEXION = "Se cortó la conexión."
 ERR_DETALLE = "{message}\n(detalle técnico: {detail})"
+
+# Ajustes de la historia (app/story_settings.py) y sus presets.
+AJUSTES_DE_LA_HISTORIA = "Ajustes de la historia"
+GENERO = "Género:"
+TEMA = "Tema:"
+TONO = "Tono:"
+PUNTO_DE_VISTA = "Punto de vista:"
+DIALOGO_EQUILIBRIO = "Diálogo:"
+AJUSTE_PLACEHOLDER = "(libre)"
+PRESET = "Preset:"
+APLICAR_PRESET = "Aplicar"
+GUARDAR_PRESET = "Guardar como…"
+BORRAR_PRESET = "Borrar"
+NOMBRE_DEL_PRESET = "Nombre del preset (si ya existe, se reemplaza):"
+PRESET_SIN_NOMBRE = "El preset necesita un nombre."
+DEMASIADOS_PRESETS = "Ya hay {max} presets guardados; borra alguno primero."
+PRESET_APLICADO = "Preset «{name}» aplicado."
+PRESET_GUARDADO = "Preset «{name}» guardado."
+PRESET_BORRADO = "Preset «{name}» borrado."
+PRESET_INCORPORADO_NO_SE_BORRA = "Los presets incorporados no se pueden borrar."
+DIALOGUE_DEFAULT_LABEL = "(Sin indicar)"
+DIALOGUE_LABELS: Dict[str, str] = {
+    "": DIALOGUE_DEFAULT_LABEL,
+    "mucha_narracion": "Casi todo narración",
+    "mas_narracion": "Más narración",
+    "equilibrado": "Equilibrado",
+    "mas_dialogo": "Más diálogo",
+    "mucho_dialogo": "Casi todo diálogo",
+}

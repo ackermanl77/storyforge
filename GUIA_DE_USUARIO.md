@@ -15,6 +15,7 @@ rendimiento/GPU, limitaciones) y [docs/](docs/PROJECT_STATUS.md)
 4. [Guía de cada función en detalle](#guía-de-cada-función-en-detalle)
    - [Flujo outline-first](#flujo-outline-first-generar-el-esquema-completo)
    - [Tipo de escritura](#tipo-de-escritura)
+   - [Ajustes de la historia y presets](#ajustes-de-la-historia-y-presets)
    - [Generar un capítulo](#generar-un-capítulo)
    - [Propósito de capítulo](#propósito-de-capítulo)
    - [Prompt propio de un capítulo](#prompt-propio-de-un-capítulo)
@@ -298,6 +299,37 @@ Selector en la pestaña Esquema, junto a "Número de capítulos". Aplica a
 
 Elegir "(Por defecto)" no aplica ningún énfasis adicional — solo las
 convenciones de formato normales (ver más abajo).
+
+### Ajustes de la historia y presets
+
+En la pestaña **Plot**, debajo de la nota del autor, hay cinco ajustes que
+valen para **toda la historia** (el esquema y cada capítulo):
+
+- **Género**, **Tema**, **Tono** y **Punto de vista**: escribe lo que quieras
+  o elige una sugerencia de la lista (por ejemplo, tono "Oscuro y misterioso"
+  o "Ligero y humorístico"; punto de vista "Primera persona", "Tercera
+  persona limitada", "Tercera persona omnisciente"...). Las sugerencias se
+  le pasan al modelo como una instrucción precisa en inglés (el idioma en
+  que escribe); un texto propio va tal cual.
+- **Diálogo**: cuánto diálogo usar frente a narración, de "Casi todo
+  narración" a "Casi todo diálogo".
+
+Vacíos (o "(Sin indicar)"), no cambian nada: el prompt queda igual que
+antes. El punto de vista elegido se le pide al modelo que lo mantenga en
+toda la historia.
+
+**Presets**: guardan juntos estos cinco ajustes y el **Tipo de escritura**.
+Elige uno en "Preset" y pulsa **Aplicar**; **Guardar como…** guarda los
+ajustes actuales con un nombre (si ya existe, lo reemplaza) y **Borrar**
+quita uno tuyo. Vienen incorporados Thriller, Romance, Terror, Fantasía
+épica, Misterio policial, Ciencia ficción y Cuento infantil (no se pueden
+borrar; uno tuyo con el mismo nombre los reemplaza). Tus presets valen para
+todos tus proyectos.
+
+En un **prompt propio** de capítulo puedes usar `{género}`, `{tema}`,
+`{tono}` y `{punto_de_vista}`. Desde el celular, la pantalla Historia tiene
+los mismos campos y un selector de preset que llena el formulario (luego
+toca Guardar).
 
 ### Generar un capítulo
 

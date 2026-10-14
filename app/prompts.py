@@ -72,10 +72,13 @@ def build_writing_style_instruction(project: Project) -> str:
     tipo conocido, p.ej. un proyecto viejo) -- en ese caso solo aplica el
     STYLE_GUIDE por defecto, sin enfasis extra.
     """
+    from .story_settings import build_story_settings_block
+
+    settings = build_story_settings_block(project)
     instruction = WRITING_STYLE_INSTRUCTIONS.get(project.writing_style.strip())
     if not instruction:
-        return ""
-    return f"WRITING STYLE EMPHASIS: {instruction}\n\n"
+        return settings
+    return f"{settings}WRITING STYLE EMPHASIS: {instruction}\n\n"
 
 
 # Instruccion en ingles para cada valor posible de chapter.purpose (project.
@@ -721,8 +724,9 @@ def build_chapter_continuation_chat(
 # Se aceptan con y sin acento ({título} / {titulo}).
 CUSTOM_PROMPT_PLACEHOLDERS = (
     "plot", "personajes", "setting", "esquema", "anterior", "título", "capítulo", "palabras", "nota_autor",
+    "género", "tema", "tono", "punto_de_vista",
 )
-_PLACEHOLDER_ALIASES = {"titulo": "título", "capitulo": "capítulo"}
+_PLACEHOLDER_ALIASES = {"titulo": "título", "capitulo": "capítulo", "genero": "género"}
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
 
 # Punto de partida que ofrece el boton "Insertar plantilla" (en ingles, como la
@@ -746,6 +750,8 @@ def render_custom_prompt(
     max_previous_words: int = 500, max_outline_words: Optional[int] = None, **_unused,
 ) -> str:
     """El prompt propio del capitulo con sus marcadores reemplazados."""
+    from .story_settings import english_value
+
     chapter = project.chapters[chapter_index]
 
     def trimmed(text: str, limit: Optional[int]) -> str:
@@ -762,6 +768,10 @@ def render_custom_prompt(
         "capítulo": lambda: str(chapter_index + 1),
         "palabras": lambda: str(chapter.target_words),
         "nota_autor": lambda: chapter.author_note.strip(),
+        "género": lambda: english_value("genre", project.genre),
+        "tema": lambda: english_value("theme", project.theme),
+        "tono": lambda: english_value("tone", project.tone),
+        "punto_de_vista": lambda: english_value("point_of_view", project.point_of_view),
     }
 
     def substitute(match: "re.Match[str]") -> str:

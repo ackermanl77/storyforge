@@ -72,6 +72,25 @@
         <textarea id="p-personajes" rows="6" data-field="personajes"></textarea>
         <label for="p-setting">Setting <span class="count" data-count="p-setting"></span></label>
         <textarea id="p-setting" rows="6" data-field="setting"></textarea>
+        <label for="p-preset">Preset de ajustes</label>
+        <div class="row">
+          <select id="p-preset"></select>
+          <button id="apply-preset" class="btn" type="button">Aplicar</button>
+        </div>
+        <label for="p-genero">Género</label>
+        <input id="p-genero" type="text" list="dl-genero" data-field="genero" placeholder="(libre)">
+        <datalist id="dl-genero"></datalist>
+        <label for="p-tema">Tema</label>
+        <input id="p-tema" type="text" list="dl-tema" data-field="tema" placeholder="(libre)">
+        <datalist id="dl-tema"></datalist>
+        <label for="p-tono">Tono</label>
+        <input id="p-tono" type="text" list="dl-tono" data-field="tono" placeholder="(libre)">
+        <datalist id="dl-tono"></datalist>
+        <label for="p-punto_de_vista">Punto de vista</label>
+        <input id="p-punto_de_vista" type="text" list="dl-punto_de_vista" data-field="punto_de_vista" placeholder="(libre)">
+        <datalist id="dl-punto_de_vista"></datalist>
+        <label for="p-dialogo">Diálogo</label>
+        <select id="p-dialogo" data-field="dialogo"></select>
         <label for="p-estilo">Tipo de escritura</label>
         <select id="p-estilo" data-field="estilo"></select>
         <label for="p-nota">Nota del autor (toda la historia)</label>
@@ -133,7 +152,7 @@
         </details>
         <details id="ch-prompt-box">
           <summary>Prompt propio <span id="ch-prompt-state" class="muted small"></span></summary>
-          <p class="muted small">Si escribes algo aquí, este capítulo se genera SOLO con este texto: StoryForge no agrega el plot, los personajes, el setting, el esquema ni los resúmenes. Tráelos donde quieras con {plot}, {personajes}, {setting}, {esquema}, {anterior}, {título}, {capítulo}, {palabras} y {nota_autor}. Vacío = prompt automático.</p>
+          <p class="muted small">Si escribes algo aquí, este capítulo se genera SOLO con este texto: StoryForge no agrega el plot, los personajes, el setting, el esquema ni los resúmenes. Tráelos donde quieras con {plot}, {personajes}, {setting}, {esquema}, {anterior}, {título}, {capítulo}, {palabras}, {nota_autor}, {género}, {tema}, {tono} y {punto_de_vista}. Vacío = prompt automático.</p>
           <textarea id="ch-prompt" rows="10"></textarea>
           <button id="ch-prompt-template" class="btn small">Insertar plantilla</button>
         </details>
