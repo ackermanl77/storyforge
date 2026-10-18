@@ -873,8 +873,22 @@ class ChapterPanel(ctk.CTkFrame):
             self.refine_entry.focus_set()
 
     # ---- acciones sobre la seleccion (F7) ----
+    def _word_at(self, x: int, y: int):
+        """(inicio, fin, palabra) bajo el punto (x, y) del texto, o None si ahi no hay una palabra."""
+        box = self.content_box
+        index = box.index(f"@{x},{y}")
+        start, end = box.index(" ".join((index, "wordstart"))), box.index(" ".join((index, "wordend")))
+        word = box.get(start, end)
+        return (start, end, word) if any(ch.isalnum() for ch in word) else None
+
     def _show_context_menu(self, event) -> str:
         menu = tk.Menu(self, tearoff=0)
+        word = self._word_at(event.x, event.y)
+        if word is not None:
+            busy = self.app.busy or self.is_generating or not self.app.engine.is_loaded
+            menu.add_command(label=S.ALTERNATIVAS_PARA.format(word=word[2]), state="disabled" if busy else "normal",
+                             command=lambda w=word: self.show_word_alternatives(w[0], w[1], (event.x_root, event.y_root)))
+            menu.add_separator()
         has_selection = bool(self._selection_range())
         state = "normal" if has_selection and not self.app.busy and not self.is_generating else "disabled"
         for mode, label in REWRITE_MODE_LABELS.items():
@@ -889,6 +903,79 @@ class ChapterPanel(ctk.CTkFrame):
         finally:
             menu.grab_release()
         return "break"
+
+    # ---- alternativas en una palabra (F15) ----
+    def show_word_alternatives(self, start: str, end: str, at=None) -> None:
+        """Pide al modelo lo que escribiria en lugar de la palabra entre `start` y `end` y lo
+        muestra en un menu: elegir una la reemplaza, o reemplaza y sigue escribiendo desde ahi."""
+        if not self._can_start_engine_task():
+            return
+        self.app._sync_all()
+        word = self.content_box.get(start, end)
+        before = self.content_box.get("1.0", start)
+        engine, project = self.app.engine, self.app.project
+        self._set_busy(True, S.BUSCANDO_ALTERNATIVAS.format(word=word))
+
+        def work(cancel_check):
+            return engine.word_alternatives(project, self.index, before)
+
+        def on_success(alternatives) -> None:
+            self.last_alternatives = list(alternatives)
+            if not alternatives:
+                messagebox.showinfo(APP_TITLE, S.SIN_ALTERNATIVAS)
+                return
+            self._show_alternatives_menu(start, end, word, alternatives, at)
+
+        self.app.task_runner.run(
+            S.ALTERNATIVAS_OPERACION, work, on_success=on_success,
+            on_finally=lambda: self._set_busy(False, ""), error_prefix=S.ERROR_BUSCANDO_ALTERNATIVAS,
+        )
+
+    def _show_alternatives_menu(self, start: str, end: str, word: str, alternatives, at=None) -> tk.Menu:
+        menu = tk.Menu(self, tearoff=0)
+        follow = tk.Menu(menu, tearoff=0)
+        for alt in alternatives:
+            label = S.REEMPLAZAR_POR.format(word=alt.word.strip() or "¶", percent=alt.probability * 100)
+            menu.add_command(label=label, command=lambda a=alt: self.replace_word(start, end, word, a.word))
+            follow.add_command(label=label, command=lambda a=alt: self.continue_with_word(start, end, word, a.word))
+        menu.add_separator()
+        menu.add_cascade(label=S.SEGUIR_DESDE_AQUI_CON, menu=follow)
+        self.alternatives_menu = menu
+        if at is None:
+            bbox = self.content_box.bbox(start)
+            at = ((self.content_box.winfo_rootx() + bbox[0], self.content_box.winfo_rooty() + bbox[1] + bbox[3])
+                  if bbox else (self.winfo_pointerx(), self.winfo_pointery()))
+        try:
+            menu.tk_popup(*at)
+        finally:
+            menu.grab_release()
+        return menu
+
+    def replace_word(self, start: str, end: str, original: str, new: str) -> Optional[str]:
+        """Reemplaza la palabra (si sigue ahi) por `new`; devuelve el indice donde termina la nueva."""
+        box = self.content_box
+        if box.get(start, end) != original:
+            self.status_label.configure(text=S.EL_TEXTO_CAMBIO_ALTERNATIVAS)
+            return None
+        previous = box.get(f"{start}-1c", start) if box.compare(start, ">", "1.0") else ""
+        text = new.lstrip() if (not previous or previous.isspace()) else new
+        self.sync_to_model()
+        self.push_history("alternativa")
+        box.delete(start, end)
+        box.insert(start, text)
+        new_end = box.index(f"{start}+{len(text)}c")
+        box.mark_set("insert", new_end)
+        self._on_content_edited()
+        self.sync_to_model()
+        self.status_label.configure(text=S.PALABRA_REEMPLAZADA.format(old=original, new=text.strip()))
+        self.app.schedule_dirty_check()
+        return new_end
+
+    def continue_with_word(self, start: str, end: str, original: str, new: str) -> None:
+        """Reemplaza la palabra y sigue escribiendo el capitulo desde ella (lo que venia despues se
+        descarta, tras confirmarlo, como en Continuar desde el cursor)."""
+        if self.replace_word(start, end, original, new) is not None:
+            self._on_continue(from_cursor=True)
 
     def _selection_range(self):
         try:

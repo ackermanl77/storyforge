@@ -216,6 +216,15 @@ deshabilitados se saltan).
 - **Clic derecho sobre texto seleccionado**: Reescribir, Expandir,
   Describir o Acortar solo ese fragmento (o con una instrucción propia). Ves
   una vista previa con diferencias antes de aceptar.
+- **Clic derecho sobre una palabra → Alternativas para «…»**: el modelo
+  propone las palabras que escribiría en ese lugar, cada una con su
+  probabilidad (por ejemplo, después de «Se arrodilló junto a él y»:
+  «giró» 25 %, «sacudió» 13 %…). Elige una para **reemplazar** la palabra
+  (el resto del capítulo queda igual), o abre **Seguir escribiendo desde
+  aquí con…** para reemplazarla y que el modelo continúe desde ella (lo que
+  venía después se descarta, tras preguntarte). El cambio se guarda en el
+  historial de versiones. Tarda alrededor de un segundo con el modelo en la
+  GPU.
 - **Más herramientas**: Reducir repetición, Reporte de repetición, Buscar y
   reemplazar y Eliminar capítulo.
 - La lista de la izquierda muestra palabras escritas / objetivo de cada

@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import urllib.error
 import urllib.request
-from typing import Iterator, List, Optional
+from typing import Iterator, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,20 @@ class ServerLlama:
     def close(self) -> None:
         pass
 
+    def top_tokens(self, prompt: str, top_k: int) -> List[Tuple[str, float]]:
+        """The ``top_k`` most likely next tokens after ``prompt`` with their probabilities (F15),
+        through the server's logprobs; [] when it doesn't return them."""
+        payload = {"prompt": prompt, "max_tokens": 1, "temperature": 0.0, "logprobs": int(top_k),
+                   "n_probs": int(top_k)}
+        if self.model:
+            payload["model"] = self.model
+        try:
+            data = self._json("/v1/completions", payload, timeout=DEFAULT_TIMEOUT_S)
+        except (urllib.error.URLError, OSError, ValueError) as error:
+            raise ServerError(f"El servidor no devolvió alternativas: {getattr(error, 'reason', error)}") from error
+        pairs = [(token, prob) for token, prob in _top_logprobs(data) if token]
+        return sorted(pairs, key=lambda pair: -pair[1])[:top_k]
+
     def __call__(self, prompt: str, max_tokens: int = 256, stop=None, stream: bool = False, seed=None,
                  logits_processor=None, **sampling):
         payload = {"prompt": prompt, "max_tokens": int(max_tokens), "stream": bool(stream)}
@@ -177,6 +192,23 @@ class ServerLlama:
                 data = json.loads(response.read().decode("utf-8"))
             return {"choices": [_choice(data)], "usage": data.get("usage") or {}}
         return _sse_chunks(response)
+
+
+def _top_logprobs(data: dict) -> List[Tuple[str, float]]:
+    """(token, probability) pairs of the first generated position, from an OpenAI-style
+    ``logprobs.top_logprobs`` or llama-server's ``completion_probabilities``."""
+    choice = (data.get("choices") or [{}])[0]
+    logprobs = choice.get("logprobs") or {}
+    top = (logprobs.get("top_logprobs") or [None])[0]
+    if isinstance(top, dict):
+        return [(token, math.exp(value)) for token, value in top.items()]
+    content = logprobs.get("content") or []
+    if content and isinstance(content[0], dict) and content[0].get("top_logprobs"):
+        return [(entry.get("token", ""), math.exp(entry.get("logprob", -99.0))) for entry in content[0]["top_logprobs"]]
+    probs = data.get("completion_probabilities") or []
+    if probs and isinstance(probs[0], dict):
+        return [(entry.get("tok_str", ""), float(entry.get("prob", 0.0))) for entry in probs[0].get("probs", [])]
+    return []
 
 
 def _choice(data: dict) -> dict:

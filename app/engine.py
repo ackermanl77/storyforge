@@ -229,6 +229,20 @@ class ModelNotLoadedError(RuntimeError):
     pass
 
 
+@dataclass(frozen=True)
+class WordAlternative:
+    """Una alternativa en una palabra del capitulo (F15): la palabra completa que el modelo
+    escribiria ahi, la probabilidad de su primer token y ese token tal cual."""
+    word: str
+    probability: float
+    token: str
+
+
+#: Cuantas alternativas se piden y cuantos tokens se usan para completar cada una a palabra.
+WORD_ALTERNATIVES = 8
+WORD_COMPLETION_TOKENS = 6
+
+
 class ContextOverflowError(RuntimeError):
     """El prompt necesario no cabe en la ventana de contexto del modelo cargado."""
 
@@ -634,6 +648,103 @@ class LocalStoryEngine:
         except Exception:  # noqa: BLE001 - dobles de prueba / sin llama_cpp
             return [processor]
         return LogitsProcessorList([processor])
+
+    # ---- alternativas en una palabra (F15) ----
+    def _alternatives_prompt(self, project: Project, chapter_index: int, text_before: str) -> str:
+        """El prompt con el que el modelo escribiria lo que sigue a `text_before` (el mismo que usa
+        Continuar), achicando el contexto si no cabe."""
+        chapter = project.chapters[chapter_index]
+        text = text_before.rstrip(" \t")
+        for budget in CONTEXT_BUDGET_LEVELS:
+            if not text.strip():
+                prompt = build_chapter_start_chat(project, chapter_index, budget, hints=[])
+            else:
+                remaining = max(chapter.target_words - count_words(text), 200)
+
+                def build(tail_words: int, _budget=budget, _remaining=remaining) -> ChatPrompt:
+                    return build_chapter_continuation_chat(project, chapter_index, _budget, text, _remaining,
+                                                           tail_words, hints=[])
+
+                prompt = build(self._dynamic_tail_words(build, text, budget["tail_words"], 16))
+            rendered = self.render_prompt(prompt)
+            if self._count_tokens(rendered) <= self._available_context(16):
+                return rendered
+        raise ContextOverflowError(S.CONTEXTO_NO_CABE_NI_REDUCIDO)
+
+    def _top_tokens(self, rendered: str, top_k: int) -> List[Tuple[str, float]]:
+        """Los `top_k` primeros tokens mas probables tras `rendered`, con su probabilidad (sin
+        temperatura). Local: un logits processor copia los logits de la primera posicion (asi no
+        hace falta logits_all=True); servidor: sus logprobs."""
+        top_tokens = getattr(self._llm, "top_tokens", None)
+        if callable(top_tokens):  # ServerLlama
+            return top_tokens(rendered, top_k)
+        import numpy as np
+
+        captured: Dict[str, object] = {}
+
+        def grab(input_ids, scores):
+            if "scores" not in captured:
+                captured["scores"] = np.array(scores, dtype=np.float64, copy=True)
+            return scores
+
+        try:
+            from llama_cpp import LogitsProcessorList
+            processors = LogitsProcessorList([grab])
+        except Exception:  # noqa: BLE001 - dobles de prueba
+            processors = [grab]
+        self._llm(rendered, max_tokens=1, temperature=0.0, logits_processor=processors)
+        scores = captured.get("scores")
+        if scores is None:
+            return []
+        scores = np.asarray(scores, dtype=np.float64)
+        scores[np.isinf(scores)] = -1e30
+        probs = np.exp(scores - scores.max())
+        probs /= probs.sum()
+        skip = set(self._end_token_ids())
+        out: List[Tuple[str, float]] = []
+        for token_id in np.argsort(probs)[::-1][: top_k * 3]:
+            if int(token_id) in skip:
+                continue
+            text = self._llm.detokenize([int(token_id)]).decode("utf-8", errors="ignore")
+            if not text or not text.strip(" ") and "\n" not in text:
+                continue
+            out.append((text, float(probs[token_id])))
+            if len(out) >= top_k:
+                break
+        return out
+
+    def word_alternatives(self, project: Project, chapter_index: int, text_before: str,
+                          top_k: int = WORD_ALTERNATIVES) -> List[WordAlternative]:
+        """Lo que el modelo podria escribir en lugar de la palabra que empieza despues de
+        `text_before` (F15): sus `top_k` primeros tokens mas probables, cada uno completado a
+        palabra entera con unos tokens greedy, con la probabilidad del primer token (las que
+        terminan en la misma palabra se suman). No modifica el capitulo."""
+        if self._llm is None:
+            raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
+        self.begin_operation(S.ALTERNATIVAS_OPERACION)
+        try:
+            rendered = self._alternatives_prompt(project, chapter_index, text_before)
+            merged: "OrderedDict[str, WordAlternative]" = OrderedDict()
+            for token, probability in self._top_tokens(rendered, top_k):
+                word = token
+                if token.strip() and self._is_word_char(token.rstrip()[-1]):
+                    response = self._llm(rendered + token, max_tokens=WORD_COMPLETION_TOKENS, temperature=0.0)
+                    following = response["choices"][0].get("text", "") if isinstance(response, dict) else ""
+                    rest = ""
+                    for ch in following:
+                        if not self._is_word_char(ch):
+                            break
+                        rest += ch
+                    word = token + rest
+                key = word.strip().lower() or word
+                if key in merged:
+                    old = merged[key]
+                    merged[key] = WordAlternative(old.word, old.probability + probability, old.token)
+                else:
+                    merged[key] = WordAlternative(word, probability, token)
+            return sorted(merged.values(), key=lambda a: -a.probability)
+        finally:
+            self._end_operation()
 
     def _special_token_text(self, token_id_getter: str) -> str:
         try:

@@ -644,6 +644,16 @@ NO_SE_PUDO_GENERAR_SECCION = 'No fue posible generar esta sección del capítulo
 N_CTX_NEGATIVO = 'n_ctx no puede ser negativo (0 = el contexto entrenado del modelo).'
 REFINAR_PARTE_VACIA = 'El modelo devolvió un texto vacío al refinar la parte {part} de {total} del capítulo. No se modificó el capítulo; inténtalo de nuevo.'
 NO_HAY_MODELO_CARGADO = 'No hay un modelo cargado. Carga un archivo .gguf primero.'
+# Alternativas en una palabra (F15)
+ALTERNATIVAS_OPERACION = "Alternativas"
+ALTERNATIVAS_PARA = "Alternativas para «{word}»…"
+BUSCANDO_ALTERNATIVAS = "Buscando alternativas para «{word}»…"
+REEMPLAZAR_POR = "{word}   ({percent:.0f} %)"
+SEGUIR_DESDE_AQUI_CON = "Seguir escribiendo desde aquí con…"
+SIN_ALTERNATIVAS = "El modelo no devolvió alternativas para esta palabra."
+ERROR_BUSCANDO_ALTERNATIVAS = "Error buscando alternativas"
+EL_TEXTO_CAMBIO_ALTERNATIVAS = "El texto cambió mientras se buscaban las alternativas; vuelve a pedirlas."
+PALABRA_REEMPLAZADA = "«{old}» → «{new}»"
 OPERACION_DETENIDA_POR_EL_USUARIO = 'Operación detenida por el usuario.'
 # Motivo por el que una entrada del Lorebook entro al prompt (prompts.LoreMatch.reason_es).
 LORE_MOTIVO_SIEMPRE = 'siempre incluida'

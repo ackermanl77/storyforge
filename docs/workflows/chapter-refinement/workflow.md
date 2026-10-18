@@ -18,6 +18,19 @@ Revise an already-generated chapter per a specific instruction ("make it darker"
 - The output token budget is `max(chapter.word_count(), chapter.target_words)` — a chapter longer than its own target reserves output space matching its actual length, not the (possibly smaller) target.
 - `app/ui_chapter_editor.py`'s `ChapterPanel._on_refine()` mirrors `_on_generate()`'s structure: same engine-loaded/busy checks, same confirm-before-overwrite, same background thread + `self.app.after(0, ...)` error reporting (careful to capture the exception message into a plain variable first — see `docs/PROJECT_STATUS.md`'s "Recently Fixed" for why that specific pattern matters). It runs through `app/task_runner.py::EngineTaskRunner` (busy lock, Stop, error dialog); `refine_chapter()` reports part i/n to the status bar and honours `cancel_check`, and the result goes to the diff preview (`app/ui_dialogs.py`) instead of straight into the chapter.
 
+## Alternatives at a word (F15, 2026-10-18)
+
+Right-clicking a word in a chapter shows **Alternativas para «word»…**. `engine.word_alternatives(project, chapter, text_before)` does the following:
+
+1. It builds the same prompt Continuar would use for the text before the word (`_alternatives_prompt()`, shrinking the context budget if needed; the chapter-start prompt for the first word).
+2. It reads the next-token distribution. Locally a logits processor copies the logits of a one-token completion, so `logits_all=True` isn't needed. Through an OpenAI-compatible server it uses `ServerLlama.top_tokens()`, which reads `logprobs` (OpenAI `top_logprobs`, chat-style `content`, or llama-server `completion_probabilities`).
+3. It drops the end-of-turn tokens and keeps the 8 likeliest.
+4. It completes each to a whole word with up to 6 greedy tokens, adding together the probabilities of alternatives that end in the same word.
+
+The editor shows them in a menu with percentages (`ChapterPanel._show_alternatives_menu()`). Choosing one replaces the word (`replace_word()`: a version-history entry "alternativa", leading space adjusted, ignored if the text changed meanwhile). **Seguir escribiendo desde aquí con…** replaces it and runs Continuar desde el cursor right after it, which asks before discarding the rest.
+
+Measured with daredevil-8b Q8_0 fully on the RTX 5080: "She knelt beside him and ___" gave turned 25 %, shook 13 %, felt 10 %, gently 9 %, rolled 7 %, lifted 4 %, pulled 4 %, touched 3 %, in 1.25 s; at the chapter start, "The" 78 % and "Rain" 10 %. Tests: `tests/test_word_alternatives.py`.
+
 ## Known limits
 
 - **Not actually a chat / multi-turn conversation**, despite the inspiration — each click is a fresh, independent revision of whatever `chapter.content` currently is; there's no memory of previous refinement instructions beyond their cumulative effect on the text itself. Asking for one change, then a second unrelated one, works fine (each one revises the latest text) — but you can't say "undo that last change" as an instruction; use "Versiones anteriores" instead.

@@ -160,6 +160,9 @@ correspondiente mas abajo.
   anteriores con origen y fecha (hasta 20).
 - **Nota del autor** (de la historia y de cada capítulo) y **clic derecho
   sobre una selección**: Reescribir / Expandir / Describir / Acortar.
+- **Alternativas en una palabra** (clic derecho sobre una palabra): las
+  palabras que el modelo escribiría ahí, con su probabilidad; elegir una la
+  reemplaza, o la reemplaza y sigue escribiendo desde ahí.
 - **Buscar y reemplazar** (Ctrl+F en el capítulo, Ctrl+Shift+F en todo el
   proyecto), total de palabras y avance por capítulo, **modo enfoque** (F11).
 - **Lorebook**: entradas activas/siempre incluidas/prioridad, escaneo de lo
