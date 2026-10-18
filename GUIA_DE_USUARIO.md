@@ -216,6 +216,17 @@ deshabilitados se saltan).
 - **Clic derecho sobre texto seleccionado**: Reescribir, Expandir,
   Describir o Acortar solo ese fragmento (o con una instrucción propia). Ves
   una vista previa con diferencias antes de aceptar.
+- **Trama → Recordar pasajes anteriores**: en una novela larga, los
+  resúmenes de capítulos anteriores dejan afuera detalles (un objeto, una
+  promesa, el nombre de un pueblo). Con esta casilla, cada capítulo lleva en
+  su prompt unos pocos párrafos de capítulos anteriores, los más parecidos a
+  lo que se va a escribir (su título, esquema, nota del autor y lo último
+  escrito). Por defecto busca por palabras, que funciona bien con nombres
+  propios. **Modelo de embeddings…** permite elegir un modelo GGUF de
+  embeddings (por ejemplo `bge-small-en-v1.5-q8_0.gguf`, unos 36 MB, de
+  Hugging Face) para buscar también por significado; se carga en la CPU y se
+  recuerda para la próxima vez. Pulsarlo de nuevo vuelve a la búsqueda por
+  palabras.
 - **Editar → Lluvia de ideas y entrevistas…** abre una ventana de
   conversación con el modelo sobre tu historia:
   - **Lluvia de ideas**: «diez ideas para la próxima escena», «¿qué pasaría

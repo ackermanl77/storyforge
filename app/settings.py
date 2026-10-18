@@ -138,6 +138,22 @@ def set_server_settings(url: str, model: str, api_key: str) -> None:
     _update(mutate)
 
 
+def get_embedding_model() -> str:
+    """El GGUF de embeddings para Recordar pasajes anteriores (B16), o "" para BM25."""
+    value = load_settings().get("embedding_model")
+    return value if isinstance(value, str) else ""
+
+
+def set_embedding_model(path: str) -> None:
+    def mutate(data: dict) -> None:
+        if path:
+            data["embedding_model"] = path
+        else:
+            data.pop("embedding_model", None)
+
+    _update(mutate)
+
+
 # ---------------- preferencias de interfaz ----------------
 def get_ui_preferences() -> dict:
     prefs = dict(UI_DEFAULTS)

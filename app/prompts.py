@@ -494,6 +494,7 @@ def _chapter_prompt_parts(
     max_outline_words: int = 400,
     max_lore_words: int = 200,
     recent_text: str = "",
+    max_recall_words: int = 400,
 ) -> Tuple[str, str, List[str]]:
     """
     (biblia, tarea): la "biblia" de la historia (contexto, capitulos
@@ -548,6 +549,12 @@ def _chapter_prompt_parts(
     if directive:
         task += f"{directive} "
     blocks = [lore_block.rstrip()] if lore_block else []
+    if project.recall_passages:
+        from .retrieval import build_recall_block
+
+        recall = build_recall_block(project, chapter_index, recent_text, max_recall_words)
+        if recall:
+            blocks.append(recall)
     return bible, task, blocks
 
 
@@ -837,7 +844,7 @@ def build_custom_chapter_chat(
 def _chapter_budget_kwargs(budget: dict) -> dict:
     keys = (
         "max_plot_words", "max_characters_words", "max_setting_words",
-        "max_previous_words", "max_outline_words", "max_lore_words",
+        "max_previous_words", "max_outline_words", "max_lore_words", "max_recall_words",
     )
     return {k: budget[k] for k in keys if k in budget}
 

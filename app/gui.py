@@ -200,7 +200,16 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         self._mark_clean()
         self._offer_autosave_recovery()
         self._restore_last_model_selection()
+        self._restore_embedding_model()
         self.after(AUTOSAVE_INTERVAL_MS, self._autosave_tick)
+
+    def _restore_embedding_model(self) -> None:
+        """Vuelve a cargar (en segundo plano) el modelo de embeddings elegido antes (B16)."""
+        from .settings import get_embedding_model
+
+        path = get_embedding_model()
+        if path and os.path.isfile(path):
+            self.load_embedding_model(path, remember=False)
 
     # ---------------- preferencias (F9) ----------------
     def _set_window_icon(self) -> None:

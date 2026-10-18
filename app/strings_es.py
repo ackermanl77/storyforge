@@ -644,6 +644,17 @@ NO_SE_PUDO_GENERAR_SECCION = 'No fue posible generar esta sección del capítulo
 N_CTX_NEGATIVO = 'n_ctx no puede ser negativo (0 = el contexto entrenado del modelo).'
 REFINAR_PARTE_VACIA = 'El modelo devolvió un texto vacío al refinar la parte {part} de {total} del capítulo. No se modificó el capítulo; inténtalo de nuevo.'
 NO_HAY_MODELO_CARGADO = 'No hay un modelo cargado. Carga un archivo .gguf primero.'
+# Pasajes anteriores (B16)
+RECORDAR_PASAJES = "Recordar pasajes anteriores"
+RECORDAR_PASAJES_AYUDA = ("Agrega al prompt de cada capítulo los párrafos de capítulos anteriores más "
+                          "parecidos a lo que se va a escribir (nombres, objetos, promesas). Útil en novelas largas.")
+MODELO_DE_EMBEDDINGS = "Modelo de embeddings…"
+EMBEDDINGS_TITULO = "Elegir un modelo GGUF de embeddings (opcional)"
+EMBEDDINGS_BM25 = "Búsqueda: por palabras (BM25)"
+EMBEDDINGS_ACTIVO = "Búsqueda: {name}"
+EMBEDDINGS_CARGANDO = "Cargando {name}…"
+EMBEDDINGS_ERROR = "No se pudo cargar el modelo de embeddings:\n\n{exc}"
+EMBEDDINGS_QUITAR = "¿Dejar de usar el modelo de embeddings y buscar por palabras (BM25)?"
 # Conversacion lateral (F14)
 CONVERSACION_OPERACION = "Conversación"
 CONVERSACION_TITULO = "Lluvia de ideas y entrevistas"

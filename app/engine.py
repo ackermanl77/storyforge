@@ -221,9 +221,9 @@ ONLY_END_MARKER_STOP = ["[END]"]
 # prompts.find_relevant_lore_entries) no sean, por si solas, lo que hace que
 # ni el presupuesto mas chico quepa en la ventana de contexto del modelo.
 CONTEXT_BUDGET_LEVELS = [
-    dict(max_plot_words=1200, max_characters_words=600, max_setting_words=600, max_previous_words=500, max_outline_words=400, tail_words=400, max_lore_words=200),
-    dict(max_plot_words=700, max_characters_words=400, max_setting_words=400, max_previous_words=300, max_outline_words=250, tail_words=250, max_lore_words=120),
-    dict(max_plot_words=350, max_characters_words=200, max_setting_words=200, max_previous_words=150, max_outline_words=120, tail_words=150, max_lore_words=60),
+    dict(max_plot_words=1200, max_characters_words=600, max_setting_words=600, max_previous_words=500, max_outline_words=400, tail_words=400, max_lore_words=200, max_recall_words=400),
+    dict(max_plot_words=700, max_characters_words=400, max_setting_words=400, max_previous_words=300, max_outline_words=250, tail_words=250, max_lore_words=120, max_recall_words=250),
+    dict(max_plot_words=350, max_characters_words=200, max_setting_words=200, max_previous_words=150, max_outline_words=120, tail_words=150, max_lore_words=60, max_recall_words=120),
 ]
 
 

@@ -131,6 +131,65 @@ class StoryTabsMixin:
         self.banned_phrases_status = ctk.CTkLabel(cliches, text=S.EVITAR_CLICHES_AYUDA, text_color=COLOR_MUTED,
                                                   justify="left", wraplength=620)
         self.banned_phrases_status.pack(side="left", padx=(8, 0))
+        # Pasajes anteriores relevantes (app/retrieval.py, B16).
+        recall = ctk.CTkFrame(box, fg_color="transparent")
+        recall.grid(row=3, column=0, columnspan=8, sticky="ew", padx=4, pady=(0, 6))
+        self.recall_passages_var = ctk.BooleanVar(value=False)
+        self.recall_passages_check = ctk.CTkCheckBox(recall, text=S.RECORDAR_PASAJES,
+                                                     variable=self.recall_passages_var,
+                                                     command=self._on_recall_passages_changed)
+        self.recall_passages_check.pack(side="left", padx=(4, 8))
+        self.embedding_model_btn = ctk.CTkButton(recall, text=S.MODELO_DE_EMBEDDINGS, width=150,
+                                                 command=self.choose_embedding_model)
+        self.embedding_model_btn.pack(side="left", padx=2)
+        self.embedding_status = ctk.CTkLabel(recall, text=S.EMBEDDINGS_BM25, text_color=COLOR_MUTED)
+        self.embedding_status.pack(side="left", padx=(8, 0))
+        ctk.CTkLabel(recall, text=S.RECORDAR_PASAJES_AYUDA, text_color=COLOR_MUTED, justify="left",
+                     wraplength=520).pack(side="left", padx=(8, 0))
+
+    def _on_recall_passages_changed(self) -> None:
+        self.project.recall_passages = bool(self.recall_passages_var.get())
+        self.schedule_dirty_check()
+
+    def load_embedding_model(self, path: str, remember: bool = True) -> None:
+        """Carga el GGUF de embeddings en segundo plano (CPU) y lo activa para la busqueda."""
+        import os
+        import threading
+
+        from . import retrieval
+        from .settings import set_embedding_model
+
+        name = os.path.basename(path)
+        self.embedding_status.configure(text=S.EMBEDDINGS_CARGANDO.format(name=name))
+
+        def work() -> None:
+            try:
+                embedder = retrieval.GGUFEmbedder(path)
+            except Exception as exc:  # noqa: BLE001 - se informa
+                self.after(0, lambda e=exc: (self.embedding_status.configure(text=S.EMBEDDINGS_BM25),
+                                             messagebox.showerror(APP_TITLE, S.EMBEDDINGS_ERROR.format(exc=e))))
+                return
+            retrieval.set_embedder(embedder)
+            if remember:
+                set_embedding_model(path)
+            self.after(0, lambda: self.embedding_status.configure(text=S.EMBEDDINGS_ACTIVO.format(name=name)))
+
+        threading.Thread(target=work, daemon=True).start()
+
+    def choose_embedding_model(self) -> None:
+        from tkinter import filedialog
+
+        from . import retrieval
+        from .settings import set_embedding_model
+
+        if retrieval.embedder_active() and messagebox.askyesno(APP_TITLE, S.EMBEDDINGS_QUITAR):
+            retrieval.set_embedder(None)
+            set_embedding_model("")
+            self.embedding_status.configure(text=S.EMBEDDINGS_BM25)
+            return
+        path = filedialog.askopenfilename(title=S.EMBEDDINGS_TITULO, filetypes=[(S.GGUF, "*.gguf")])
+        if path:
+            self.load_embedding_model(path)
 
     def story_setting_widgets(self) -> list:
         return [*self.story_setting_boxes.values(), self.dialogue_menu]
@@ -164,12 +223,14 @@ class StoryTabsMixin:
             combo.set(getattr(self.project, field, ""))
         self.dialogue_menu.set(story_settings.dialogue_label(self.project.dialogue_balance))
         self.avoid_cliches_var.set(bool(self.project.avoid_cliches))
+        self.recall_passages_var.set(bool(self.project.recall_passages))
 
     def sync_story_settings(self) -> None:
         for field, combo in self.story_setting_boxes.items():
             setattr(self.project, field, combo.get().strip()[: story_settings.MAX_SETTING_CHARS])
         self.project.dialogue_balance = story_settings.dialogue_key(self.dialogue_menu.get())
         self.project.avoid_cliches = bool(self.avoid_cliches_var.get())
+        self.project.recall_passages = bool(self.recall_passages_var.get())
 
     def apply_selected_preset(self, name: str = "") -> bool:
         name = name or self.preset_menu.get()

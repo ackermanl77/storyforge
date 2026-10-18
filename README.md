@@ -160,6 +160,12 @@ correspondiente mas abajo.
   anteriores con origen y fecha (hasta 20).
 - **Nota del autor** (de la historia y de cada capítulo) y **clic derecho
   sobre una selección**: Reescribir / Expandir / Describir / Acortar.
+- **Recordar pasajes anteriores** (Trama): en novelas largas, agrega al
+  prompt de cada capítulo los párrafos de capítulos anteriores más
+  parecidos a lo que se va a escribir, para que un nombre o una promesa de
+  hace veinte capítulos no se pierda en los resúmenes. Busca por palabras, o
+  por significado con un modelo GGUF de embeddings opcional (p. ej.
+  bge-small, ~36 MB).
 - **Lluvia de ideas y entrevistas** (Editar): una conversación al costado
   de la historia: pide ideas, consecuencias o soluciones, o entrevista a un
   personaje, que contesta en primera persona. Ve la premisa, los personajes,
