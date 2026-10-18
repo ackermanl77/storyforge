@@ -644,6 +644,30 @@ NO_SE_PUDO_GENERAR_SECCION = 'No fue posible generar esta sección del capítulo
 N_CTX_NEGATIVO = 'n_ctx no puede ser negativo (0 = el contexto entrenado del modelo).'
 REFINAR_PARTE_VACIA = 'El modelo devolvió un texto vacío al refinar la parte {part} de {total} del capítulo. No se modificó el capítulo; inténtalo de nuevo.'
 NO_HAY_MODELO_CARGADO = 'No hay un modelo cargado. Carga un archivo .gguf primero.'
+# Conversacion lateral (F14)
+CONVERSACION_OPERACION = "Conversación"
+CONVERSACION_TITULO = "Lluvia de ideas y entrevistas"
+CONVERSACION_MENU = "Lluvia de ideas y entrevistas…"
+CONVERSACION_MODO_IDEAS = "Lluvia de ideas"
+CONVERSACION_MODO_PERSONAJE = "Entrevistar a un personaje"
+CONVERSACION_PERSONAJE = "Personaje:"
+CONVERSACION_PERSONAJE_EJEMPLO = "p. ej. Mara"
+CONVERSACION_ENVIAR = "Enviar (Ctrl+Enter)"
+CONVERSACION_NUEVA = "Nueva conversación"
+CONVERSACION_INSERTAR = "Insertar la última respuesta en el capítulo"
+CONVERSACION_COPIAR = "Copiar la última respuesta"
+CONVERSACION_TU = "Tú"
+CONVERSACION_IDEAS = "Ideas"
+CONVERSACION_AYUDA = ("Pregunta lo que quieras sobre la historia («diez ideas para la próxima escena», «¿qué "
+                      "pasaría si Mara no abre la puerta?») o entrevista a un personaje. Ve la premisa, los "
+                      "personajes, la ambientación, el esquema y el capítulo seleccionado; nada se escribe en "
+                      "el capítulo salvo que insertes una respuesta.")
+CONVERSACION_ESCRIBE_UN_MENSAJE = "Escribe un mensaje primero."
+CONVERSACION_FALTA_PERSONAJE = "Escribe el nombre del personaje que quieres entrevistar."
+CONVERSACION_SIN_RESPUESTA = "Todavía no hay una respuesta para insertar."
+CONVERSACION_INSERTADA = "Respuesta insertada en el capítulo {number}."
+CONVERSACION_ORIGEN = "conversación"  # origen en el historial de versiones
+ERROR_EN_LA_CONVERSACION = "Error en la conversación: "
 # Alternativas en una palabra (F15)
 ALTERNATIVAS_OPERACION = "Alternativas"
 ALTERNATIVAS_PARA = "Alternativas para «{word}»…"

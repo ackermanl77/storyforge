@@ -32,6 +32,7 @@ from .output_guard import clean_section
 from .prompts import (
     FINAL_SECTION_HINT,
     NOT_OVER_NUDGE,
+    SIDE_CHAT_BRAINSTORM,
     ChatPrompt,
     build_beat_progress_hint,
     build_section_scope_hint,
@@ -44,6 +45,7 @@ from .prompts import (
     build_partial_summary_chat,
     build_refine_chapter_chat,
     build_rewrite_span_chat,
+    build_side_chat,
     build_summary_chat,
     parse_outline_response,
 )
@@ -1605,6 +1607,44 @@ class LocalStoryEngine:
         self.stats.total_parts = total
         if progress_callback:
             progress_callback(part, total)
+
+    def side_chat(
+        self, project: Project, chapter_index: Optional[int], history: Sequence[Tuple[str, str]], message: str,
+        mode: str = SIDE_CHAT_BRAINSTORM, character: str = "", max_words: int = 350,
+        cancel_check: Optional[Callable[[], bool]] = None, on_token: Optional[Callable[[str], None]] = None,
+    ) -> str:
+        """Un turno de la conversacion lateral (F14): lluvia de ideas o entrevista a un personaje,
+        con la biblia de la historia y el capitulo actual como contexto. Si no cabe, se descartan los
+        turnos mas viejos y se achica el contexto (CONTEXT_BUDGET_LEVELS). No toca el proyecto."""
+        if self._llm is None:
+            raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
+        self.begin_operation(S.CONVERSACION_OPERACION)
+        try:
+            max_out_tokens = int(max_words * TOKENS_PER_WORD_ESTIMATE) + 60
+            limit = self._available_context(max_out_tokens)
+            turns = list(history)
+            prompt = None
+            for budget in CONTEXT_BUDGET_LEVELS:
+                for tail in (600, 300, 0):
+                    while True:
+                        candidate = build_side_chat(project, chapter_index, turns, message, mode, character,
+                                                    budget, tail)
+                        if self._count_tokens(self.render_prompt(candidate)) <= limit:
+                            prompt = candidate
+                            break
+                        if len(turns) <= 2:
+                            break
+                        turns = turns[2:]  # olvidar el intercambio mas viejo
+                    if prompt is not None:
+                        break
+                if prompt is not None:
+                    break
+            if prompt is None:
+                raise ContextOverflowError(S.CONTEXTO_NO_CABE_NI_REDUCIDO)
+            return self._complete(prompt, max_tokens=max_out_tokens, stop=ONLY_END_MARKER_STOP,
+                                  on_token=on_token, cancel_check=cancel_check, task=TASK_EXPAND)
+        finally:
+            self._end_operation()
 
     def expand_field(
         self, field_key: str, text: str, max_words: int = 400,

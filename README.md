@@ -160,6 +160,11 @@ correspondiente mas abajo.
   anteriores con origen y fecha (hasta 20).
 - **Nota del autor** (de la historia y de cada capítulo) y **clic derecho
   sobre una selección**: Reescribir / Expandir / Describir / Acortar.
+- **Lluvia de ideas y entrevistas** (Editar): una conversación al costado
+  de la historia: pide ideas, consecuencias o soluciones, o entrevista a un
+  personaje, que contesta en primera persona. Ve la premisa, los personajes,
+  la ambientación, el esquema y el capítulo seleccionado; nada entra al
+  capítulo salvo que insertes una respuesta.
 - **Alternativas en una palabra** (clic derecho sobre una palabra): las
   palabras que el modelo escribiría ahí, con su probabilidad; elegir una la
   reemplaza, o la reemplaza y sigue escribiendo desde ahí.

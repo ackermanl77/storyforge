@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from . import strings_es as S
 from .project import Chapter, LoreEntry, Project
@@ -1110,6 +1110,77 @@ def build_outline_chat(project: Project, num_chapters: int, **budget) -> ChatPro
         user=raw,
         raw=raw,
     )
+
+
+# ---- conversacion lateral: lluvia de ideas y entrevista a un personaje (F14) ----
+_SPANISH_WORDS = frozenset("que qué el la los las de del por para y es tu tú su como cómo cuando dónde donde porque "
+                           "pero con una un se le lo me mi ella él hay".split())
+
+
+def looks_spanish(text: str) -> bool:
+    """Heuristica barata: signos de apertura, eñe/tildes o varias palabras funcionales del espanol."""
+    if any(ch in text for ch in "¿¡ñÑáéíóúÁÉÍÓÚ"):
+        return True
+    words = re.findall(r"[a-záéíóúñü]+", text.lower())
+    return len(words) >= 3 and sum(word in _SPANISH_WORDS for word in words) / len(words) >= 0.25
+SIDE_CHAT_BRAINSTORM = "brainstorm"
+SIDE_CHAT_CHARACTER = "character"
+
+
+def build_side_chat(project: Project, chapter_index: Optional[int], history: Sequence[Tuple[str, str]],
+                    message: str, mode: str, character: str = "", budget: Optional[dict] = None,
+                    chapter_tail_words: int = 600) -> ChatPrompt:
+    """El prompt de un turno de la conversacion lateral. Ve la biblia de la historia (premisa,
+    personajes, ambientacion), el resumen del esquema, los capitulos anteriores resumidos y el final
+    del capitulo actual; `history` son los turnos previos ("user"/"assistant"), contados dentro del
+    turno de usuario para que funcione con cualquier plantilla de chat. Responde en el idioma del
+    usuario. Nada de esto se escribe en el capitulo."""
+    budget = budget or {}
+    context = build_context_block(project, budget.get("max_plot_words", 1200),
+                                  budget.get("max_characters_words", 600), budget.get("max_setting_words", 600))
+    parts = [context]
+    overview = build_story_outline_overview(project)
+    if overview.strip():
+        parts.append("CHAPTER OUTLINE:\n" + _trim_words(overview, budget.get("max_outline_words", 400)))
+    if chapter_index is not None and 0 <= chapter_index < len(project.chapters):
+        previous = build_previous_context(project, chapter_index, budget.get("max_previous_words", 500))
+        if previous.strip():
+            parts.append(previous)
+        chapter = project.chapters[chapter_index]
+        tail = " ".join(chapter.content.split()[-chapter_tail_words:]) if chapter_tail_words > 0 else ""
+        if tail:
+            parts.append(f"CURRENT CHAPTER ({chapter.title or chapter_index + 1}), LATEST TEXT:\n{tail}")
+    bible = "\n\n".join(p.strip() for p in parts if p.strip())
+    if mode == SIDE_CHAT_CHARACTER:
+        name = character.strip() or "the main character"
+        system = (
+            f"You are {name}, a character in the story described below. Stay in character: answer in the "
+            f"first person, with {name}'s voice, knowledge, opinions and secrets as the story establishes "
+            "them, and only what they could know at this point. Invent details that fit when asked about "
+            "something the story doesn't say. Never mention being an AI or a story. Answer in the same "
+            "language the writer uses."
+        )
+    else:
+        system = (
+            "You are a creative writing partner helping an author develop the story described below. "
+            "Brainstorm freely: offer concrete, varied ideas (numbered when listing several), point out "
+            "consequences and contradictions, and ask a question back when it helps. Keep to the story's "
+            "established facts unless asked to change them. Do not write the chapter itself unless asked. "
+            "Answer in the same language the writer uses."
+        )
+    transcript = "\n".join(
+        f"{'Writer' if role == 'user' else (character.strip() or 'Character') if mode == SIDE_CHAT_CHARACTER else 'You'}: {text.strip()}"
+        for role, text in history if text.strip()
+    )
+    user = f"STORY BIBLE:\n{bible}\n\n"
+    if transcript:
+        user += f"CONVERSATION SO FAR:\n{transcript}\n\n"
+    user += f"THE WRITER NOW SAYS:\n{message.strip()}"
+    if looks_spanish(message):
+        # La biblia suele estar en ingles: sin esto el modelo contesta en ingles a una pregunta en espanol.
+        user += "\n\n(Answer in Spanish.)"
+    raw = f"{system}\n\n{user}\n\nAnswer:\n"
+    return ChatPrompt(system=system, user=user, raw=raw)
 
 
 def build_summary_chat(text: str, max_words: int) -> ChatPrompt:

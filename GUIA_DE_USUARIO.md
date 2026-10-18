@@ -216,6 +216,21 @@ deshabilitados se saltan).
 - **Clic derecho sobre texto seleccionado**: Reescribir, Expandir,
   Describir o Acortar solo ese fragmento (o con una instrucción propia). Ves
   una vista previa con diferencias antes de aceptar.
+- **Editar → Lluvia de ideas y entrevistas…** abre una ventana de
+  conversación con el modelo sobre tu historia:
+  - **Lluvia de ideas**: «diez ideas para la próxima escena», «¿qué pasaría
+    si Mara no abre la puerta?», «¿hay alguna contradicción en el esquema?».
+  - **Entrevistar a un personaje**: escribe su nombre y pregúntale lo que
+    quieras («Mara, ¿qué le pasó a tu hermano?»); contesta en primera
+    persona, con lo que la historia dice de él o ella.
+  El modelo ve la premisa, los personajes, la ambientación, el esquema, los
+  capítulos anteriores (resumidos) y el final del capítulo seleccionado, y
+  recuerda la conversación (si se alarga, olvida lo más viejo). Contesta en
+  el idioma en que escribes. Nada se escribe en el capítulo salvo que pulses
+  **Insertar la última respuesta en el capítulo** (va en el cursor del
+  capítulo seleccionado y queda en su historial de versiones). **Nueva
+  conversación** empieza de cero; la conversación no se guarda con el
+  proyecto.
 - **Clic derecho sobre una palabra → Alternativas para «…»**: el modelo
   propone las palabras que escribiría en ese lugar, cada una con su
   probabilidad (por ejemplo, después de «Se arrodilló junto a él y»:

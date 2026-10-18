@@ -12,6 +12,19 @@ from . import strings_es as S
 class MenuMixin:
     """Menu y atajos de StoryForgeApp."""
 
+    def open_side_chat(self):
+        """Editar > Lluvia de ideas y entrevistas (F14): una sola ventana, que se trae al frente."""
+        from .ui_side_chat import SideChatWindow
+
+        window = getattr(self, "side_chat", None)
+        if window is not None and window.winfo_exists():
+            window.deiconify()
+            window.lift()
+            window.focus_set()
+            return window
+        self.side_chat = SideChatWindow(self)
+        return self.side_chat
+
     # ---------------- menu ----------------
     def _build_menu(self) -> None:
         menubar = tk.Menu(self)
@@ -36,6 +49,8 @@ class MenuMixin:
         edit_menu.add_command(label=S.BUSCAR_EN_EL_CAPITULO, command=self.find_in_chapter, accelerator=S.CTRL_F)
         edit_menu.add_command(label=S.BUSCAR_EN_PROYECTO_MENU, command=self.open_project_search,
                               accelerator=S.CTRL_SHIFT_F)
+        edit_menu.add_separator()
+        edit_menu.add_command(label=S.CONVERSACION_MENU, command=self.open_side_chat)
         menubar.add_cascade(label=S.MENU_EDITAR, menu=edit_menu)
         view_menu = tk.Menu(menubar, tearoff=0)
         view_menu.add_command(label=S.MODO_ENFOQUE, command=self.toggle_focus_mode, accelerator=S.F11)
