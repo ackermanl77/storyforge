@@ -16,7 +16,7 @@ import threading
 import time
 from collections import OrderedDict
 from dataclasses import dataclass, field, replace
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
 
 from . import strings_es as S
 from .chat_format import (
@@ -56,8 +56,13 @@ from .sampling import (
     TASK_SUMMARY,
     SamplingConfig,
 )
+from .phrase_guard import MAX_REWINDS, MAX_REWINDS_AT_ONE_POINT, PhraseGuard, PhraseMatch, word_variants
 
 PromptLike = Union[str, ChatPrompt]
+
+# Tareas de prosa donde se cortan las frases a evitar (B15): escribir y
+# continuar capitulos, expandir, refinar y reescribir; no esquemas ni resumenes.
+PHRASE_GUARD_TASKS = (TASK_PROSE, TASK_EXPAND, TASK_REFINE)
 
 # Valores de type_k/type_v de llama.cpp (enum ggml_type) para la cache KV.
 GGML_KV_TYPES = {"f16": 1, "q8_0": 8, "q4_0": 2}
@@ -93,6 +98,7 @@ class GenerationStats:
     generated_tokens: int = 0
     prompt_eval_seconds: float = 0.0  # de la ultima llamada (hasta el primer token)
     decode_seconds: float = 0.0  # acumulado, todas las llamadas
+    phrase_rewinds: int = 0  # frases a evitar cortadas y reescritas (B15)
     seed: Optional[int] = None
     sampling: Dict[str, float] = field(default_factory=dict)
     words_written: int = 0
@@ -186,6 +192,11 @@ DEFAULT_PROSE_STOP = [
     "(To be continued", "(End of", "[Your Name]",
     # ...o para comentar el esquema ("(Note: this part continues with beat 4...").
     "(Note:",
+    # ...o para hablarle al usuario (visto con daredevil-8b al cerrar una escena
+    # sin poder terminar su turno). Al principio de parrafo, para no cortar dialogo.
+    "\n\nPlease let me know", "\n\nLet me know if", "(Please note", "\n\nNext part:",
+    "Thank you for the prompt", "\n\nI hope this meets", "\n\nI hope you enjoy",
+    "Stay tuned for", "(still to come)", "\n\n**Note", "Note from the author",
 ]
 ONLY_END_MARKER_STOP = ["[END]"]
 
@@ -329,6 +340,8 @@ class LocalStoryEngine:
         self.sampling = SamplingConfig()
         # Semilla usada por la ultima operacion (la elegida o la aleatoria).
         self.last_seed: Optional[int] = None
+        # Frases a evitar del proyecto de la operacion en curso (B15), o None.
+        self.phrase_guard: Optional[PhraseGuard] = None
         # Donde empezo la ultima seccion del ultimo generate_chapter() (posicion
         # en el texto devuelto; lo anterior es prefijo intacto), o None si no se
         # escribio ninguna. "Reintentar última sección" continua desde ahi.
@@ -561,13 +574,30 @@ class LocalStoryEngine:
     def _min_length_processor(self, min_tokens: int, prompt_tokens: int):
         """logits_processor de llama.cpp que prohibe los tokens de fin de turno
         hasta que se generaron `min_tokens` tokens; None si no hace falta."""
+        return self._logits_processor(min_tokens, prompt_tokens)
+
+    def _logits_processor(self, min_tokens: int, prompt_tokens: int, banned_first: Sequence[int] = ()):
+        """logits_processor de llama.cpp: prohibe los tokens de fin de turno
+        hasta generar `min_tokens` tokens, y los `banned_first` como primer
+        token generado (frases a evitar, B15). None si no hace falta."""
         end_ids = self._end_token_ids() if min_tokens > 0 else []
-        if not end_ids:
+        first_ids = list(banned_first)
+        if not end_ids and not first_ids:
             return None
+        # llama.cpp llama al procesador una vez por token generado, el primero
+        # con el prompt ya evaluado: su largo en ese momento es el del prompt
+        # tal como lo tokenizo llama.cpp (special=True, su BOS), que
+        # _count_tokens() solo aproxima. Asi "primer token" y el minimo son exactos.
+        start: List[int] = []
 
         def processor(input_ids, scores):
-            if len(input_ids) - prompt_tokens < min_tokens:
+            if not start:
+                start.append(len(input_ids))
+            generated = len(input_ids) - start[0]
+            if end_ids and generated < min_tokens:
                 scores[end_ids] = -float("inf")
+            if first_ids and generated == 0:
+                scores[first_ids] = -float("inf")
             return scores
 
         try:  # llama-cpp-python iterates over a LogitsProcessorList
@@ -766,15 +796,131 @@ class LocalStoryEngine:
         stops = list(stop or DEFAULT_PROSE_STOP)
         if not isinstance(prompt, str):
             stops += [s for s in self.formatter.stop if s and s not in stops]
+        guard = self.phrase_guard if task in PHRASE_GUARD_TASKS else None
+        if guard:
+            return self._complete_guarded(guard, text_prompt, max_tokens, stops, task, min_tokens, on_token, cancel_check)
+        result, _used = self._run_completion(
+            text_prompt, prompt_tokens, max_tokens, stops, task, min_tokens, on_token, cancel_check,
+        )
+        return result
+
+    def _complete_guarded(
+        self, guard: PhraseGuard, text_prompt: str, max_tokens: int, stops: List[str], task: str,
+        min_tokens: int, on_token: Optional[Callable[[str], None]], cancel_check: Optional[Callable[[], bool]],
+    ) -> CompletionResult:
+        """
+        _complete_ex con frases a evitar (B15, app/phrase_guard.py). Cuando el
+        texto completa una frase de la lista, se detiene la generacion, se
+        retrocede hasta justo antes de la frase y se sigue desde ahi (el texto
+        aceptado se agrega al prompt, asi llama.cpp reutiliza su cache) con la
+        primera palabra de la frase prohibida en esa posicion. Al transmitir se
+        retienen los ultimos `guard.max_span` caracteres, asi una frase que se
+        va a cortar nunca llega a `on_token`. Si el modelo insiste
+        (MAX_REWINDS_AT_ONE_POINT en el mismo lugar, o MAX_REWINDS en total),
+        el texto se acepta como quedo.
+        """
+        hold = guard.max_span
+        accepted = ""          # texto ya aceptado en esta llamada
+        emitted = 0            # caracteres de `accepted + actual` ya pasados a on_token
+        allowed_until = 0      # coincidencias que empiezan antes de esto se aceptan
+        bans: dict = {}        # posicion en `accepted` -> ids prohibidos ahi
+        tries_at: dict = {}    # posicion -> retrocesos en ese lugar
+        remaining, generated, rewinds = max_tokens, 0, 0
+
+        def emit(text: str, final: bool = False) -> None:
+            nonlocal emitted
+            safe = len(text) if final else max(emitted, len(text) - hold)
+            if on_token is not None and safe > emitted:
+                on_token(text[emitted:safe])
+            emitted = max(emitted, safe)
+
+        while True:
+            prompt_text = text_prompt + accepted
+            prompt_tokens = self._count_tokens(prompt_text)
+            current: List[str] = []
+            hit: List[PhraseMatch] = []
+
+            def watch(delta: str, _current=current, _hit=hit, _accepted=accepted) -> bool:
+                _current.append(delta)
+                text = _accepted + "".join(_current)
+                found = guard.search(text, max(allowed_until, len(text) - len(delta) - hold))
+                if found is not None and found.start >= emitted:
+                    _hit.append(found)
+                    return True  # detener: se retrocede
+                emit(text)
+                return False
+
+            result, used = self._run_completion(
+                prompt_text, prompt_tokens, remaining, stops, task, max(0, min_tokens - generated),
+                None, cancel_check, banned_first=bans.get(len(accepted), ()), watch=watch,
+            )
+            generated += used
+            remaining -= used
+            # Siempre transmitido (watch), asi una frase se detecta al aparecer y no
+            # despues de escribir toda la seccion; una respuesta entera (un doble de
+            # prueba) pasa por watch() de una vez.
+            text = accepted + "".join(current)
+            logger.debug("frases a evitar: llamada con %d caracteres aceptados -> %d tokens, %s, termina en %r",
+                         len(accepted), used, result.finish_reason, text[-60:])
+            match = hit[0] if hit else None
+            done = (match is None or result.finish_reason == "cancelled" or remaining <= 0
+                    or rewinds >= MAX_REWINDS)
+            if match is not None and not done:
+                cut = text[: match.start].rstrip()
+                cut = text[: max(len(cut), emitted)]
+                if tries_at.get(len(cut), 0) >= MAX_REWINDS_AT_ONE_POINT:
+                    # El modelo insiste en esta frase aqui: se acepta y se sigue.
+                    allowed_until = match.end
+                    accepted = text
+                    if result.finish_reason != "phrase":
+                        done = True
+                else:
+                    tries_at[len(cut)] = tries_at.get(len(cut), 0) + 1
+                    ids = set(bans.get(len(cut), ()))
+                    ids.update(self._first_token_ids(match.first_word))
+                    bans[len(cut)] = tuple(sorted(ids))
+                    rewinds += 1
+                    self.stats.phrase_rewinds += 1
+                    logger.info("Frase a evitar %r: se retrocede y se sigue de otra forma", match.phrase)
+                    accepted = cut
+                    continue
+            if done or match is None:
+                finish = result.finish_reason if result.finish_reason != "phrase" else "length"
+                emit(text, final=True)
+                self.last_finish_reason = finish
+                return CompletionResult(text, finish)
+
+    def _first_token_ids(self, word: str) -> List[int]:
+        """Los primeros tokens con los que el modelo empezaria `word` (con y sin
+        espacio, minuscula y mayuscula inicial). Vacio si no se puede tokenizar."""
+        ids = set()
+        for form in word_variants(word):
+            try:
+                tokens = self._llm.tokenize(form.encode("utf-8"), add_bos=False, special=False)
+            except Exception:  # noqa: BLE001 - dobles de prueba
+                continue
+            if tokens:
+                ids.add(int(tokens[0]))
+        return sorted(ids)
+
+    def _run_completion(
+        self, text_prompt: str, prompt_tokens: int, max_tokens: int, stops: List[str], task: str,
+        min_tokens: int, on_token: Optional[Callable[[str], None]], cancel_check: Optional[Callable[[], bool]],
+        banned_first: Sequence[int] = (), watch: Optional[Callable[[str], bool]] = None,
+    ) -> Tuple[CompletionResult, int]:
+        """Una sola llamada a llama.cpp: devuelve el resultado y los tokens
+        generados. `banned_first`: ids prohibidos como PRIMER token generado.
+        `watch(delta)` (solo al transmitir) puede detener la generacion
+        devolviendo True; el resultado lleva entonces finish_reason "phrase"."""
         call_kwargs = dict(max_tokens=max_tokens, stop=stops)
         call_kwargs.update(self._sampling_kwargs(task))
-        processor = self._min_length_processor(min_tokens, prompt_tokens)
+        processor = self._logits_processor(min_tokens, prompt_tokens, banned_first)
         if processor is not None:
             call_kwargs["logits_processor"] = processor
         # Solo pedimos streaming token a token (llama_cpp.Llama.__call__(...,
         # stream=True), que devuelve un generador en vez de un dict) cuando
         # hay alguien escuchando o alguien que puede cancelar.
-        if on_token is not None or cancel_check is not None:
+        if on_token is not None or cancel_check is not None or watch is not None:
             call_kwargs["stream"] = True
 
         stats = self.stats
@@ -784,7 +930,7 @@ class LocalStoryEngine:
         stats.n_ctx = self._n_ctx
         stats.prompt_text = text_prompt
         stats.seed = call_kwargs.get("seed")
-        stats.sampling = {k: v for k, v in call_kwargs.items() if k not in ("stop", "stream", "max_tokens", "seed")}
+        stats.sampling = {k: v for k, v in call_kwargs.items() if k not in ("stop", "stream", "max_tokens", "seed", "logits_processor")}
         call_start = time.monotonic()
 
         response = self._llm(text_prompt, **call_kwargs)
@@ -798,12 +944,15 @@ class LocalStoryEngine:
             text = choice.get("text", "")
             elapsed = time.monotonic() - call_start
             usage = response.get("usage") or {}
-            stats.generated_tokens += int(usage.get("completion_tokens") or (self._count_tokens(text) if text else 0))
+            used = int(usage.get("completion_tokens") or (self._count_tokens(text) if text else 0))
+            stats.generated_tokens += used
             stats.decode_seconds += elapsed
+            if watch is not None and text:
+                watch(text)
             if on_token is not None and text:
                 on_token(text)
             self.last_finish_reason = choice.get("finish_reason")
-            return CompletionResult(text, self.last_finish_reason)
+            return CompletionResult(text, self.last_finish_reason), used
 
         # Streaming real: `response` es un generador de fragmentos, cada uno
         # con un delta incremental de texto (NO acumulado; ~1 token cada
@@ -812,6 +961,7 @@ class LocalStoryEngine:
         pieces: List[str] = []
         finish_reason: Optional[str] = None
         first_token_at: Optional[float] = None
+        used = 0
         try:
             for chunk in response:
                 if self._is_cancelled(cancel_check):
@@ -823,6 +973,7 @@ class LocalStoryEngine:
                     stats.prompt_eval_seconds = now - call_start
                     decode_base = stats.decode_seconds
                 stats.generated_tokens += 1
+                used += 1
                 stats.decode_seconds = decode_base + (now - first_token_at)
                 choice = chunk["choices"][0]
                 if choice.get("finish_reason"):
@@ -833,16 +984,19 @@ class LocalStoryEngine:
                 pieces.append(delta)
                 if on_token is not None:
                     on_token(delta)
+                if watch is not None and watch(delta):
+                    finish_reason = "phrase"
+                    break
         finally:
             # Cortar el generador de llama-cpp-python lo cierra limpiamente.
             close = getattr(response, "close", None)
-            if finish_reason == "cancelled" and callable(close):
+            if finish_reason in ("cancelled", "phrase") and callable(close):
                 try:
                     close()
                 except Exception:  # noqa: BLE001
                     pass
         self.last_finish_reason = finish_reason
-        return CompletionResult("".join(pieces), finish_reason)
+        return CompletionResult("".join(pieces), finish_reason), used
 
     def _complete_with_shrinking_budget(
         self,
@@ -1050,6 +1204,7 @@ class LocalStoryEngine:
         chapter = project.chapters[chapter_index]
         target = chapter.target_words
         self.last_section_start = None
+        self.phrase_guard = PhraseGuard.for_project(project)
         self.cleaned_sections = 0
 
         full_text = (resume_from or "").rstrip()
@@ -1362,6 +1517,7 @@ class LocalStoryEngine:
         """
         if self._llm is None:
             raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
+        self.phrase_guard = PhraseGuard.for_project(project)
         self.begin_operation(f"Refinar capítulo {chapter_index + 1}")
         try:
             return self._refine_chapter(project, chapter_index, instruction, cancel_check, progress_callback, on_token)
@@ -1415,6 +1571,7 @@ class LocalStoryEngine:
         """
         if self._llm is None:
             raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
+        self.phrase_guard = PhraseGuard.for_project(project)
         if not selection.strip():
             raise ValueError(S.NO_HAY_TEXTO_SELECCIONADO)
         self.begin_operation("Reescribir selección")

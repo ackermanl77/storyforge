@@ -16,6 +16,7 @@ rendimiento/GPU, limitaciones) y [docs/](docs/PROJECT_STATUS.md)
    - [Flujo outline-first](#flujo-outline-first-generar-el-esquema-completo)
    - [Tipo de escritura](#tipo-de-escritura)
    - [Ajustes de la historia y presets](#ajustes-de-la-historia-y-presets)
+   - [Evitar clichés](#evitar-clichés)
    - [Generar un capítulo](#generar-un-capítulo)
    - [Propósito de capítulo](#propósito-de-capítulo)
    - [Prompt propio de un capítulo](#prompt-propio-de-un-capítulo)
@@ -339,6 +340,30 @@ En un **prompt propio** de capítulo puedes usar `{género}`, `{tema}`,
 `{tono}` y `{punto_de_vista}`. Desde el celular, la pantalla Historia tiene
 los mismos campos y un selector de preset que llena el formulario (luego
 toca Guardar).
+
+### Evitar clichés
+
+Los modelos locales repiten frases hechas: en una prueba real con el modelo
+8B, un capítulo de 3000 palabras tenía "her heart skipped a beat", "sent
+shivers down her spine" y dos veces "barely above a whisper". Con **Evitar
+clichés** marcado (pestaña Plot, debajo de los ajustes de la historia;
+viene marcado), StoryForge corta esas frases **mientras se escriben**: en
+cuanto el texto completa una, vuelve a justo antes de ella y hace que el
+modelo siga de otra forma (la primera palabra de la frase queda prohibida
+en ese lugar). No llegas a ver la frase cortada: el texto en pantalla va
+una oración por detrás mientras se genera. Si el modelo insiste en la misma
+frase en el mismo lugar, después de tres intentos se acepta.
+
+Hay una lista incorporada, en inglés y en español ("heart skipped a beat",
+"little did * know", "nada volvería a ser igual"...). En **Frases a
+evitar…** agregas las tuyas, una por línea, en el idioma en que escribe el
+modelo: no distingue mayúsculas, y "*" vale por 1 a 3 palabras cualquiera
+("change * life forever" cubre "change her whole life forever"). Tus
+frases cuentan aunque desmarques Evitar clichés (eso solo quita la lista
+incorporada). Se aplica al escribir y continuar capítulos, a Refinar y a
+Reescribir; no a los esquemas ni a los resúmenes. Medido con el modelo 8B:
+de 4 clichés por capítulo a ninguno (unos 10 cortados y reescritos por
+capítulo), sin cambiar el largo.
 
 ### Generar un capítulo
 

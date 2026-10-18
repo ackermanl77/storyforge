@@ -66,6 +66,13 @@ correspondiente mas abajo.
 
 ## Historial de cambios
 
+**Evitar clichés (2026-10-17):**
+- Mientras se escribe un capítulo (y al Refinar o Reescribir), las frases hechas de una lista
+  ("her heart skipped a beat", "nada volvería a ser igual"...) se cortan al aparecer y el modelo
+  sigue de otra forma. Pestaña Plot: "Evitar clichés" y "Frases a evitar…" (las tuyas, "*" = 1 a 3
+  palabras). Con el modelo 8B: de 4 clichés por capítulo a ninguno. Además se cortan los párrafos
+  en que el modelo se sale de la historia para hablarte ("Please let me know…", "Note from the author").
+
 **Generador de historias (2026-10-14):**
 - Una página aparte, **/generador**, para escribir una historia de una vez sin proyecto ni
   capítulos: trama, personajes, ambientación, género, tema, punto de vista, tono y contexto
@@ -499,7 +506,7 @@ python -m pytest -q
 ruff check app tests
 ```
 
-Resultado el 2026-10-08: **352 passed, 2 skipped, 21 subtests** (los 2
+Resultado el 2026-10-17: **429 passed, 4 skipped, 21 subtests** (los 4
 saltados son la prueba opcional con un modelo real); corre la suite tú
 mismo antes de confiar en este número. `scripts\run_coverage.ps1` genera el
 reporte de cobertura (usa `.venv`). Las pruebas

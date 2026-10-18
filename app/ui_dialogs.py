@@ -174,6 +174,41 @@ class TextViewerDialog(ctk.CTkToplevel):
         self.clipboard_append(text)
 
 
+class PhraseListDialog(ctk.CTkToplevel):
+    """Editor de las frases a evitar propias del proyecto (una por linea)."""
+
+    def __init__(self, master, phrases: List[str], defaults, on_save: Callable[[List[str]], None]):
+        super().__init__(master)
+        self.title(S.FRASES_A_EVITAR_TITULO)
+        self.geometry("720x520")
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+        self._on_save = on_save
+        ctk.CTkLabel(self, text=S.FRASES_A_EVITAR_AYUDA, justify="left", wraplength=680).grid(
+            row=0, column=0, sticky="w", padx=10, pady=(10, 0))
+        self.box = ctk.CTkTextbox(self, wrap="none")
+        self.box.grid(row=1, column=0, sticky="nsew", padx=10, pady=6)
+        self.box.insert("1.0", "\n".join(phrases))
+        ctk.CTkLabel(self, text=S.FRASES_INCORPORADAS.format(phrases=" · ".join(defaults)), justify="left",
+                     wraplength=680, text_color="gray").grid(row=2, column=0, sticky="w", padx=10)
+        bar = ctk.CTkFrame(self, fg_color="transparent")
+        bar.grid(row=3, column=0, sticky="e", padx=10, pady=(4, 10))
+        self.save_btn = ctk.CTkButton(bar, text=S.GUARDAR, width=90, command=self.save)
+        self.save_btn.pack(side="left", padx=4)
+        self.cancel_btn = ctk.CTkButton(bar, text=S.CANCELAR, width=90, command=self.destroy)
+        self.cancel_btn.pack(side="left", padx=4)
+        apply_tab_order(self, self.box, self.save_btn, self.cancel_btn)
+
+    def phrases(self) -> List[str]:
+        from .phrase_guard import clean_phrases
+
+        return clean_phrases(self.box.get("1.0", "end").splitlines())
+
+    def save(self) -> None:
+        self._on_save(self.phrases())
+        self.destroy()
+
+
 # ---------------------------------------------------------------- busqueda en el proyecto
 @dataclass
 class SearchHit:

@@ -595,9 +595,17 @@ class TestStreamingGeneration(unittest.TestCase):
         llm = StreamingFakeLlama()
         engine._llm = llm
         project = make_project(target_words=100)
+        project.avoid_cliches = False
         engine.generate_chapter(project, 0)
         self.assertTrue(llm.stream_requests)
         self.assertFalse(any(llm.stream_requests))
+
+    def test_the_phrase_guard_streams_internally_to_catch_phrases_as_they_appear(self):
+        engine = LocalStoryEngine()
+        llm = StreamingFakeLlama()
+        engine._llm = llm
+        engine.generate_chapter(make_project(target_words=100), 0)  # avoid_cliches is on by default
+        self.assertTrue(all(llm.stream_requests))
 
     def test_requests_streaming_when_progress_callback_is_given(self):
         engine = LocalStoryEngine()

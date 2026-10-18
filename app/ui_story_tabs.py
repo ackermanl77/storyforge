@@ -118,9 +118,37 @@ class StoryTabsMixin:
         self.delete_preset_btn.pack(side="left", padx=2)
         self.preset_status = ctk.CTkLabel(presets, text="", text_color=COLOR_MUTED)
         self.preset_status.pack(side="left", padx=(8, 0))
+        # Frases a evitar (app/phrase_guard.py, B15).
+        cliches = ctk.CTkFrame(box, fg_color="transparent")
+        cliches.grid(row=2, column=0, columnspan=8, sticky="ew", padx=4, pady=(0, 6))
+        self.avoid_cliches_var = ctk.BooleanVar(value=True)
+        self.avoid_cliches_check = ctk.CTkCheckBox(cliches, text=S.EVITAR_CLICHES, variable=self.avoid_cliches_var,
+                                                   command=self._on_avoid_cliches_changed)
+        self.avoid_cliches_check.pack(side="left", padx=(4, 8))
+        self.banned_phrases_btn = ctk.CTkButton(cliches, text=S.FRASES_A_EVITAR, width=130,
+                                                command=self.edit_banned_phrases)
+        self.banned_phrases_btn.pack(side="left", padx=2)
+        self.banned_phrases_status = ctk.CTkLabel(cliches, text=S.EVITAR_CLICHES_AYUDA, text_color=COLOR_MUTED,
+                                                  justify="left", wraplength=620)
+        self.banned_phrases_status.pack(side="left", padx=(8, 0))
 
     def story_setting_widgets(self) -> list:
         return [*self.story_setting_boxes.values(), self.dialogue_menu]
+
+    def _on_avoid_cliches_changed(self) -> None:
+        self.project.avoid_cliches = bool(self.avoid_cliches_var.get())
+        self.schedule_dirty_check()
+
+    def edit_banned_phrases(self) -> None:
+        from .phrase_guard import DEFAULT_BANNED_PHRASES
+        from .ui_dialogs import PhraseListDialog
+
+        def save(phrases):
+            self.project.banned_phrases = phrases
+            self.banned_phrases_status.configure(text=S.FRASES_GUARDADAS.format(count=len(phrases)))
+            self.schedule_dirty_check()
+
+        self.banned_phrases_dialog = PhraseListDialog(self, self.project.banned_phrases, DEFAULT_BANNED_PHRASES, save)
 
     @staticmethod
     def _preset_names() -> list:
@@ -135,11 +163,13 @@ class StoryTabsMixin:
         for field, combo in self.story_setting_boxes.items():
             combo.set(getattr(self.project, field, ""))
         self.dialogue_menu.set(story_settings.dialogue_label(self.project.dialogue_balance))
+        self.avoid_cliches_var.set(bool(self.project.avoid_cliches))
 
     def sync_story_settings(self) -> None:
         for field, combo in self.story_setting_boxes.items():
             setattr(self.project, field, combo.get().strip()[: story_settings.MAX_SETTING_CHARS])
         self.project.dialogue_balance = story_settings.dialogue_key(self.dialogue_menu.get())
+        self.project.avoid_cliches = bool(self.avoid_cliches_var.get())
 
     def apply_selected_preset(self, name: str = "") -> bool:
         name = name or self.preset_menu.get()

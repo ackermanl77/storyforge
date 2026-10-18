@@ -414,6 +414,10 @@ class Project:
     tone: str = ""
     point_of_view: str = ""
     dialogue_balance: str = ""
+    # Frases a evitar (app/phrase_guard.py, B15): las de DEFAULT_BANNED_PHRASES
+    # si avoid_cliches, mas las propias del proyecto (una frase por elemento).
+    avoid_cliches: bool = True
+    banned_phrases: List[str] = field(default_factory=list)
     # Lorebook / World Info -- ver LoreEntry arriba.
     lore_entries: List[LoreEntry] = field(default_factory=list)
     author: str = ""
@@ -559,6 +563,8 @@ class Project:
             "tone": self.tone,
             "point_of_view": self.point_of_view,
             "dialogue_balance": self.dialogue_balance,
+            "avoid_cliches": self.avoid_cliches,
+            "banned_phrases": list(self.banned_phrases),
             "author_note": self.author_note,
             "sampling": self.sampling.to_dict(),
             "chapter_heading": self.chapter_heading,
@@ -598,6 +604,10 @@ class Project:
         for key, value in clean_settings(data).items():
             if key != "writing_style":
                 setattr(proj, key, value)
+        from .phrase_guard import clean_phrases
+
+        proj.avoid_cliches = _bool_field(data, "avoid_cliches", True)
+        proj.banned_phrases = clean_phrases(p for p in _list_field(data, "banned_phrases") if isinstance(p, str))
         model_path = data.get("model_path")
         proj.model_path = model_path if isinstance(model_path, str) and model_path.strip() else None
         context_size = data.get("context_size")

@@ -735,6 +735,21 @@ PRESET_APLICADO = "Preset «{name}» aplicado."
 PRESET_GUARDADO = "Preset «{name}» guardado."
 PRESET_BORRADO = "Preset «{name}» borrado."
 PRESET_INCORPORADO_NO_SE_BORRA = "Los presets incorporados no se pueden borrar."
+# Frases a evitar (app/phrase_guard.py).
+EVITAR_CLICHES = "Evitar clichés"
+EVITAR_CLICHES_AYUDA = (
+    "Corta mientras se escribe las frases hechas que los modelos locales repiten "
+    "(«her heart skipped a beat», «nada volvería a ser igual»…) y hace que el modelo lo diga de otra forma."
+)
+FRASES_A_EVITAR = "Frases a evitar…"
+FRASES_A_EVITAR_TITULO = "Frases a evitar"
+FRASES_A_EVITAR_AYUDA = (
+    "Una frase por línea, en el idioma en que escribe el modelo; no distingue mayúsculas. "
+    "«*» es de 1 a 3 palabras cualquiera: «change * life forever» cubre «change her whole life forever». "
+    "Se suman a las incorporadas mientras «Evitar clichés» esté marcado:"
+)
+FRASES_INCORPORADAS = "Incorporadas: {phrases}"
+FRASES_GUARDADAS = "{count} frases propias."
 DIALOGUE_DEFAULT_LABEL = "(Sin indicar)"
 DIALOGUE_LABELS: Dict[str, str] = {
     "": DIALOGUE_DEFAULT_LABEL,

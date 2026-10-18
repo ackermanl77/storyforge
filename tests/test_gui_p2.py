@@ -265,6 +265,27 @@ class TestStorySettings(_Base):
         self.assertEqual(app.story_setting_boxes["genre"].get(), "Romance")
         self.assertEqual(app.dialogue_menu.get(), "(Sin indicar)")
 
+    def test_avoid_cliches_and_the_phrase_list(self):
+        app = self.app
+        self.assertTrue(app.avoid_cliches_var.get())  # on by default
+        app.avoid_cliches_check.toggle()
+        self.assertFalse(app.project.avoid_cliches)
+        app.avoid_cliches_check.toggle()
+        app.edit_banned_phrases()
+        dialog = app.banned_phrases_dialog
+        dialog.box.insert("1.0", "the void stared back\n\n  his jaw   tightened  \n")
+        dialog.save()
+        self.assertEqual(app.project.banned_phrases, ["the void stared back", "his jaw tightened"])
+        app.edit_banned_phrases()
+        self.assertIn("his jaw tightened", app.banned_phrases_dialog.box.get("1.0", "end"))
+        app.banned_phrases_dialog.destroy()
+        # Another project shows its own switch.
+        app.project = Project(avoid_cliches=False)
+        app._load_into_ui()
+        self.assertFalse(app.avoid_cliches_var.get())
+        app._sync_all()
+        self.assertFalse(app.project.avoid_cliches)
+
 
 class TestFindReplaceF5(_Base):
     def test_chapter_replace_all_pushes_history(self):

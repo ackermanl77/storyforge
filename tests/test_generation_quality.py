@@ -573,6 +573,11 @@ class TestChapterLength(unittest.TestCase):
 
         scores = np.zeros(200, dtype=np.float32)
         min_tokens = int(seen[0][0] * engine_module.MIN_SECTION_FRACTION)
+        # The first call is the first generated token: the processor counts from the context
+        # length it sees then (llama.cpp's own prompt tokenization, not an estimate).
+        processors[0](np.arange(50), scores)
+        self.assertEqual(scores[101], -np.inf)
+        scores = np.zeros(200, dtype=np.float32)
         processors[0](np.arange(50 + min_tokens - 1), scores)  # one token short of the minimum
         self.assertEqual(scores[101], -np.inf)  # EOS blocked
         self.assertEqual(scores[LLAMA3_SPECIALS["<|eot_id|>"]], -np.inf)
@@ -581,5 +586,8 @@ class TestChapterLength(unittest.TestCase):
         self.assertEqual(scores[101], 0)  # free to end once it's long enough
 
     def test_breaking_out_of_the_story_is_cut(self):
-        for marker in ("(To be continued", "(End of", "[Your Name]", "(Note:"):
+        for marker in ("(To be continued", "(End of", "[Your Name]", "(Note:",
+                       # daredevil-8b, after a scene it couldn't end its turn on (2026-10-17):
+                       "\n\nPlease let me know", "(Please note", "\n\nNext part:", "Stay tuned for",
+                       "(still to come)", "\n\n**Note", "Note from the author"):
             self.assertIn(marker, engine_module.DEFAULT_PROSE_STOP)
