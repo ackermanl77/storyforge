@@ -119,6 +119,25 @@ def get_last_model() -> Optional[str]:
     return value if isinstance(value, str) and value else None
 
 
+# ---------------- modelo en un servidor (B14) ----------------
+def get_server_settings() -> dict:
+    """URL, modelo y clave del ultimo servidor usado (la clave queda en settings.json, como texto)."""
+    stored = load_settings().get("server")
+    out = {"url": "http://127.0.0.1:1234/v1", "model": "", "api_key": ""}
+    if isinstance(stored, dict):
+        for key in out:
+            if isinstance(stored.get(key), str):
+                out[key] = stored[key][:500]
+    return out
+
+
+def set_server_settings(url: str, model: str, api_key: str) -> None:
+    def mutate(data: dict) -> None:
+        data["server"] = {"url": url.strip(), "model": model.strip(), "api_key": api_key.strip()}
+
+    _update(mutate)
+
+
 # ---------------- preferencias de interfaz ----------------
 def get_ui_preferences() -> dict:
     prefs = dict(UI_DEFAULTS)

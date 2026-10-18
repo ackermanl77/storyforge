@@ -404,6 +404,33 @@ class LocalStoryEngine:
     def n_ctx(self) -> int:
         return self._n_ctx
 
+    @property
+    def is_server(self) -> bool:
+        """True when the model runs on an OpenAI-compatible server (connect_server)."""
+        from .server_backend import ServerLlama
+
+        return isinstance(self._llm, ServerLlama)
+
+    def connect_server(self, base_url: str, model: str = "", api_key: str = "", n_ctx: Optional[int] = None,
+                       chat_format: Optional[str] = None) -> None:
+        """
+        Usa un modelo de un servidor compatible con OpenAI (B14, app/server_backend.py):
+        LM Studio, Ollama, KoboldCpp, llama-server... `model` vacio = el primero que
+        ofrece el servidor; `n_ctx` vacio = el que publica el servidor (o 8192).
+        Lanza ServerError con un mensaje para el usuario si no se puede conectar.
+        """
+        from .server_backend import ServerLlama
+
+        if chat_format is not None:
+            self.set_chat_format(chat_format)
+        llm = ServerLlama(base_url, model=model, api_key=api_key, n_ctx=n_ctx)
+        self.unload()
+        self._llm = llm
+        self._model_path = f"{llm.root} ({llm.model or 'servidor'})"
+        self._n_ctx = llm.n_ctx()
+        self.model_info = None
+        self.load_options = dict(n_ctx=self._n_ctx, server=llm.root, model=llm.model)
+
     def load(self, model_path: str, n_ctx: int = 8192, n_threads: Optional[int] = None,
               n_gpu_layers: int = 0, chat_format: Optional[str] = None,
               flash_attn: Optional[bool] = None, n_batch: Optional[int] = None,
@@ -580,6 +607,8 @@ class LocalStoryEngine:
         """logits_processor de llama.cpp: prohibe los tokens de fin de turno
         hasta generar `min_tokens` tokens, y los `banned_first` como primer
         token generado (frases a evitar, B15). None si no hace falta."""
+        if self.is_server:
+            return None  # a server can't run a local logits processor (see app/server_backend.py)
         end_ids = self._end_token_ids() if min_tokens > 0 else []
         first_ids = list(banned_first)
         if not end_ids and not first_ids:
@@ -893,6 +922,8 @@ class LocalStoryEngine:
     def _first_token_ids(self, word: str) -> List[int]:
         """Los primeros tokens con los que el modelo empezaria `word` (con y sin
         espacio, minuscula y mayuscula inicial). Vacio si no se puede tokenizar."""
+        if self.is_server:
+            return []  # the ban needs a logits processor, which a server doesn't run
         ids = set()
         for form in word_variants(word):
             try:

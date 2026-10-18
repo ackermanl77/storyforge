@@ -534,3 +534,27 @@ class TestSavedAlternatives(_Base):
         panel.content_box.insert("end", " editada")
         panel._on_content_edited()  # a hand edit drops them
         self.assertEqual(ch.alternatives, [])
+
+
+class TestServerConnection(_Base):
+    def test_connecting_to_a_server_from_the_model_tab(self):
+        from app.engine import LocalStoryEngine
+        from tests.test_server_backend import FakeServer
+
+        server = FakeServer()
+        self.addCleanup(server.close)
+        self.app.engine = LocalStoryEngine()
+        self.app.server_url_entry.delete(0, "end")
+        self.app.server_url_entry.insert(0, server.url)
+        with mock.patch("app.settings.user_data_dir", return_value=tempfile.mkdtemp()):
+            self.app._connect_server()
+            for _ in range(50):
+                self.app.update()
+                if self.app.engine.is_loaded:
+                    break
+            self.assertTrue(self.app.engine.is_server, self.app.model_status.cget("text"))
+            self.app.update()
+            self.assertIn("fake-70b", self.app.model_status.cget("text"))
+            from app.settings import get_server_settings
+
+            self.assertEqual(get_server_settings()["url"], server.url)  # remembered for next time

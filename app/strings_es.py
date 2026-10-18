@@ -735,6 +735,21 @@ PRESET_APLICADO = "Preset «{name}» aplicado."
 PRESET_GUARDADO = "Preset «{name}» guardado."
 PRESET_BORRADO = "Preset «{name}» borrado."
 PRESET_INCORPORADO_NO_SE_BORRA = "Los presets incorporados no se pueden borrar."
+# Modelo en un servidor compatible con OpenAI (app/server_backend.py).
+SERVIDOR_TITULO = "O usa un modelo en un servidor (LM Studio, Ollama, KoboldCpp, llama-server…)"
+SERVIDOR_AYUDA = (
+    "Dirección del servidor compatible con OpenAI, en esta PC o en otra de la red (por ejemplo "
+    "http://127.0.0.1:1234/v1 para LM Studio, http://127.0.0.1:11434/v1 para Ollama, "
+    "http://127.0.0.1:5001/v1 para KoboldCpp). El modelo vacío usa el que ofrece el servidor. "
+    "Elige el formato de chat del modelo arriba si el servidor no lo informa."
+)
+SERVIDOR_URL = "Dirección:"
+SERVIDOR_MODELO = "Modelo:"
+SERVIDOR_CLAVE = "Clave de API:"
+SERVIDOR_CONECTAR = "Conectar"
+SERVIDOR_CONECTANDO = "Conectando con {url}…"
+SERVIDOR_CONECTADO = "Conectado: {model} en {url} (contexto {n_ctx}, formato de chat {chat_format})."
+SERVIDOR_TAREA = "Conectar con el servidor"
 # Frases a evitar (app/phrase_guard.py).
 EVITAR_CLICHES = "Evitar clichés"
 EVITAR_CLICHES_AYUDA = (

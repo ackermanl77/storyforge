@@ -66,6 +66,13 @@ correspondiente mas abajo.
 
 ## Historial de cambios
 
+**Modelo en un servidor (2026-10-18):**
+- Pestaña Modelo → "O usa un modelo en un servidor": escribe la dirección de LM Studio, Ollama,
+  KoboldCpp, llama-server o el servidor de llama-cpp-python (en esta PC o en otra de la red) y pulsa
+  Conectar. Sirve para usar un modelo más grande que el que cabe en tu GPU, en otra máquina. Todo lo
+  demás (capítulos, continuar, reescribir, evitar clichés) funciona igual; lo único que no se puede
+  en un servidor es forzar el largo mínimo de cada sección.
+
 **Evitar clichés (2026-10-17):**
 - Mientras se escribe un capítulo (y al Refinar o Reescribir), las frases hechas de una lista
   ("her heart skipped a beat", "nada volvería a ser igual"...) se cortan al aparecer y el modelo

@@ -172,7 +172,74 @@ class ModelTabMixin:
         self.model_status.grid(row=8, column=0, sticky="w", padx=10, pady=10)
 
         self._build_sampling_panel(tab, row=9)
+        self._build_server_panel(tab, row=10)
         self._on_model_selected(self.model_combo.get())
+
+    # ---- modelo en un servidor compatible con OpenAI (B14) ----
+    def _build_server_panel(self, tab, row: int) -> None:
+        from .settings import get_server_settings
+
+        saved = get_server_settings()
+        frame = ctk.CTkFrame(tab)
+        frame.grid(row=row, column=0, sticky="ew", padx=10, pady=(10, 10))
+        frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(frame, text=S.SERVIDOR_TITULO, font=ctk.CTkFont(weight="bold")).grid(
+            row=0, column=0, columnspan=6, sticky="w", padx=8, pady=(8, 2))
+        ctk.CTkLabel(frame, text=S.SERVIDOR_AYUDA, wraplength=880, justify="left", text_color=COLOR_MUTED,
+                     font=ctk.CTkFont(size=11)).grid(row=1, column=0, columnspan=6, sticky="w", padx=8)
+        ctk.CTkLabel(frame, text=S.SERVIDOR_URL).grid(row=2, column=0, sticky="e", padx=(8, 4), pady=8)
+        self.server_url_entry = ctk.CTkEntry(frame)
+        self.server_url_entry.insert(0, saved["url"])
+        self.server_url_entry.grid(row=2, column=1, sticky="ew", padx=(0, 8))
+        ctk.CTkLabel(frame, text=S.SERVIDOR_MODELO).grid(row=2, column=2, sticky="e", padx=(0, 4))
+        self.server_model_entry = ctk.CTkEntry(frame, width=200)
+        self.server_model_entry.insert(0, saved["model"])
+        self.server_model_entry.grid(row=2, column=3, padx=(0, 8))
+        ctk.CTkLabel(frame, text=S.SERVIDOR_CLAVE).grid(row=2, column=4, sticky="e", padx=(0, 4))
+        self.server_key_entry = ctk.CTkEntry(frame, width=120, show="•")
+        self.server_key_entry.insert(0, saved["api_key"])
+        self.server_key_entry.grid(row=2, column=5, padx=(0, 8))
+        self.server_connect_btn = ctk.CTkButton(frame, text=S.SERVIDOR_CONECTAR, command=self._connect_server, width=110)
+        self.server_connect_btn.grid(row=3, column=5, sticky="e", padx=8, pady=(0, 8))
+
+    def _connect_server(self) -> None:
+        from .settings import set_server_settings
+
+        if self.busy:
+            messagebox.showwarning(APP_TITLE, S.ESPERA_ANTES_DE_CARGAR_MODELO)
+            return
+        url = self.server_url_entry.get().strip()
+        model = self.server_model_entry.get().strip()
+        api_key = self.server_key_entry.get().strip()
+        chat_format = self._selected_chat_format()
+        try:
+            n_ctx = int(self.n_ctx_entry.get().strip() or 0) or None
+        except ValueError:
+            n_ctx = None
+        self.model_status.configure(text=S.SERVIDOR_CONECTANDO.format(url=url), text_color=COLOR_MUTED)
+        engine = self.engine
+
+        def work(_cancel_check):
+            engine.connect_server(url, model=model, api_key=api_key, n_ctx=n_ctx, chat_format=chat_format)
+            return None
+
+        def on_success(_result) -> None:
+            set_server_settings(url, model, api_key)
+            self.project.context_size = engine.n_ctx or None
+            self.model_status.configure(
+                text=S.SERVIDOR_CONECTADO.format(model=engine._llm.model or "?", url=engine._llm.root, n_ctx=engine.n_ctx,
+                                                 chat_format=self._chat_format_description(chat_format)),
+                text_color=COLOR_OK,
+            )
+            self.schedule_dirty_check()
+
+        def on_error(exc) -> str:
+            logger.error("No se pudo conectar con %s: %s", url, exc)
+            message = S.ERROR_GENERICO.format(exc=describe_exception(exc))
+            self.after(0, lambda: self.model_status.configure(text=message, text_color=COLOR_ERROR))
+            return ""
+
+        self.task_runner.run(S.SERVIDOR_TAREA, work, on_success=on_success, on_error=on_error, autosave=False)
 
     def _build_sampling_panel(self, tab, row: int) -> None:
         """Muestreo (B6): preset de prosa, valores avanzados y semilla. Se
