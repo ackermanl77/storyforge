@@ -88,5 +88,10 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 .story .tools { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .star.on { color: #e0a800; border-color: #e0a800; }
 .empty { color: var(--muted); text-align: center; padding: 30px 10px; }
+.num { width: 6.5em; }
+.small-chips .chip { font-size: 0.8em; padding: 2px 8px; }
+.revise { display: flex; gap: 6px; margin-top: 6px; }
+.revise textarea { flex: 1; min-height: 2.6em; }
+.request-line { font-style: italic; margin: 2px 0 6px; }
 .toast { position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--card);
   padding: 9px 16px; border-radius: 10px; z-index: 10; }

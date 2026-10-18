@@ -632,23 +632,48 @@ class StoryForgeService:
             form = generator.clean_form(data)
         except generator.GeneratorError as exc:
             raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
-        story = Project(name="Generador", plot=form["plot"], characters=form["characters"], setting=form["setting"])
-        chapter = story.add_chapter("Story", target_words=min(generator.target_words(form), MAX_WORDS_PER_CHAPTER))
-        # Las llaves del usuario no son marcadores del prompt propio ({plot}...): un espacio de ancho cero
-        # las separa (prompts._PLACEHOLDER_RE solo reconoce {palabra}).
-        chapter.custom_prompt = generator.build_prompt(form).replace("{", "{\u200b")
         engine = self.engine
+        total = int(form.get("chapters", 1) or 1)
+
+        def write(prompt: str, words: int, progress) -> str:
+            """Una pieza con el motor de los capítulos (un proyecto temporal de un capítulo con prompt propio)."""
+            story = Project(name="Generador", plot=form["plot"], characters=form["characters"], setting=form["setting"])
+            chapter = story.add_chapter("Story", target_words=min(words, MAX_WORDS_PER_CHAPTER))
+            # Las llaves del usuario no son marcadores del prompt propio ({plot}...): un espacio de ancho cero
+            # las separa (prompts._PLACEHOLDER_RE solo reconoce {palabra}).
+            chapter.custom_prompt = prompt.replace("{", "{\u200b")
+            return engine.generate_chapter(story, 0, progress_callback=progress, cancel_check=job_ref[0].cancel.is_set)
+
+        job_ref: List[Job] = []
 
         def work(job: Job) -> str:
-            job.target = chapter.target_words
+            job_ref.append(job)
             started = time.time()
+            job.target = generator.target_words(form)
+            parts: List[str] = []
+            summary = ""
+            for index in range(total):
+                if total > 1:
+                    job.label = S.GENERADOR_TAREA_CAPITULO.format(number=index + 1, total=total)
+                done = "\n\n".join(parts)
+                prefix = (done + "\n\n" if done else "") + (f"Chapter {index + 1}\n\n" if total > 1 else "")
 
-            def progress(text: str, words: int, target: int) -> None:
-                job.text, job.words, job.target = text, words, target
+                def progress(text: str, words: int, target: int, _prefix=prefix) -> None:
+                    job.text = _prefix + text
+                    job.words = count_words(job.text)
 
-            result = engine.generate_chapter(story, 0, progress_callback=progress, cancel_check=job.cancel.is_set)
+                piece = write(generator.build_prompt(form, chapter=index, story_so_far=summary),
+                              generator.chapter_words(form), progress).strip()
+                parts.append((f"Chapter {index + 1}\n\n" if total > 1 else "") + piece)
+                if job.cancel.is_set() or not piece or index == total - 1:
+                    break
+                job.message = S.GENERADOR_RESUMIENDO.format(number=index + 1)
+                chapter_summary = call_supported(engine.summarize, piece, cancel_check=job.cancel.is_set)
+                summary = (summary + "\n" if summary else "") + f"Chapter {index + 1}: {chapter_summary.strip()}"
+                job.message = ""
+            result = "\n\n".join(parts).strip()
             job.text, job.words = result, count_words(result)
-            if result.strip():
+            if result:
                 generator.add_to_history(form, result, time.time() - started, getattr(engine, "last_seed", None))
             if job.cancel.is_set():
                 return S.WEB_TAREA_DETENIDA
@@ -656,6 +681,59 @@ class StoryForgeService:
             return S.LISTO_SEMILLA.format(seed=seed) if seed is not None else S.LISTO
 
         return self._start("story", S.GENERADOR_TAREA, work)
+
+    def start_story_revision(self, entry_id: str, request: Any) -> Dict[str, Any]:
+        """Pedir cambios sobre un resultado del generador: el modelo reescribe la historia según el
+        pedido; el resultado es una entrada nueva del historial unida a la original."""
+        self._require_idle()
+        if not self.engine.is_loaded:
+            raise ApiError(HTTPStatus.CONFLICT, S.NO_HAY_MODELO_CARGADO)
+        entry = generator.get_entry(entry_id)
+        if entry is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, S.WEB_NO_ENCONTRADO)
+        try:
+            text_request = generator.clean_request(request)
+        except generator.GeneratorError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        form = entry["form"]
+        engine = self.engine
+
+        def work(job: Job) -> str:
+            started = time.time()
+            words = max(generator.MIN_WORDS, int(entry.get("words") or count_words(entry.get("text", ""))))
+            story = Project(name="Generador", plot=form.get("plot", ""))
+            chapter = story.add_chapter("Story", target_words=min(words, MAX_WORDS_PER_CHAPTER))
+            chapter.custom_prompt = generator.build_revision_prompt(form, entry["text"], text_request).replace("{", "{\u200b")
+            job.target = chapter.target_words
+
+            def progress(text: str, words_now: int, target: int) -> None:
+                job.text, job.words, job.target = text, words_now, target
+
+            result = engine.generate_chapter(story, 0, progress_callback=progress, cancel_check=job.cancel.is_set)
+            job.text, job.words = result, count_words(result)
+            if result.strip():
+                generator.add_to_history(form, result, time.time() - started, getattr(engine, "last_seed", None),
+                                         parent=entry_id, request=text_request)
+            return S.WEB_TAREA_DETENIDA if job.cancel.is_set() else S.LISTO
+
+        return self._start("story", S.GENERADOR_TAREA_REVISION, work)
+
+    def story_to_project(self, entry_id: str) -> Dict[str, Any]:
+        """Convierte un resultado del generador en un proyecto de StoryForge (archivo nuevo en la carpeta
+        de proyectos); no cambia el proyecto abierto."""
+        entry = generator.get_entry(entry_id)
+        if entry is None:
+            raise ApiError(HTTPStatus.NOT_FOUND, S.WEB_NO_ENCONTRADO)
+        project = generator.project_from_entry(entry)
+        stem = _slug(project.name)
+        filename = f"{stem}{PROJECT_SUFFIX}"
+        n = 2
+        while os.path.exists(os.path.join(self.projects_dir, filename)):
+            filename = f"{stem}_{n}{PROJECT_SUFFIX}"
+            n += 1
+        project.save(os.path.join(self.projects_dir, filename))
+        return {"archivo": filename, "nombre": project.name, "capitulos": len(project.chapters),
+                "mensaje": S.GENERADOR_PROYECTO_CREADO.format(name=project.name)}
 
     def start_summary(self, index: int) -> Dict[str, Any]:
         """Regenerar resumen de un capitulo."""
@@ -817,6 +895,27 @@ def _r_generator_save(svc, m, body, q):
     if entry is None:
         raise ApiError(HTTPStatus.NOT_FOUND, S.WEB_NO_ENCONTRADO)
     return entry
+
+
+@route("POST", r"/api/generador/historial/([0-9a-f]{12})/revisar")
+def _r_generator_revise(svc, m, body, q):
+    return svc.start_story_revision(m.group(1), body.get("pedido"))
+
+
+@route("POST", r"/api/generador/historial/([0-9a-f]{12})/valorar")
+def _r_generator_rate(svc, m, body, q):
+    try:
+        entry = generator.set_rating(m.group(1), str(body.get("valor", "")))
+    except generator.GeneratorError as exc:
+        raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+    if entry is None:
+        raise ApiError(HTTPStatus.NOT_FOUND, S.WEB_NO_ENCONTRADO)
+    return entry
+
+
+@route("POST", r"/api/generador/historial/([0-9a-f]{12})/proyecto")
+def _r_generator_project(svc, m, body, q):
+    return svc.story_to_project(m.group(1))
 
 
 @route("DELETE", r"/api/generador/historial/([0-9a-f]{12})")

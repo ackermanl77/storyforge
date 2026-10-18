@@ -93,6 +93,11 @@ correspondiente mas abajo.
 - Se abre con `StoryForge.exe --generador` o el acceso directo **"StoryForge - Generador de
   historias"** del instalador. Idea tomada del formulario de un generador de historias en línea
   (diseño propio).
+- **Segunda ronda (2026-10-18)**, tras analizar con REA el generador de toolsaday.com: campos
+  según el propósito (trama del capítulo y resumen del anterior; resumen de la historia y trama
+  del clímax o del final), largo exacto (50-6.000 palabras), hasta 10 capítulos por historia (cada
+  uno con el resumen de los anteriores), idioma de salida, **✏️ Pedir cambios** sobre un
+  resultado, 👍/👎 y **📚 Crear proyecto** con la historia.
 
 **Ajustes de la historia y presets (2026-10-13):**
 - En la pestaña Plot: **género, tema, tono, punto de vista** (texto libre con sugerencias) y el

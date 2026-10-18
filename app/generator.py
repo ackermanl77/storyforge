@@ -12,6 +12,13 @@ inglés, como en el resto de StoryForge.
 
 Historial, guardados y presets propios viven en user_data_dir()/generador.json
 (HISTORY_LIMIT entradas; las guardadas no se borran solas).
+
+Segunda ronda (2026-10-18, comparado con el generador de toolsaday.com analizado con REA): campos
+que dependen del propósito (trama del capítulo y resumen del anterior; resumen de la historia y
+trama del clímax o del final), largo exacto en palabras (50-6000), varios capítulos para una
+historia completa (uno por uno, cada uno con el resumen de los anteriores), idioma de salida,
+pedir cambios sobre un resultado (una revisión que queda en el historial unida al original),
+valorar resultados (me gusta / no me gusta) y convertir un resultado en un proyecto de StoryForge.
 """
 
 from __future__ import annotations
@@ -31,7 +38,32 @@ from .paths import user_data_dir
 FIELD_LIMITS = {
     "plot": 50_000, "characters": 50_000, "setting": 10_000, "genre": 1_000, "theme": 1_000,
     "point_of_view": 1_000, "tone": 255, "context": 50_000,
+    # Solo para algunos propósitos (PURPOSE_FIELDS).
+    "chapter_plot": 50_000, "previous_summary": 50_000, "main_summary": 50_000, "climax_plot": 50_000,
+    "ending_plot": 50_000,
 }
+
+# Campos extra de cada propósito (los demás se vacían): el capítulo necesita su trama y qué pasó antes;
+# el clímax, el final y el epílogo, el resumen de la historia y su propia trama.
+PURPOSE_FIELDS = {
+    "chapter": ("chapter_plot", "previous_summary"),
+    "climax": ("main_summary", "climax_plot"),
+    "ending": ("main_summary", "ending_plot"),
+    "epilogue": ("main_summary",),
+}
+PURPOSE_FIELD_LABELS = {
+    "chapter_plot": ("Trama del capítulo", "THIS CHAPTER'S PLOT"),
+    "previous_summary": ("Resumen del capítulo anterior", "WHAT HAPPENED IN THE PREVIOUS CHAPTER"),
+    "main_summary": ("Resumen de la historia", "SUMMARY OF THE STORY SO FAR"),
+    "climax_plot": ("Trama del clímax", "WHAT HAPPENS IN THE CLIMAX"),
+    "ending_plot": ("Trama del final", "HOW THE STORY ENDS"),
+}
+MIN_WORDS, MAX_WORDS = 50, 6000
+MAX_CHAPTERS = 10
+LANGUAGES = ("English", "Spanish", "French", "German", "Italian", "Portuguese")
+LANGUAGE_LABELS = {"English": "Inglés", "Spanish": "Español", "French": "Francés", "German": "Alemán",
+                   "Italian": "Italiano", "Portuguese": "Portugués"}
+MAX_REVISION_REQUEST = 2_000
 
 PURPOSES = {
     "complete": ("Historia completa", "a complete, self-contained story with a clear beginning, middle and a "
@@ -113,25 +145,56 @@ def clean_form(data: Any) -> Dict[str, Any]:
         form[field] = value
     dialogue = data.get("dialogue", -1)
     form["dialogue"] = dialogue if isinstance(dialogue, int) and not isinstance(dialogue, bool) and -1 <= dialogue <= 100 else -1
-    if not form["plot"]:
+    for field in PURPOSE_FIELD_LABELS:  # solo los del propósito elegido
+        if field not in PURPOSE_FIELDS.get(form["purpose"], ()):
+            form[field] = ""
+    words = data.get("words")
+    if isinstance(words, int) and not isinstance(words, bool) and words > 0:
+        form["words"] = max(MIN_WORDS, min(MAX_WORDS, words))
+    else:
+        form["words"] = LENGTHS[form["length"]][1]
+    chapters = data.get("chapters", 1)
+    form["chapters"] = (max(1, min(MAX_CHAPTERS, chapters))
+                        if isinstance(chapters, int) and not isinstance(chapters, bool) and form["purpose"] == "complete"
+                        else 1)
+    language = data.get("language", "English")
+    if language not in LANGUAGES:
+        raise GeneratorError("Idioma desconocido.")
+    form["language"] = language
+    if not form["plot"] and not any(form[f] for f in PURPOSE_FIELDS.get(form["purpose"], ())):
         raise GeneratorError("Escribe al menos la trama de la historia.")
     return form
 
 
 def target_words(form: Dict[str, Any]) -> int:
-    return LENGTHS[form["length"]][1]
+    """El largo pedido en palabras (el de toda la historia si tiene varios capítulos)."""
+    words = form.get("words")
+    return int(words) if isinstance(words, int) and words > 0 else LENGTHS[form.get("length", "short")][1]
 
 
-def build_prompt(form: Dict[str, Any]) -> str:
-    """El prompt completo (en inglés) para el formulario."""
+def chapter_words(form: Dict[str, Any]) -> int:
+    return max(MIN_WORDS, target_words(form) // max(1, int(form.get("chapters", 1) or 1)))
+
+
+def build_prompt(form: Dict[str, Any], chapter: int = 0, story_so_far: str = "") -> str:
+    """El prompt completo (en inglés) para el formulario. Con varios capítulos, `chapter` es el
+    índice del que se escribe y `story_so_far` el resumen de los anteriores."""
     purpose = PURPOSES[form["purpose"]][1]
     fmt_name, fmt_rules = FORMATS[form["format"]][1], FORMATS[form["format"]][2]
-    words = target_words(form)
-    lines = [
-        "You are a skilled fiction writer working on an adult creative-writing project.",
-        f"Write {purpose}, as {fmt_name}, about {words} words long, in English.",
-        "",
-    ]
+    chapters = int(form.get("chapters", 1) or 1)
+    language = form.get("language", "English")
+    words = chapter_words(form)
+    lines = ["You are a skilled fiction writer working on an adult creative-writing project."]
+    if chapters > 1:
+        last = chapter == chapters - 1
+        lines.append(f"The story is {purpose}, told in {chapters} chapters. Write chapter {chapter + 1} of "
+                     f"{chapters} now, as {fmt_name}, about {words} words long, in {language}.")
+        lines.append("This is the final chapter: bring the story to its ending." if last else
+                     "This is not the last chapter: move the story forward and end the chapter without "
+                     "resolving the central conflict.")
+    else:
+        lines.append(f"Write {purpose}, as {fmt_name}, about {words} words long, in {language}.")
+    lines.append("")
     settings = []
     for field, label in (("genre", "Genre"), ("theme", "Theme")):
         if form[field]:
@@ -147,17 +210,42 @@ def build_prompt(form: Dict[str, Any]) -> str:
         settings.append(f"Dialogue: {dialogue}")
     if settings:
         lines += ["STORY SETTINGS:", *settings, ""]
-    lines += ["PLOT:", form["plot"], ""]
+    if form["plot"]:
+        lines += ["PLOT:", form["plot"], ""]
+    for field in PURPOSE_FIELDS.get(form["purpose"], ()):
+        if form.get(field):
+            lines += [f"{PURPOSE_FIELD_LABELS[field][1]}:", form[field], ""]
     for field, label in (("characters", "CHARACTERS"), ("setting", "SETTING"), ("context", "ADDITIONAL CONTEXT")):
         if form[field]:
             lines += [f"{label}:", form[field], ""]
+    if chapters > 1 and story_so_far.strip():
+        lines += ["THE STORY SO FAR (previous chapters, summarized):", story_so_far.strip(), ""]
     lines += ["RULES:", *(f"- {rule}" for rule in fmt_rules),
               "- Do not repeat the same descriptive word or phrase more than twice in a scene.",
-              "- Write only in English, whatever the language of the notes above.",
+              f"- Write only in {language}, whatever the language of the notes above.",
               f"- Output only the {fmt_name.split()[-1]} itself: no title line, no notes, no commentary."]
     if form["purpose"] != "complete":
         lines.append("- Write only this part of the story; do not summarize the rest of it.")
+    if chapters > 1:
+        lines.append("- Continue from the story so far without retelling it; do not write a chapter heading.")
     return "\n".join(lines).strip()
+
+
+def build_revision_prompt(form: Dict[str, Any], text: str, request: str) -> str:
+    """El prompt para pedir cambios sobre un resultado: la historia completa y lo que se quiere."""
+    fmt_name = FORMATS[form["format"]][1]
+    language = form.get("language", "English")
+    return "\n".join([
+        "You are a skilled fiction editor and writer working on an adult creative-writing project.",
+        f"Below is {fmt_name} written for the author, followed by the author's request. Rewrite it following "
+        f"the request, keeping everything the request doesn't ask to change. If the request asks to continue "
+        f"or extend it, write the whole text including the continuation. Write in {language}.",
+        "",
+        "THE TEXT:", text.strip(), "",
+        "THE AUTHOR'S REQUEST:", request.strip(), "",
+        "RULES:",
+        f"- Output only the revised {fmt_name.split()[-1]}: no notes, no commentary, no explanation of the changes.",
+    ]).strip()
 
 
 def title_for(form: Dict[str, Any]) -> str:
@@ -242,10 +330,15 @@ def history() -> List[Dict[str, Any]]:
     return [item for item in items if isinstance(item, dict)]
 
 
-def add_to_history(form: Dict[str, Any], text: str, seconds: float, seed: Optional[int]) -> Dict[str, Any]:
+def add_to_history(form: Dict[str, Any], text: str, seconds: float, seed: Optional[int],
+                   parent: Optional[str] = None, request: str = "") -> Dict[str, Any]:
+    title = title_for(form)
+    if request:
+        title = f"↳ {request.strip()[:60]}{'…' if len(request.strip()) > 60 else ''}"
     entry = {
-        "id": uuid.uuid4().hex[:12], "title": title_for(form), "created": time.time(), "form": form,
+        "id": uuid.uuid4().hex[:12], "title": title, "created": time.time(), "form": form,
         "text": text, "words": len(text.split()), "seconds": round(seconds, 1), "seed": seed, "saved": False,
+        "rating": "", "parent": parent or "", "request": request.strip(),
     }
     with _lock:
         data = _load()
@@ -268,6 +361,60 @@ def set_saved(entry_id: str, saved: bool) -> Optional[Dict[str, Any]]:
                 _save(data)
                 return item
     return None
+
+
+def get_entry(entry_id: str) -> Optional[Dict[str, Any]]:
+    return next((item for item in history() if item.get("id") == entry_id), None)
+
+
+def set_rating(entry_id: str, rating: str) -> Optional[Dict[str, Any]]:
+    """"like", "dislike" o "" (sin valorar)."""
+    if rating not in ("like", "dislike", ""):
+        raise GeneratorError("Valoración desconocida.")
+    with _lock:
+        data = _load()
+        for item in data.get("history", []):
+            if isinstance(item, dict) and item.get("id") == entry_id:
+                item["rating"] = rating
+                _save(data)
+                return item
+    return None
+
+
+def clean_request(text: Any) -> str:
+    if not isinstance(text, str) or not text.strip():
+        raise GeneratorError("Escribe qué quieres cambiar.")
+    return text.strip()[:MAX_REVISION_REQUEST]
+
+
+def project_from_entry(entry: Dict[str, Any]):
+    """Un proyecto de StoryForge con la historia: trama, personajes, ambientación y ajustes del
+    formulario, y un capítulo por cada «Chapter N» del texto (o uno solo)."""
+    import re
+
+    from .project import Project
+
+    form = entry.get("form") or {}
+    name = (form.get("genre") or "Historia") + " — " + " ".join((form.get("plot") or entry.get("title", "")).split())[:40]
+    project = Project(name=name.strip(" —") or "Historia", plot=form.get("plot", ""),
+                      characters=form.get("characters", ""), setting=form.get("setting", ""))
+    for field in ("genre", "theme", "tone", "point_of_view"):
+        if form.get(field):
+            setattr(project, field, form[field][:200])
+    dialogue = dialogue_key(form.get("dialogue", -1))
+    if dialogue:
+        project.dialogue_balance = dialogue
+    text = entry.get("text", "")
+    parts = re.split(r"(?m)^\s*Chapter (\d+)\s*$", text)
+    if len(parts) >= 3:  # [antes, "1", texto1, "2", texto2, ...]
+        for index in range(1, len(parts), 2):
+            body = parts[index + 1].strip()
+            chapter = project.add_chapter(f"Capítulo {parts[index]}", target_words=max(MIN_WORDS, len(body.split())))
+            chapter.content = body
+    else:
+        chapter = project.add_chapter("Capítulo 1", target_words=max(MIN_WORDS, len(text.split())))
+        chapter.content = text.strip()
+    return project
 
 
 def delete_entry(entry_id: str) -> bool:
@@ -323,7 +470,12 @@ def options() -> Dict[str, Any]:
     return {
         "propositos": [{"valor": k, "etiqueta": v[0]} for k, v in PURPOSES.items()],
         "formatos": [{"valor": k, "etiqueta": v[0]} for k, v in FORMATS.items()],
-        "largos": [{"valor": k, "etiqueta": v[0]} for k, v in LENGTHS.items()],
+        "largos": [{"valor": k, "etiqueta": v[0], "palabras": v[1]} for k, v in LENGTHS.items()],
+        "palabras": {"min": MIN_WORDS, "max": MAX_WORDS},
+        "capitulos_max": MAX_CHAPTERS,
+        "idiomas": [{"valor": k, "etiqueta": LANGUAGE_LABELS[k]} for k in LANGUAGES],
+        "campos_proposito": {purpose: [{"campo": f, "etiqueta": PURPOSE_FIELD_LABELS[f][0]} for f in fields]
+                             for purpose, fields in PURPOSE_FIELDS.items()},
         "sugerencias": {field: list(story_settings.SUGGESTIONS[field])
                         for field in ("genre", "theme", "tone", "point_of_view")},
         "limites": FIELD_LIMITS,

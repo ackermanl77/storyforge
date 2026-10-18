@@ -70,15 +70,26 @@
         <legend class="label">Propósito</legend>
         <div id="purpose" class="chips" role="radiogroup"></div>
       </fieldset>
+      <div id="purpose-fields"></div>
       <fieldset class="field">
         <legend class="label">Formato</legend>
         <div id="format" class="chips" role="radiogroup"></div>
       </fieldset>
 
+      <div class="field">
+        <span class="label">Largo <small id="words-hint" class="muted"></small></span>
+        <div class="slider-row">
+          <input type="range" id="words-range" step="50" aria-label="Largo en palabras">
+          <input type="number" id="words" class="num" step="50" aria-label="Palabras">
+          <span class="muted small">palabras</span>
+        </div>
+        <div id="length-chips" class="chips small-chips"></div>
+      </div>
       <div class="grid2">
-        <label class="field"><span class="label">Largo</span><select id="length"></select></label>
-        <label class="field"><span class="label">Idioma</span>
-          <select id="language" disabled><option>English</option></select></label>
+        <label class="field" id="chapters-field"><span class="label">Capítulos <small class="muted">(historia completa)</small></span>
+          <div class="slider-row"><input type="range" id="chapters" min="1" max="10" value="1" aria-label="Capítulos">
+          <b id="chapters-value">1</b></div></label>
+        <label class="field"><span class="label">Idioma</span><select id="language"></select></label>
       </div>
 
       <div class="field">

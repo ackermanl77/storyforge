@@ -8,7 +8,8 @@ const TOKEN_KEY = "storyforge-token";
 const FORM_KEY = "storyforge-generador-formulario";
 const $ = (id) => document.getElementById(id);
 const fmt = (n) => Number(n || 0).toLocaleString("es");
-const TEXT_FIELDS = ["plot", "characters", "setting", "genre", "theme", "point_of_view", "tone", "context"];
+const TEXT_FIELDS = ["plot", "characters", "setting", "genre", "theme", "point_of_view", "tone", "context",
+  "chapter_plot", "previous_summary", "main_summary", "climax_plot", "ending_plot"];
 
 const state = { options: null, history: [], outputs: [], job: null, poll: null, lastForm: null };
 
@@ -76,19 +77,76 @@ function chipValue(containerId) {
 
 function readForm() {
   const form = {};
-  for (const field of TEXT_FIELDS) form[field] = $(field).value;
+  for (const field of TEXT_FIELDS) form[field] = $(field) ? $(field).value : "";
   form.purpose = chipValue("purpose");
   form.format = chipValue("format");
-  form.length = $("length").value;
+  form.words = Number($("words").value) || 800;
+  form.chapters = form.purpose === "complete" ? Number($("chapters").value) : 1;
+  form.language = $("language").value || "English";
   form.dialogue = $("dialogue-on").checked ? Number($("dialogue").value) : -1;
   return form;
 }
 
+function wordsFor(form) {
+  if (typeof form.words === "number" && form.words > 0) return form.words;
+  const preset = ((state.options || {}).largos || []).find((l) => l.valor === (form.length || "short"));
+  return preset ? preset.palabras : 800;
+}
+
+function setWords(n) {
+  const limits = (state.options || {}).palabras || { min: 50, max: 6000 };
+  const value = Math.max(limits.min, Math.min(limits.max, Math.round(Number(n) || 800)));
+  $("words").value = value;
+  $("words-range").value = value;
+  const chapters = Number($("chapters").value) || 1;
+  $("words-hint").textContent = chapters > 1 ? `(~${fmt(Math.round(value / chapters))} por capítulo)` : "";
+}
+
+// Campos que dependen del propósito (como el formulario de toolsaday): se muestran solo para el suyo.
+function updatePurposeFields() {
+  const purpose = chipValue("purpose");
+  const wanted = new Set((((state.options || {}).campos_proposito || {})[purpose] || []).map((f) => f.campo));
+  document.querySelectorAll("[data-purpose-field]").forEach((el) => el.classList.toggle("hidden", !wanted.has(el.dataset.purposeField)));
+  $("chapters-field").classList.toggle("hidden", purpose !== "complete");
+  setWords($("words").value);
+}
+
+function buildPurposeFields(fieldsByPurpose) {
+  const box = $("purpose-fields");
+  box.innerHTML = "";
+  const seen = new Set();
+  for (const fields of Object.values(fieldsByPurpose)) {
+    for (const f of fields) {
+      if (seen.has(f.campo)) continue;
+      seen.add(f.campo);
+      const label = document.createElement("label");
+      label.className = "field hidden";
+      label.dataset.purposeField = f.campo;
+      label.innerHTML = `<span class="label"></span>`;
+      label.firstChild.textContent = f.etiqueta;
+      const small = document.createElement("small");
+      small.dataset.count = f.campo;
+      label.firstChild.appendChild(small);
+      const area = document.createElement("textarea");
+      area.id = f.campo;
+      area.rows = 3;
+      area.dataset.field = f.campo;
+      area.addEventListener("input", () => { updateCounts(); rememberForm(); });
+      label.appendChild(area);
+      box.appendChild(label);
+    }
+  }
+}
+
 function writeForm(form) {
-  for (const field of TEXT_FIELDS) $(field).value = form[field] || "";
+  for (const field of TEXT_FIELDS) if ($(field)) $(field).value = form[field] || "";
   setChip("purpose", form.purpose || "complete");
   setChip("format", form.format || "prose");
-  $("length").value = form.length || "short";
+  $("chapters").value = form.chapters || 1;
+  $("chapters-value").textContent = $("chapters").value;
+  $("language").value = form.language || "English";
+  setWords(wordsFor(form));
+  updatePurposeFields();
   const hasDialogue = typeof form.dialogue === "number" && form.dialogue >= 0;
   $("dialogue-on").checked = hasDialogue;
   $("dialogue").disabled = !hasDialogue;
@@ -101,7 +159,7 @@ function updateCounts() {
   const limits = (state.options || {}).limites || {};
   document.querySelectorAll("[data-count]").forEach((el) => {
     const field = el.dataset.count;
-    el.textContent = `${fmt($(field).value.length)} / ${fmt(limits[field])}`;
+    if ($(field)) el.textContent = `${fmt($(field).value.length)} / ${fmt(limits[field])}`;
   });
 }
 
@@ -121,17 +179,30 @@ function fillPresets(presets, select) {
 async function loadOptions() {
   const options = await api("GET", "/api/generador");
   state.options = options;
-  chipGroup("purpose", options.propositos, rememberForm);
+  buildPurposeFields(options.campos_proposito || {});
+  chipGroup("purpose", options.propositos, () => { updatePurposeFields(); rememberForm(); });
   chipGroup("format", options.formatos, rememberForm);
-  const length = $("length");
-  length.innerHTML = "";
-  for (const item of options.largos) length.add(new Option(item.etiqueta, item.valor));
+  for (const id of ["words", "words-range"]) { $(id).min = options.palabras.min; $(id).max = options.palabras.max; }
+  $("chapters").max = options.capitulos_max;
+  const chips = $("length-chips");
+  chips.innerHTML = "";
+  for (const item of options.largos) {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "chip";
+    chip.textContent = item.etiqueta;
+    chip.addEventListener("click", () => { setWords(item.palabras); rememberForm(); });
+    chips.appendChild(chip);
+  }
+  const language = $("language");
+  language.innerHTML = "";
+  for (const item of options.idiomas) language.add(new Option(item.etiqueta, item.valor));
   for (const [field, values] of Object.entries(options.sugerencias)) {
     const list = $(`dl-${field}`);
     list.innerHTML = "";
     for (const value of values) list.appendChild(new Option(value));
   }
-  for (const [field, limit] of Object.entries(options.limites)) $(field).maxLength = limit;
+  for (const [field, limit] of Object.entries(options.limites)) if ($(field)) $(field).maxLength = limit;
   fillPresets(options.presets);
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(FORM_KEY) || "null"); } catch (e) { saved = null; }
@@ -258,6 +329,12 @@ function storyCard(entry, { collapsed = false } = {}) {
   head.append(title, meta);
   const text = document.createElement("pre");
   text.textContent = entry.text;
+  if (entry.request) {
+    const req = document.createElement("p");
+    req.className = "small muted request-line";
+    req.textContent = `Cambio pedido: «${entry.request}»`;
+    head.appendChild(req);
+  }
   const tools = document.createElement("div");
   tools.className = "tools";
   const button = (label, handler, extra = "") => {
@@ -278,6 +355,42 @@ function storyCard(entry, { collapsed = false } = {}) {
     renderOutputs();
   }, entry.saved ? "star on" : "star");
   star.title = "Los guardados no se borran del historial";
+  const rate = (value, label) => button(label, async () => {
+    const next = entry.rating === value ? "" : value;
+    const updated = await api("POST", `/api/generador/historial/${entry.id}/valorar`, { valor: next });
+    entry.rating = updated.rating;
+    await refreshHistory();
+    renderOutputs();
+  }, entry.rating === value ? "star on" : "star");
+  rate("like", "👍").title = "Me gusta";
+  rate("dislike", "👎").title = "No me gusta";
+  button("✏️ Pedir cambios", async () => {
+    let box = card.querySelector(".revise");
+    if (box) { box.remove(); return; }
+    box = document.createElement("div");
+    box.className = "revise";
+    const area = document.createElement("textarea");
+    area.placeholder = "p. ej. Hazlo más oscuro, agrega un giro al final, continúa la historia…";
+    area.maxLength = 2000;
+    const send = document.createElement("button");
+    send.className = "btn small primary";
+    send.type = "button";
+    send.textContent = "Enviar";
+    send.addEventListener("click", () => run(async () => {
+      if (!area.value.trim()) { toast("Escribe qué quieres cambiar."); return; }
+      const snapshot = await api("POST", `/api/generador/historial/${entry.id}/revisar`, { pedido: area.value });
+      box.remove();
+      switchTab("outputs");
+      track(snapshot);
+    }));
+    box.append(area, send);
+    card.appendChild(box);
+    area.focus();
+  });
+  button("📚 Crear proyecto", async () => {
+    const result = await api("POST", `/api/generador/historial/${entry.id}/proyecto`);
+    toast(`${result.mensaje} (${result.capitulos} cap.) — ábrelo en StoryForge.`);
+  }).title = "Convierte esta historia en un proyecto de StoryForge para seguir escribiéndola por capítulos";
   button("Descargar .txt", async () => download(entry));
   button("Regenerar", async () => generate(entry.form));
   button("Usar estos ajustes", async () => { writeForm(entry.form); window.scrollTo({ top: 0, behavior: "smooth" }); });
@@ -340,7 +453,10 @@ function switchTab(name) {
 // ---- eventos ----
 document.querySelectorAll(".tab").forEach((t) => t.addEventListener("click", () => switchTab(t.dataset.tab)));
 document.querySelectorAll("[data-field]").forEach((el) => el.addEventListener("input", () => { updateCounts(); rememberForm(); }));
-$("length").addEventListener("change", rememberForm);
+$("words").addEventListener("change", () => { setWords($("words").value); rememberForm(); });
+$("words-range").addEventListener("input", () => { setWords($("words-range").value); rememberForm(); });
+$("chapters").addEventListener("input", () => { $("chapters-value").textContent = $("chapters").value; setWords($("words").value); rememberForm(); });
+$("language").addEventListener("change", rememberForm);
 $("dialogue").addEventListener("input", rememberForm);
 $("dialogue-on").addEventListener("change", () => { $("dialogue").disabled = !$("dialogue-on").checked; rememberForm(); });
 $("generate").addEventListener("click", () => run(() => generate(readForm())));

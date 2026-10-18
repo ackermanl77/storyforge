@@ -822,4 +822,8 @@ DIALOGUE_LABELS: Dict[str, str] = {
 
 # Generador de historias (/generador, app/generator.py).
 GENERADOR_TAREA = "Generar historia"
+GENERADOR_TAREA_CAPITULO = "Generar historia: capítulo {number} de {total}"
+GENERADOR_TAREA_REVISION = "Aplicar cambios a la historia"
+GENERADOR_RESUMIENDO = "Resumiendo el capítulo {number} para el siguiente…"
+GENERADOR_PROYECTO_CREADO = "Proyecto creado: {name}"
 WEB_AYUDA_GENERADOR = "Abre el generador de historias en el navegador (una historia de una vez, sin proyecto)."

@@ -718,19 +718,38 @@ un enlace en la página del QR.
    opcionales (los cuatro campos cortos tienen sugerencias, pero aceptan
    cualquier texto).
 3. Elige el **propósito** (historia completa, comienzo, capítulo, escena
-   climática, final o epílogo), el **formato** (prosa, guion de cine, obra de
-   teatro o poesía) y el **largo**. Marca "indicar" en **Equilibrio de
-   diálogo** si quieres mover el control entre narración y diálogo.
-4. Pulsa **✨ Generar**. El texto aparece mientras se escribe; **Detener**
+   climática, final o epílogo). Algunos propósitos agregan sus propios campos:
+   **Capítulo** pide la trama del capítulo y un resumen del anterior; **Escena
+   climática**, **Final** y **Epílogo** piden un resumen de la historia, y los
+   dos primeros además la trama del clímax o del final. Con esos campos llenos
+   la trama general es opcional.
+4. Elige el **formato** (prosa, guion de cine, obra de teatro o poesía) y el
+   **largo** exacto en palabras (50 a 6.000, con el control, el número o los
+   atajos). Para una **historia completa** puedes pedir hasta 10
+   **capítulos**: se escriben uno por uno y cada uno recibe un resumen de los
+   anteriores; el largo es el de toda la historia. Marca "indicar" en
+   **Equilibrio de diálogo** si quieres mover el control entre narración y
+   diálogo.
+5. Elige el **idioma** de la historia (inglés por defecto; también español,
+   francés, alemán, italiano o portugués; los modelos suelen escribir mejor en
+   inglés).
+6. Pulsa **✨ Generar**. El texto aparece mientras se escribe; **Detener**
    corta y guarda lo escrito hasta ese momento.
-
-La historia se escribe en inglés (como el resto de StoryForge), aunque
-llenes el formulario en español.
 
 Cada historia queda en **Historial** (las últimas 200) con sus botones:
 **Copiar**, **☆ Guardar** (pasa a **Guardados** y nunca se borra sola),
 **Descargar .txt**, **Regenerar** (otra versión con los mismos ajustes) y
-**Usar estos ajustes** (los vuelve a poner en el formulario).
+**Usar estos ajustes** (los vuelve a poner en el formulario). Además:
+
+- **👍 / 👎** para valorar el resultado (se recuerda en el historial).
+- **✏️ Pedir cambios**: escribe qué quieres cambiar ("más oscuro", "agrega un
+  giro al final", "continúa la historia") y **Enviar**; el modelo reescribe la
+  historia según el pedido. La versión nueva queda en el historial, con el
+  cambio pedido a la vista, y la original no se toca.
+- **📚 Crear proyecto**: convierte la historia en un proyecto de StoryForge
+  (trama, personajes, ambientación y ajustes del formulario; un capítulo por
+  cada "Chapter N") para seguir escribiéndola por capítulos. Ábrelo desde la
+  app o el celular; no cambia el proyecto abierto.
 
 **Presets:** "Cargar preset…" trae cuatro ejemplos completos y los tuyos.
 **Guardar preset** guarda el formulario actual con un nombre; **Borrar**
