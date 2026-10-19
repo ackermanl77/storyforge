@@ -66,6 +66,12 @@ correspondiente mas abajo.
 
 ## Historial de cambios
 
+**Importar un manuscrito (2026-10-18, F16):**
+- Archivo → **Importar manuscrito...** (y en el celular, Inicio → Proyectos): un `.docx`, `.md` o
+  `.txt` se convierte en un proyecto nuevo con un capítulo por encabezado: estilos de título de Word,
+  `#` de Markdown, o líneas como "Chapter 1" / "Capítulo IV" / "Prólogo". Se conservan la cursiva y la
+  negrita. Si hay más de 10 capítulos, los sobrantes se agregan al último sin perder texto.
+
 **Modelo en un servidor (2026-10-18):**
 - Pestaña Modelo → "O usa un modelo en un servidor": escribe la dirección de LM Studio, Ollama,
   KoboldCpp, llama-server o el servidor de llama-cpp-python (en esta PC o en otra de la red) y pulsa

@@ -175,6 +175,24 @@ $("new-project").addEventListener("click", () => run(async () => {
   show("historia");
 }));
 
+$("import-manuscript").addEventListener("change", (event) => run(async () => {
+  const file = event.target.files[0];
+  event.target.value = "";
+  if (!file) return;
+  if (busy()) throw new Error("Espera a que termine la tarea en curso.");
+  const datos = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result).split(",")[1] || "");
+    reader.onerror = () => reject(new Error("No se pudo leer el archivo."));
+    reader.readAsDataURL(file);
+  });
+  const project = await api("POST", "/api/proyectos/importar", { nombre: file.name, datos });
+  setProject(project);
+  if (project.mensaje) toast(project.mensaje);
+  await loadProjects();
+  show("capitulos");
+}));
+
 function setProject(project) {
   state.project = project;
   $("top-project").textContent = project ? project.nombre : "Sin proyecto";

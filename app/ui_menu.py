@@ -31,6 +31,7 @@ class MenuMixin:
         file_menu = tk.Menu(menubar, tearoff=0)
         file_menu.add_command(label=S.NUEVO_PROYECTO, command=self.new_project, accelerator=S.CTRL_N)
         file_menu.add_command(label=S.ABRIR_PROYECTO_MENU, command=self.open_project, accelerator=S.CTRL_O)
+        file_menu.add_command(label=S.IMPORTAR_MANUSCRITO_MENU, command=self.import_manuscript)
         file_menu.add_command(label=S.GUARDAR_PROYECTO, command=self.save_project, accelerator=S.CTRL_S)
         file_menu.add_command(
             label=S.GUARDAR_PROYECTO_COMO_MENU, command=self.save_project_as, accelerator=S.CTRL_SHIFT_S,

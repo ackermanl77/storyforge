@@ -106,6 +106,22 @@ See the README's "Limitaciones reales que debes conocer" section for the user-fa
 
 ## Recently Fixed
 
+- **Manuscript import** (2026-10-18, F16). `app/manuscript.py`, `read_manuscript(bytes, filename)`:
+  - **Inputs:** .docx (python-docx, already a dependency), .md, .txt (utf-8, cp1252 fallback).
+  - **Chapter headings:** Word heading styles (Heading/Título N, Title = 0), Markdown `#` levels, or
+    lines matching a chapter/prologue/epilogue/part pattern in English and Spanish (digits, Roman
+    numerals or number words). The heading level used is the highest that occurs more than once; a
+    single higher one becomes the project name.
+  - **Text before the first heading:** short (40 words or fewer) is dropped as front matter; longer
+    becomes an "Inicio" chapter.
+  - **Formatting:** Word runs keep `*italic*`/`**bold**` (consecutive same-format runs merged first).
+  - **Chapter limit:** sections beyond `MAX_CHAPTERS` are appended to the last chapter with their
+    headings, and the count is reported.
+  - **Desktop:** Archivo > Importar manuscrito… opens it as an unsaved project.
+  - **Web:** `POST /api/proyectos/importar` (`{nombre, datos: base64}`, its own 42 MB body limit)
+    saves and opens a new project file, with a file input on the phone's Inicio screen.
+  - Tests: `tests/test_manuscript.py`.
+
 - **Recall of earlier passages** (2026-10-18, B16). `Project.recall_passages` (Plot tab checkbox, off by default; saved, old projects load with it off, so prompts are byte-identical unless it is on). `app/retrieval.py` splits the chapters before the current one into passages (paragraphs, short ones merged to >= 30 words, long ones cut at 160). It ranks them against a query made of the chapter's title, outline and author note and the last 150 words written, and adds the best that fit `max_recall_words` (400/250/120 by context budget level) to the step context as "RELEVANT EARLIER PASSAGES", in story order. Ranking is BM25 in pure Python by default. With a GGUF embedding model (Plot tab > Modelo de embeddings…, saved in settings.json, loaded on the CPU in the background and again at start) it is cosine similarity plus 0.15 x normalised BM25, so shared names still count. Query/document prefixes are chosen by model family (bge, nomic, e5), and vectors are cached per passage. A model that fails falls back to BM25. Measured with bge-small-en-v1.5 Q8 (36 MB, loads in 0.3 s, about 3 ms per query once passages are cached): "deliver the keepsake he entrusted to her" -> the compass passage and "nobody can sail across" -> the ferry passage, where BM25 matched only by names or nothing. "She follows the footprints underground" still preferred the wrong paragraph (cosine 0.50 vs 0.43), a limit of the small model. Tests: `tests/test_retrieval.py`.
 - **Brainstorm and character interviews** (2026-10-18, F14). Editar > Lluvia de ideas y entrevistas… opens `app/ui_side_chat.py::SideChatWindow` (one per app). `engine.side_chat()` sends `prompts.build_side_chat()`: a system turn for a brainstorming partner or for the named character (first person, in character, only what they would know); a user turn with the story bible (plot, characters, setting, the outline overview, previous chapters summarised, the selected chapter's last 600 words), the conversation so far as a transcript (so any chat template works) and the new message, plus "(Answer in Spanish.)" when `looks_spanish()` says so. With English bibles the model otherwise answered Spanish questions in English. When the prompt doesn't fit, the oldest exchanges are dropped first, then the chapter tail, then the context budget levels. The reply streams into the window. Nothing touches the project unless the last reply is inserted at the selected chapter's cursor, which adds a history entry "conversación". The conversation isn't saved. Real model: five story-specific ideas in 3.5 s; Mara answered in character, in Spanish, consistent with the bible, and the follow-up used the earlier answer. Tests: `tests/test_side_chat.py`.
 - **Story generator, second round** (2026-10-18). Compared with toolsaday.com's AI Story Generator, analysed with REA.

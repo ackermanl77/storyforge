@@ -639,6 +639,21 @@ Todo desde el menú **Archivo**:
 - **Abrir proyecto...**: carga un proyecto guardado antes (`.storyforge.json`
   o `.json`). Si el archivo está dañado y existe la copia `.bak` de la
   versión anterior, la app ofrece abrirla.
+- **Importar manuscrito...**: convierte un texto que ya tienes (`.docx`,
+  `.md` o `.txt`) en un proyecto nuevo, con un capítulo por encabezado:
+  - En Word se usan los títulos con estilo ("Título 1", "Heading 1"...).
+  - En Markdown se usan los `#`/`##`.
+  - En un `.txt`, y en un Word sin estilos, se usan las líneas como
+    "Chapter 1", "CAPÍTULO IV", "Capítulo tres: El faro", "Prólogo" o "Epílogo".
+  - Un único título por encima de los capítulos pasa a ser el nombre del proyecto.
+  - La cursiva y la negrita de Word se conservan como `*cursiva*` y `**negrita**`.
+  - Un proyecto tiene como máximo 10 capítulos: si el manuscrito tiene más, las
+    secciones sobrantes se agregan al último capítulo con su encabezado, para no
+    perder texto, y la app avisa.
+  - El proyecto queda sin guardar: **Guardar** pregunta dónde.
+  - Desde el celular, el mismo botón está en Inicio → Proyectos
+    ("Importar manuscrito"); allí el proyecto se guarda en la carpeta de
+    proyectos de la PC.
 - **Guardar proyecto** / **Guardar proyecto como...**: guarda todo
   (plot, personajes, setting, esquema, capítulos, lorebook, muestreo, nota
   del autor, título y autor) en un archivo `.storyforge.json`. El título de

@@ -590,6 +590,44 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
             return
         self.open_project_path(path)
 
+    def import_manuscript(self, path: str = "") -> bool:
+        """Archivo > Importar manuscrito (F16): un .docx/.md/.txt partido en capitulos por sus
+        encabezados (app/manuscript.py), como proyecto nuevo sin guardar."""
+        if self.busy:
+            messagebox.showwarning(APP_TITLE, S.GENERACION_EN_CURSO_CAMBIAR_PROYECTO)
+            return False
+        if not self._confirm_discard_changes(S.MANUSCRITO_CAMBIAR_PROYECTO):
+            return False
+        if not path:
+            path = filedialog.askopenfilename(
+                title=S.IMPORTAR_MANUSCRITO,
+                filetypes=[(S.MANUSCRITO_TIPOS, S.MANUSCRITO_PATRONES), (S.TODOS_LOS_ARCHIVOS, "*.*")],
+            )
+        if not path:
+            return False
+        from .manuscript import import_manuscript
+
+        try:
+            manuscript = import_manuscript(path)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror(APP_TITLE, S.MANUSCRITO_NO_SE_PUDO.format(exc=describe_exception(exc)))
+            return False
+        self.project = manuscript.to_project()
+        self.current_path = None
+        self._load_into_ui()
+        self._mark_clean()
+        self._clean_json = ""  # sin guardar: Guardar pregunta donde
+        self._update_dirty_state()
+        message = S.MANUSCRITO_IMPORTADO.format(
+            name=self.project.name, chapters=len(self.project.chapters), words=self.project.total_words(),
+        )
+        if manuscript.merged:
+            from .project import MAX_CHAPTERS
+
+            message += "\n\n" + S.MANUSCRITO_SECCIONES_UNIDAS.format(maximum=MAX_CHAPTERS, merged=manuscript.merged)
+        messagebox.showinfo(APP_TITLE, message + "\n\n" + S.MANUSCRITO_SIN_GUARDAR)
+        return True
+
     def open_project_path(self, path: str) -> bool:
         try:
             project = Project.load(path)

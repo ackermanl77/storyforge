@@ -827,3 +827,21 @@ GENERADOR_TAREA_REVISION = "Aplicar cambios a la historia"
 GENERADOR_RESUMIENDO = "Resumiendo el capítulo {number} para el siguiente…"
 GENERADOR_PROYECTO_CREADO = "Proyecto creado: {name}"
 WEB_AYUDA_GENERADOR = "Abre el generador de historias en el navegador (una historia de una vez, sin proyecto)."
+
+# ---- Importar manuscrito (F16, app/manuscript.py) ----
+IMPORTAR_MANUSCRITO_MENU = "Importar manuscrito..."
+IMPORTAR_MANUSCRITO = "Importar manuscrito"
+MANUSCRITO_TIPOS = "Manuscrito (.docx, .md, .txt)"
+MANUSCRITO_PATRONES = "*.docx *.md *.markdown *.txt"
+MANUSCRITO_FORMATO_NO_SOPORTADO = "Solo se pueden importar manuscritos .docx, .md o .txt."
+MANUSCRITO_DEMASIADO_GRANDE = "El manuscrito es demasiado grande (máximo 30 MB)."
+MANUSCRITO_DOCX_ILEGIBLE = "No se pudo leer el documento de Word: {exc}"
+MANUSCRITO_VACIO = "El manuscrito no tiene texto."
+MANUSCRITO_IMPORTADO = "Se importó «{name}»: {chapters} capítulos, {words:,} palabras."
+MANUSCRITO_SECCIONES_UNIDAS = (
+    "El manuscrito tenía más de {maximum} capítulos: las {merged} secciones sobrantes se agregaron "
+    "al último capítulo, con su encabezado, para no perder texto."
+)
+MANUSCRITO_SIN_GUARDAR = "El proyecto todavía no está guardado: usa Guardar para elegir dónde."
+MANUSCRITO_CAMBIAR_PROYECTO = "importar un manuscrito"
+MANUSCRITO_NO_SE_PUDO = "No se pudo importar el manuscrito: {exc}"

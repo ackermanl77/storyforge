@@ -77,6 +77,9 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 PROJECT_SUFFIX = ".storyforge.json"
 TOKEN_HEADER = "X-StoryForge-Token"
 MAX_BODY_BYTES = 2 * 1024 * 1024  # un capitulo maximo (~10k palabras) cabe de sobra
+# Importar manuscrito (F16): el archivo viaja en base64 dentro del JSON.
+MAX_IMPORT_BODY_BYTES = 42 * 1024 * 1024
+IMPORT_PATH = "/api/proyectos/importar"
 DEFAULT_LOAD_OPTIONS = {"n_ctx": 8192, "n_threads": None, "flash_attn": None, "n_batch": None,
                         "n_ubatch": None, "kv_cache_type": "f16"}
 EXPORT_FORMATS = {
@@ -317,6 +320,41 @@ class StoryForgeService:
             self.engine.sampling = self.project.sampling
             self._save()
         return self.project_view()
+
+    def import_manuscript(self, filename: str, data_b64: str) -> Dict[str, Any]:
+        """Importar manuscrito (F16): crea un proyecto nuevo con los capitulos del archivo y lo abre."""
+        import base64
+        import binascii
+
+        from .manuscript import read_manuscript
+        from .project import MAX_CHAPTERS
+
+        self._require_idle()
+        try:
+            content = base64.b64decode(data_b64 or "", validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, S.MANUSCRITO_VACIO) from exc
+        try:
+            manuscript = read_manuscript(content, os.path.basename(filename or "manuscrito.txt"))
+        except ValueError as exc:
+            raise ApiError(HTTPStatus.BAD_REQUEST, str(exc)) from exc
+        project = manuscript.to_project()
+        stem = _slug(project.name)
+        name = f"{stem}{PROJECT_SUFFIX}"
+        n = 2
+        while os.path.exists(os.path.join(self.projects_dir, name)):
+            name = f"{stem}_{n}{PROJECT_SUFFIX}"
+            n += 1
+        with self._lock:
+            self.project = project
+            self.project_file = name
+            self.engine.sampling = project.sampling
+            self._save()
+        view = self.project_view()
+        view["mensaje"] = S.MANUSCRITO_IMPORTADO.format(name=project.name, chapters=len(project.chapters), words=project.total_words())
+        if manuscript.merged:
+            view["mensaje"] += " " + S.MANUSCRITO_SECCIONES_UNIDAS.format(maximum=MAX_CHAPTERS, merged=manuscript.merged)
+        return view
 
     def open_project(self, filename: str) -> Dict[str, Any]:
         self._require_idle()
@@ -823,6 +861,11 @@ def _r_create(svc, m, body, q):
     return svc.create_project(str(body.get("nombre") or ""))
 
 
+@route("POST", r"/api/proyectos/importar")
+def _r_import(svc, m, body, q):
+    return svc.import_manuscript(str(body.get("nombre") or ""), str(body.get("datos") or ""))
+
+
 @route("POST", r"/api/proyecto/abrir")
 def _r_open(svc, m, body, q):
     return svc.open_project(str(body.get("archivo") or ""))
@@ -992,7 +1035,8 @@ class _Handler(BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length") or 0)
         except ValueError:
             length = -1
-        if length < 0 or length > MAX_BODY_BYTES:
+        limit = MAX_IMPORT_BODY_BYTES if self.path.split("?")[0] == IMPORT_PATH else MAX_BODY_BYTES
+        if length < 0 or length > limit:
             self.close_connection = True
             return b""
         return self.rfile.read(length) if length else b""
