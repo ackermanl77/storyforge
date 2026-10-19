@@ -58,6 +58,29 @@ def _ensure_nltk_data() -> bool:
         _NLTK_READY = False
         return False
 
+    ok = nltk_data_found()
+    if not ok:
+        try:
+            nltk.download("stopwords", quiet=True, raise_on_error=True)
+            nltk.download("wordnet", quiet=True, raise_on_error=True)
+            ok = nltk_data_found()
+        except Exception:
+            ok = False
+
+    _NLTK_READY = ok
+    return ok
+
+
+def nltk_data_found() -> bool:
+    """Si stopwords y wordnet estan disponibles sin descargar nada (los
+    locales de nltk_data/ o los que NLTK ya encuentra por su cuenta, como
+    los empaquetados en _internal\nltk_data del .exe). Lo usa tambien
+    --self-test (app/selftest.py), que nunca debe descargar."""
+    try:
+        import nltk
+    except ImportError:
+        return False
+
     local_dir = _local_nltk_data_dir()
     if os.path.isdir(local_dir) and local_dir not in nltk.data.path:
         nltk.data.path.insert(0, local_dir)
@@ -75,17 +98,7 @@ def _ensure_nltk_data() -> bool:
                 continue
         return False
 
-    ok = _has("corpora/stopwords") and _has("corpora/wordnet")
-    if not ok:
-        try:
-            nltk.download("stopwords", quiet=True, raise_on_error=True)
-            nltk.download("wordnet", quiet=True, raise_on_error=True)
-            ok = _has("corpora/stopwords") and _has("corpora/wordnet")
-        except Exception:
-            ok = False
-
-    _NLTK_READY = ok
-    return ok
+    return _has("corpora/stopwords") and _has("corpora/wordnet")
 
 
 def _get_stopwords() -> set:

@@ -79,6 +79,17 @@ echo.
 echo [5/7] Empaquetando con PyInstaller...
 %PY% -m PyInstaller --noconfirm --clean storyforge.spec
 if errorlevel 1 goto :fail
+REM Prueba del .exe recien hecho (app/selftest.py): interfaz, llama.cpp/CUDA,
+REM NLTK, exportaciones y paginas web. "start /wait": cmd no espera solo a un
+REM programa de ventana; el informe queda en StoryForge-selftest.txt en TEMP.
+del /q "%TEMP%\StoryForge-selftest.txt" 2>nul
+start "" /wait dist\StoryForge\StoryForge.exe --self-test
+if errorlevel 1 (
+    type "%TEMP%\StoryForge-selftest.txt" 2>nul
+    echo ERROR: StoryForge.exe --self-test fallo.
+    goto :fail
+)
+type "%TEMP%\StoryForge-selftest.txt"
 if not defined SIGNTOOL goto :signed_exe
 "%SIGNTOOL%" sign /sha1 %CODESIGN_THUMBPRINT% /fd SHA256 /tr %CODESIGN_TIMESTAMP_URL% /td SHA256 dist\StoryForge\StoryForge.exe
 if errorlevel 1 goto :fail

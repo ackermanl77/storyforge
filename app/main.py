@@ -60,9 +60,16 @@ def _parse_args(argv):
 
 
 def main(argv=None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if "--self-test" in argv:
+        # Revisa interfaz, llama.cpp, NLTK, exportaciones y paginas web, y
+        # termina: sin ventana (app/selftest.py).
+        from .selftest import run_self_test
+
+        return run_self_test()
     _configure_logging()
     sys.excepthook = _log_uncaught_exception
-    args = _parse_args(sys.argv[1:] if argv is None else argv)
+    args = _parse_args(argv)
     if args.servidor or args.generador:
         # StoryForge en el celular (app/web_server.py): sin ventana.
         from .web_server import serve
