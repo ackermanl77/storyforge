@@ -106,6 +106,20 @@ See the README's "Limitaciones reales que debes conocer" section for the user-fa
 
 ## Recently Fixed
 
+- **Exe resources and a smaller bundle** (2026-10-18, K5).
+  - **Publisher:** one name, the version resource's CompanyName is "MELEJ" like the installer's
+    AppPublisher.
+  - **Manifest:** `storyforge.spec` writes `build/StoryForge.manifest` (PyInstaller's default +
+    `activeCodePage` UTF-8 + `dpiAwareness` PerMonitorV2) and passes it to `EXE(manifest=)`.
+  - **omw-1.4 (26 MB):** no longer bundled. NLTK loads the multilingual WordNet only for
+    non-English lookups, and `app/repetition.py`'s English synonym search was checked with only
+    wordnet + stopwords on the data path: no download, no warning, the same synonyms. A `.zip` next to
+    its unzipped corpus is skipped too.
+  - **Verified on a PyInstaller build** (CPU wheel, scratch folder): version info
+    `MELEJ | StoryForge Local | 0.4.0`, the manifest embedded, `nltk_data` without omw, and the exe
+    opened its window.
+  - Tests: `tests/test_packaging.py`.
+
 - **Lorebook progressions, story matrix, notes, prompt components** (2026-10-18, F17-F20).
   - **F17, progressions:**
     - `LoreEntry.progressions` (`[{from_chapter, text}]`, cleaned/sorted, written only when present,

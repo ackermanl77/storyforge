@@ -127,7 +127,7 @@ with open(VERSION_FILE, "w", encoding="utf-8") as _f:
                     OS=0x40004, fileType=0x1, subtype=0x0, date=(0, 0)),
   kids=[
     StringFileInfo([StringTable('040A04B0', [
-      StringStruct('CompanyName', 'StoryForge Local'),
+      StringStruct('CompanyName', 'MELEJ'),
       StringStruct('FileDescription', 'StoryForge Local - escritura de historias con IA local'),
       StringStruct('FileVersion', '{APP_VERSION}'),
       StringStruct('InternalName', 'StoryForge'),
@@ -139,10 +139,58 @@ with open(VERSION_FILE, "w", encoding="utf-8") as _f:
 )
 """)
 
+# Manifest (K5): el de PyInstaller por defecto mas activeCodePage UTF-8 (rutas con acentos para
+# cualquier API "ANSI") y dpiAwareness PerMonitorV2 (ventana nitida con escalado o dos monitores).
+MANIFEST_FILE = os.path.join("build", "StoryForge.manifest")
+with open(MANIFEST_FILE, "w", encoding="utf-8") as _f:
+    _f.write("""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"></requestedExecutionLevel>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{e2011457-1546-43c5-a5fe-008deee3d3f0}"></supportedOS>
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"></supportedOS>
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"></supportedOS>
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"></supportedOS>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"></supportedOS>
+    </application>
+  </compatibility>
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
+    </windowsSettings>
+  </application>
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"></assemblyIdentity>
+    </dependentAssembly>
+  </dependency>
+</assembly>
+""")
+
 # Datos de NLTK (K4): si el build los descargo en nltk_data/ (build.bat lo
 # hace), se incluyen siempre, en vez de depender de la cache de la maquina.
+# Sin omw-1.4 (K5, 26 MB): el WordNet multilingue solo se carga para idiomas distintos del ingles
+# (wn.synsets(..., lang=...)); app/repetition.py busca sinonimos en ingles, y se comprobo que
+# funciona con solo wordnet + stopwords (sin descargas ni avisos). Se omiten tambien los .zip
+# de un corpus que ya esta descomprimido al lado.
 if os.path.isdir("nltk_data"):
-    datas.append(("nltk_data", "nltk_data"))
+    for _root, _dirs, _files in os.walk("nltk_data"):
+        _dirs[:] = [d for d in _dirs if not d.startswith("omw")]
+        for _name in _files:
+            _path = os.path.join(_root, _name)
+            if _name.startswith("omw") or (_name.endswith(".zip") and os.path.isdir(_path[:-4])):
+                continue
+            datas.append((_path, _root))
 
 # La pagina de "StoryForge en el celular" (app/web_server.py sirve app/web/).
 datas.append(("app/web", "app/web"))
@@ -209,6 +257,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     version=VERSION_FILE,
+    manifest=MANIFEST_FILE,
     icon="assets/icon.ico",
 )
 
