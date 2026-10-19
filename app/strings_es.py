@@ -845,3 +845,68 @@ MANUSCRITO_SECCIONES_UNIDAS = (
 MANUSCRITO_SIN_GUARDAR = "El proyecto todavía no está guardado: usa Guardar para elegir dónde."
 MANUSCRITO_CAMBIAR_PROYECTO = "importar un manuscrito"
 MANUSCRITO_NO_SE_PUDO = "No se pudo importar el manuscrito: {exc}"
+
+# ---- Notas del proyecto (F19) y progresiones del lorebook (F17) ----
+TAB_NOTAS = "Notas"
+NOTA_INVALIDA = "Nota inválida en el proyecto."
+DEMASIADAS_NOTAS = "Hay {count} notas (máximo {maximum})."
+NOTA_DEMASIADO_LARGA = "La nota '{label}' tiene {words:,} palabras (máximo {maximum:,})."
+PROGRESION_DEMASIADO_LARGA = "Lorebook '{label}': la versión desde el capítulo {chapter} pasa de {maximum:,} palabras."
+NOTAS_EXPLICACION = (
+    "Apuntes del proyecto: ideas, reglas propias, lo que no quieres olvidar. Las marcadas "
+    "\"Incluir en el prompt\" se envían con cada capítulo (como notas del autor, hasta unas "
+    "400 palabras en total); las demás son solo para ti. En un prompt propio, {notas} las inserta."
+)
+AGREGAR_NOTA = "+ Agregar nota"
+TITULO_ETIQUETA = "Título:"
+INCLUIR_EN_EL_PROMPT = "Incluir en el prompt"
+AUN_NO_HAY_NOTAS = "Todavía no hay notas. Agrega una arriba."
+ELIMINAR_LA_NOTA = "¿Eliminar la nota «{label}»?"
+NOTA_SIN_TITULO = "Nota {number}"
+YA_HAY_NOTAS_EL_MAXIMO = "Ya hay {maximum} notas, el máximo."
+PROGRESIONES_ETIQUETA = "Cambios:"
+PROGRESIONES_AYUDA = (
+    "Opcional: versiones de esta entrada que valen desde un capítulo. Escribe una línea "
+    "\"== Desde el capítulo 5 ==\" y debajo el texto nuevo; desde ese capítulo se usa en lugar del texto de arriba."
+)
+
+# ---- Componentes de prompt (F20, app/prompt_components.py) ----
+COMPONENTES_MENU = "Componentes de prompt..."
+COMPONENTES_TITULO = "Componentes de prompt"
+COMPONENTES_EXPLICACION = (
+    "Textos con nombre que puedes reutilizar en cualquier proyecto: escribe {@nombre} en el prompt "
+    "propio de un capítulo o en un campo del generador de historias y se reemplaza por su texto."
+)
+COMPONENTE_NOMBRE_INVALIDO = "El nombre solo puede tener letras, números, guiones y guiones bajos (hasta 40)."
+COMPONENTE_VACIO = "Escribe el texto del componente."
+COMPONENTE_DEMASIADO_LARGO = "Un componente puede tener hasta {maximum:,} palabras."
+COMPONENTES_MAXIMO = "Ya hay {maximum} componentes, el máximo."
+COMPONENTE_GUARDADO = "Componente guardado: {{@{name}}}"
+COMPONENTE_NOMBRE = "Nombre:"
+COMPONENTE_TEXTO = "Texto:"
+COMPONENTE_GUARDAR = "Guardar"
+COMPONENTE_BORRAR = "Borrar"
+COMPONENTE_NUEVO = "Nuevo"
+COMPONENTE_BORRAR_CONFIRMAR = "¿Borrar el componente {{@{name}}}?"
+COMPONENTE_COPIAR_MARCADOR = "Copiar {@nombre}"
+COMPONENTES_NINGUNO = "Todavía no hay componentes."
+
+# ---- Matriz de la historia (F18, app/story_matrix.py) ----
+MATRIZ_MENU = "Matriz de la historia..."
+MATRIZ_TITULO = "Matriz de la historia"
+MATRIZ_EXPLICACION = (
+    "Cuántas veces aparece cada personaje (de la pestaña Personajes: líneas como \"Nombre: ...\") y cada "
+    "entrada activa del lorebook en cada capítulo. Un capítulo sin texto cuenta su esquema y su resumen "
+    "(marcado \"esquema\"). Doble clic en una fila abre ese capítulo."
+)
+MATRIZ_CAPITULO = "Capítulo"
+MATRIZ_PLANEADO = "(esquema)"
+MATRIZ_ACTUALIZAR = "Actualizar"
+MATRIZ_EXPORTAR_CSV = "Exportar CSV"
+MATRIZ_CSV = "CSV"
+MATRIZ_SIN_COLUMNAS = (
+    "No hay columnas: escribe los personajes como \"Nombre: descripción\" en la pestaña Personajes "
+    "o agrega entradas al lorebook."
+)
+MATRIZ_AUSENCIAS = "Desaparecen varios capítulos seguidos: {items}."
+MATRIZ_AUSENCIA = "{label} ({chapters})"

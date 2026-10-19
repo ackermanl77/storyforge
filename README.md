@@ -66,6 +66,16 @@ correspondiente mas abajo.
 
 ## Historial de cambios
 
+**Herramientas de la historia (2026-10-18, F17-F20):**
+- **Lorebook con cambios por capítulo:** una entrada puede tener versiones "desde el capítulo N", y el
+  prompt de cada capítulo usa la que vale ahí.
+- **Pestaña Notas:** apuntes del proyecto; los marcados "Incluir en el prompt" se envían con cada
+  capítulo. `{notas}` funciona en prompts propios.
+- **Matriz de la historia** (Ver): capítulos × personajes y entradas del lorebook, con quién desaparece
+  varios capítulos seguidos y exportación a CSV.
+- **Componentes de prompt** (Editar): textos con nombre reutilizables, `{@nombre}` en prompts propios y
+  en el generador.
+
 **Importar un manuscrito (2026-10-18, F16):**
 - Archivo → **Importar manuscrito...** (y en el celular, Inicio → Proyectos): un `.docx`, `.md` o
   `.txt` se convierte en un proyecto nuevo con un capítulo por encabezado: estilos de título de Word,

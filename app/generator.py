@@ -179,6 +179,11 @@ def chapter_words(form: Dict[str, Any]) -> int:
 def build_prompt(form: Dict[str, Any], chapter: int = 0, story_so_far: str = "") -> str:
     """El prompt completo (en inglés) para el formulario. Con varios capítulos, `chapter` es el
     índice del que se escribe y `story_so_far` el resumen de los anteriores."""
+    # Componentes de prompt (F20): {@nombre} en cualquier campo de texto.
+    from .prompt_components import expand_components, load_components
+
+    components = load_components()
+    form = {key: expand_components(value, components) if isinstance(value, str) else value for key, value in form.items()}
     purpose = PURPOSES[form["purpose"]][1]
     fmt_name, fmt_rules = FORMATS[form["format"]][1], FORMATS[form["format"]][2]
     chapters = int(form.get("chapters", 1) or 1)

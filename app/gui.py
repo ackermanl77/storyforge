@@ -68,6 +68,7 @@ from .ui_dialogs import (
     TextViewerDialog,
 )
 from .ui_lorebook_tab import LorebookTabMixin, LoreEntryPanel, _lore_entry_matches_search
+from .ui_notes_tab import NotesTabMixin
 from .ui_menu import MenuMixin
 from .ui_model_tab import ModelTabMixin
 from .ui_outline_tab import OutlinePanel, OutlineTabMixin
@@ -140,7 +141,7 @@ def about_text(engine) -> str:
     return "\n".join(lines)
 
 
-class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, OutlineTabMixin,
+class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, NotesTabMixin, OutlineTabMixin,
                     ChaptersTabMixin, ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
@@ -325,6 +326,7 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         self.tab_characters = self.tabview.add(S.TAB_PERSONAJES)
         self.tab_setting = self.tabview.add(S.TAB_SETTING)
         self.tab_lorebook = self.tabview.add(S.TAB_LOREBOOK)
+        self.tab_notes = self.tabview.add(S.TAB_NOTAS)
         self.tab_outline = self.tabview.add(S.TAB_ESQUEMA)
         self.tab_chapters = self.tabview.add(S.TAB_CAPITULOS)
 
@@ -333,6 +335,7 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         self._build_characters_tab()
         self._build_setting_tab()
         self._build_lorebook_tab()
+        self._build_notes_tab()
         self._build_outline_tab()
         self._build_chapters_tab()
 
@@ -522,6 +525,7 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         for panel in self.chapter_panels:
             panel.sync_to_model()
         self._sync_lore_panels()
+        self._sync_snippet_panels()
 
     def _load_into_ui(self, keep_selection: bool = False) -> None:
         self.plot_box.set(self.project.plot)
@@ -543,6 +547,7 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
             self.selected_chapter_index = 0
         self._clear_lore_panels()
         self._render_lore_entries()
+        self._render_snippets()
         self._render_outline_panels()
         self._render_chapters()
         self._refresh_complete_outline_btn()

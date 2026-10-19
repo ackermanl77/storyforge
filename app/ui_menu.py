@@ -25,6 +25,29 @@ class MenuMixin:
         self.side_chat = SideChatWindow(self)
         return self.side_chat
 
+    def open_prompt_components(self):
+        """Editar > Componentes de prompt (F20)."""
+        from .ui_components import ComponentsWindow
+
+        window = getattr(self, "components_window", None)
+        if window is not None and window.winfo_exists():
+            window.lift()
+            return window
+        self.components_window = ComponentsWindow(self)
+        return self.components_window
+
+    def open_story_matrix(self):
+        """Ver > Matriz de la historia (F18)."""
+        from .ui_matrix import StoryMatrixWindow
+
+        window = getattr(self, "matrix_window", None)
+        if window is not None and window.winfo_exists():
+            window.refresh()
+            window.lift()
+            return window
+        self.matrix_window = StoryMatrixWindow(self)
+        return self.matrix_window
+
     # ---------------- menu ----------------
     def _build_menu(self) -> None:
         menubar = tk.Menu(self)
@@ -52,10 +75,12 @@ class MenuMixin:
                               accelerator=S.CTRL_SHIFT_F)
         edit_menu.add_separator()
         edit_menu.add_command(label=S.CONVERSACION_MENU, command=self.open_side_chat)
+        edit_menu.add_command(label=S.COMPONENTES_MENU, command=self.open_prompt_components)
         menubar.add_cascade(label=S.MENU_EDITAR, menu=edit_menu)
         view_menu = tk.Menu(menubar, tearoff=0)
         view_menu.add_command(label=S.MODO_ENFOQUE, command=self.toggle_focus_mode, accelerator=S.F11)
         view_menu.add_command(label=S.VER_EL_ULTIMO_PROMPT_ENVIADO, command=self.show_last_prompt)
+        view_menu.add_command(label=S.MATRIZ_MENU, command=self.open_story_matrix)
         menubar.add_cascade(label=S.MENU_VER, menu=view_menu)
         help_menu = tk.Menu(menubar, tearoff=0)
         help_menu.add_command(label=S.ACERCA_DE_STORYFORGE, command=self.show_about)

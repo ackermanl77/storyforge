@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Sequence, Tuple
 
 from . import strings_es as S
+from .project import MAX_SNIPPET_PROMPT_WORDS, count_words  # noqa: F401  (notas, F19)
 from .project import Chapter, LoreEntry, Project
 
 
@@ -438,6 +439,7 @@ def build_lore_scan_text(chapter: Chapter, previous: str, recent_text: str = "")
 
 def build_lorebook_block(
     entries: List[LoreEntry], scan_text: str, max_entry_words: int = 200, max_entries: int = 8,
+    chapter_number: Optional[int] = None,
 ) -> str:
     """
     Bloque de contexto con SOLO las entradas del lorebook relevantes a
@@ -446,6 +448,8 @@ def build_lorebook_block(
     seccion. `max_entries` acota cuantas entradas como maximo se incluyen
     (las de mayor prioridad primero); cada una se recorta a
     `max_entry_words`, igual que el resto de los campos de este archivo.
+    `chapter_number` (1 = el primero) elige la version de cada entrada que vale en ese
+    capitulo (progresiones, F17: LoreEntry.text_for_chapter).
     """
     matched = [m.entry for m in match_lore_entries(entries, scan_text)][:max_entries]
     if not matched:
@@ -453,7 +457,7 @@ def build_lorebook_block(
     lines = []
     for entry in matched:
         name = entry.name.strip() or "(sin nombre)"
-        text = _trim_words(entry.text.strip(), max_entry_words)
+        text = _trim_words(entry.text_for_chapter(chapter_number).strip(), max_entry_words)
         lines.append(f"{name}: {text}")
     return "RELEVANT WORLD INFO (only what applies to this part of the story):\n" + "\n".join(lines) + "\n\n"
 
@@ -525,7 +529,9 @@ def _chapter_prompt_parts(
     # de incluir el lorebook completo (que podria no caber en absoluto en el
     # contexto de un modelo local con un elenco/mundo grande).
     lore_scan_text = build_lore_scan_text(chapter, previous, recent_text)
-    lore_block = build_lorebook_block(project.lore_entries, lore_scan_text, max_entry_words=max_lore_words)
+    lore_block = build_lorebook_block(project.lore_entries, lore_scan_text, max_entry_words=max_lore_words,
+                                      chapter_number=chapter_index + 1)
+    snippets_block = build_snippets_block(project, max_words=min(MAX_SNIPPET_PROMPT_WORDS, 2 * max_lore_words))
     style_emphasis = build_writing_style_instruction(project)
     purpose_instruction = build_chapter_purpose_instruction(chapter)
     bible = (
@@ -534,6 +540,7 @@ def _chapter_prompt_parts(
         "with the plot, characters and setting provided. Do not break "
         "character or add disclaimers.\n\n"
         f"{context}\n"
+        f"{snippets_block}"
         f"{overview}\n"
         f"PROGRESS SO FAR:\n{previous}\n\n"
         f"{outline_block}"
@@ -638,6 +645,26 @@ NOT_OVER_NUDGE = (
     "summary; keep developing the remaining events."
 )
 FINAL_SECTION_HINT = "This is the final part of the chapter: bring it to a natural close."
+
+
+def snippets_text(project: Project, max_words: int = MAX_SNIPPET_PROMPT_WORDS) -> str:
+    """Las notas del proyecto marcadas "Incluir en el prompt" (F19), una por linea, recortadas a
+    `max_words` en total (las primeras de la lista primero). Vacio si no hay."""
+    lines, left = [], max_words
+    for snippet in project.snippets:
+        text = " ".join(snippet.text.split())
+        if not snippet.in_prompt or not text or left <= 0:
+            continue
+        text = _trim_words(text, left)
+        left -= count_words(text)
+        title = snippet.title.strip()
+        lines.append(f"- {title}: {text}" if title else f"- {text}")
+    return "\n".join(lines)
+
+
+def build_snippets_block(project: Project, max_words: int = MAX_SNIPPET_PROMPT_WORDS) -> str:
+    text = snippets_text(project, max_words)
+    return f"AUTHOR'S NOTES ON THIS STORY (keep the chapter consistent with them):\n{text}\n\n" if text else ""
 
 
 def build_author_note(project: Project, chapter: Chapter) -> str:
@@ -763,7 +790,7 @@ def build_chapter_continuation_chat(
 # Se aceptan con y sin acento ({título} / {titulo}).
 CUSTOM_PROMPT_PLACEHOLDERS = (
     "plot", "personajes", "setting", "esquema", "anterior", "título", "capítulo", "palabras", "nota_autor",
-    "género", "tema", "tono", "punto_de_vista",
+    "género", "tema", "tono", "punto_de_vista", "notas",
 )
 _PLACEHOLDER_ALIASES = {"titulo": "título", "capitulo": "capítulo", "genero": "género"}
 _PLACEHOLDER_RE = re.compile(r"\{(\w+)\}")
@@ -811,6 +838,7 @@ def render_custom_prompt(
         "tema": lambda: english_value("theme", project.theme),
         "tono": lambda: english_value("tone", project.tone),
         "punto_de_vista": lambda: english_value("point_of_view", project.point_of_view),
+        "notas": lambda: snippets_text(project),
     }
 
     def substitute(match: "re.Match[str]") -> str:
@@ -818,7 +846,10 @@ def render_custom_prompt(
         value = values.get(key)
         return value() if value else match.group(0)
 
-    return _PLACEHOLDER_RE.sub(substitute, chapter.custom_prompt).strip()
+    # Componentes de prompt (F20): {@nombre} primero, asi pueden traer sus propios marcadores.
+    from .prompt_components import expand_components
+
+    return _PLACEHOLDER_RE.sub(substitute, expand_components(chapter.custom_prompt)).strip()
 
 
 def build_custom_chapter_chat(

@@ -106,6 +106,37 @@ See the README's "Limitaciones reales que debes conocer" section for the user-fa
 
 ## Recently Fixed
 
+- **Lorebook progressions, story matrix, notes, prompt components** (2026-10-18, F17-F20).
+  - **F17, progressions:**
+    - `LoreEntry.progressions` (`[{from_chapter, text}]`, cleaned/sorted, written only when present,
+      so old files are identical).
+    - `text_for_chapter(n)` is used by `build_lorebook_block(..., chapter_number)` from
+      `_chapter_prompt_parts`.
+    - Edited in each lorebook panel as text with "== Desde el capítulo N ==" headers
+      (`parse_progressions`/`format_progressions`).
+    - Validated against `MAX_LORE_ENTRY_WORDS`.
+  - **F18, story matrix:** `app/story_matrix.py::build_story_matrix()`.
+    - **Columns:** characters parsed from the Personajes text ("Name:", "- Name —", "**Name**"; full
+      name and first name) plus enabled lorebook entries (name and keywords), up to 40.
+    - **Cells:** non-overlapping mentions in the chapter's text, or in its outline + summary when it
+      has no text yet ("planned").
+    - **Extras:** `gaps()` reports streaks of absence; `to_csv()` exports.
+    - **UI:** `app/ui_matrix.py` (Ver > Matriz de la historia…, ttk.Treeview; double-click opens the
+      chapter).
+  - **F19, notes:** `Project.snippets` (`Snippet(title, text, in_prompt)`, 100 max, 2000 words each)
+    in a new Notas tab (`app/ui_notes_tab.py`). The `in_prompt` ones go into the chapter bible as
+    "AUTHOR'S NOTES ON THIS STORY" after the context block, capped at
+    min(400, 2 x max_lore_words) words, so they shrink with the context budget. There is also a
+    `{notas}` placeholder. Prompts are byte-identical when no note is marked.
+  - **F20, prompt components:** `app/prompt_components.py`.
+    - **Storage:** named texts in `user_data_dir()/componentes_prompt.json`.
+    - **Expansion:** `{@name}` expands one level (no cycles; unknown names are left as written), in
+      custom prompts before the placeholders and in every text field of the generator form.
+    - **UI:** Editar > Componentes de prompt… (`app/ui_components.py`).
+  - **Tests:** `tests/test_story_tools.py`. The new tab, the progressions box and both windows were
+    also built in a real Tk window by a script (notes synced, progressions parsed, a component saved,
+    the matrix opened the chosen chapter).
+
 - **Manuscript import** (2026-10-18, F16). `app/manuscript.py`, `read_manuscript(bytes, filename)`:
   - **Inputs:** .docx (python-docx, already a dependency), .md, .txt (utf-8, cp1252 fallback).
   - **Chapter headings:** Word heading styles (Heading/Título N, Title = 0), Markdown `#` levels, or

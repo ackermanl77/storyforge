@@ -48,6 +48,14 @@ MAX_CHAPTER_ALTERNATIVES = 10
 # diferencia de plot/personajes/setting que siempre se incluyen completos.
 MAX_LORE_ENTRIES = 200
 MAX_LORE_ENTRY_WORDS = 500
+# Progresiones del lorebook (F17): versiones de una entrada que valen desde un capitulo.
+MAX_LORE_PROGRESSIONS = 20
+
+# Notas del proyecto (F19, "snippets"): apuntes libres; las marcadas "en el prompt"
+# se envian con cada capitulo, recortadas a MAX_SNIPPET_PROMPT_WORDS en total.
+MAX_SNIPPETS = 100
+MAX_SNIPPET_WORDS = 2000
+MAX_SNIPPET_PROMPT_WORDS = 400
 
 # Version del formato del archivo de proyecto. 1 = sin "format_version"
 # (todo lo guardado antes de esta version). 2 = historial con origen y fecha,
@@ -344,6 +352,10 @@ class LoreEntry:
     enabled: bool = True
     constant: bool = False
     priority: int = 0
+    # Progresiones (F17): [{"from_chapter": N, "text": "..."}], ordenadas por capitulo. Al
+    # escribir el capitulo N se usa el texto de la ultima con from_chapter <= N (y `text` antes
+    # de la primera): un personaje que cambia de cargo, un lugar destruido, un secreto revelado.
+    progressions: List[Dict[str, Any]] = field(default_factory=list)
 
     def keyword_list(self) -> List[str]:
         return [k.strip() for k in self.keywords.split(",") if k.strip()]
@@ -351,11 +363,24 @@ class LoreEntry:
     def word_count(self) -> int:
         return count_words(self.text)
 
+    def text_for_chapter(self, chapter_number: Optional[int]) -> str:
+        """El texto que vale en el capitulo `chapter_number` (1 = el primero); `text` sin numero."""
+        if chapter_number is None:
+            return self.text
+        current = self.text
+        for step in self.progressions:
+            if step["from_chapter"] <= chapter_number:
+                current = step["text"]
+        return current
+
     def to_dict(self) -> dict:
-        return {
+        data = {
             "name": self.name, "keywords": self.keywords, "text": self.text,
             "enabled": self.enabled, "constant": self.constant, "priority": self.priority,
         }
+        if self.progressions:
+            data["progressions"] = [dict(step) for step in self.progressions]
+        return data
 
     @staticmethod
     def from_dict(d: dict, where: str = "") -> "LoreEntry":
@@ -368,7 +393,63 @@ class LoreEntry:
             enabled=_bool_field(d, "enabled", True),
             constant=_bool_field(d, "constant", False),
             priority=max(-100, min(_int_field(d, "priority", 0, where), 100)),
+            progressions=clean_progressions(d.get("progressions")),
         )
+
+
+def clean_progressions(value: Any) -> List[Dict[str, Any]]:
+    """Progresiones validas, ordenadas por capitulo, una por capitulo (la ultima gana)."""
+    by_chapter: Dict[int, str] = {}
+    for step in value if isinstance(value, list) else []:
+        if not isinstance(step, dict) or not isinstance(step.get("text"), str):
+            continue
+        chapter = step.get("from_chapter")
+        if isinstance(chapter, bool) or not isinstance(chapter, int) or not 1 <= chapter <= MAX_CHAPTERS:
+            continue
+        by_chapter[chapter] = step["text"]
+    return [{"from_chapter": chapter, "text": by_chapter[chapter]} for chapter in sorted(by_chapter)][:MAX_LORE_PROGRESSIONS]
+
+
+# Las progresiones se editan como texto: cada version empieza con una linea "== Desde el capitulo N ==".
+_PROGRESSION_HEADER = re.compile(r"^\s*==\s*desde\s+el\s+cap[ií]tulo\s+(\d+)\s*==\s*$", re.IGNORECASE | re.MULTILINE)
+
+
+def format_progressions(progressions: List[Dict[str, Any]]) -> str:
+    return "\n\n".join(f"== Desde el capítulo {step['from_chapter']} ==\n{step['text'].strip()}" for step in progressions)
+
+
+def parse_progressions(text: str) -> List[Dict[str, Any]]:
+    """Lo que escribio el usuario en el cuadro de progresiones (ver format_progressions)."""
+    matches = list(_PROGRESSION_HEADER.finditer(text or ""))
+    steps = []
+    for i, match in enumerate(matches):
+        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+        body = text[match.end():end].strip()
+        if body:
+            steps.append({"from_chapter": int(match.group(1)), "text": body})
+    return clean_progressions(steps)
+
+
+@dataclass
+class Snippet:
+    """Una nota del proyecto (F19): apuntes, ideas, reglas propias. Si `in_prompt`, se envia
+    con el prompt de cada capitulo (ver prompts.build_snippets_block)."""
+    title: str = ""
+    text: str = ""
+    in_prompt: bool = False
+
+    def word_count(self) -> int:
+        return count_words(self.text)
+
+    def to_dict(self) -> dict:
+        return {"title": self.title, "text": self.text, "in_prompt": self.in_prompt}
+
+    @staticmethod
+    def from_dict(d: dict, where: str = "") -> "Snippet":
+        if not isinstance(d, dict):
+            raise ValueError(S.NOTA_INVALIDA)
+        return Snippet(title=_str_field(d, "title", "", where), text=_str_field(d, "text", "", where),
+                       in_prompt=_bool_field(d, "in_prompt", False))
 
 
 def portable_model_path(path: Optional[str], models_dir: Optional[str]) -> Optional[str]:
@@ -422,6 +503,8 @@ class Project:
     recall_passages: bool = False
     # Lorebook / World Info -- ver LoreEntry arriba.
     lore_entries: List[LoreEntry] = field(default_factory=list)
+    # Notas del proyecto (F19) -- ver Snippet arriba.
+    snippets: List[Snippet] = field(default_factory=list)
     author: str = ""
     # Nota del autor para toda la historia (cada capitulo puede tener la suya).
     author_note: str = ""
@@ -494,12 +577,22 @@ class Project:
                 f"Hay {len(self.lore_entries)} entradas de lorebook (máximo {MAX_LORE_ENTRIES})."
             )
         for i, entry in enumerate(self.lore_entries, start=1):
+            label = entry.name.strip() or f"entrada {i}"
             if entry.word_count() > MAX_LORE_ENTRY_WORDS:
-                label = entry.name.strip() or f"entrada {i}"
                 errors.append(
                     f"Lorebook '{label}': el texto tiene {entry.word_count():,} palabras "
                     f"(máximo {MAX_LORE_ENTRY_WORDS:,})."
                 )
+            for step in entry.progressions:
+                if count_words(step["text"]) > MAX_LORE_ENTRY_WORDS:
+                    errors.append(S.PROGRESION_DEMASIADO_LARGA.format(
+                        label=label, chapter=step["from_chapter"], maximum=MAX_LORE_ENTRY_WORDS))
+        if len(self.snippets) > MAX_SNIPPETS:
+            errors.append(S.DEMASIADAS_NOTAS.format(count=len(self.snippets), maximum=MAX_SNIPPETS))
+        for i, snippet in enumerate(self.snippets, start=1):
+            if snippet.word_count() > MAX_SNIPPET_WORDS:
+                errors.append(S.NOTA_DEMASIADO_LARGA.format(
+                    label=snippet.title.strip() or str(i), words=snippet.word_count(), maximum=MAX_SNIPPET_WORDS))
         return errors
 
     def validate_warnings(self) -> List[str]:
@@ -537,6 +630,16 @@ class Project:
         chapter.push_history(source=source, limit=self.history_limit)
 
     # ---------------- lorebook / world info ----------------
+    def can_add_snippet(self) -> bool:
+        return len(self.snippets) < MAX_SNIPPETS
+
+    def add_snippet(self, title: str = "", text: str = "", in_prompt: bool = False) -> Snippet:
+        if not self.can_add_snippet():
+            raise ValueError(S.DEMASIADAS_NOTAS.format(count=len(self.snippets), maximum=MAX_SNIPPETS))
+        snippet = Snippet(title=title, text=text, in_prompt=in_prompt)
+        self.snippets.append(snippet)
+        return snippet
+
     def can_add_lore_entry(self) -> bool:
         return len(self.lore_entries) < MAX_LORE_ENTRIES
 
@@ -573,6 +676,7 @@ class Project:
             "chapter_heading": self.chapter_heading,
             "history_limit": self.history_limit,
             "lore_entries": [e.to_dict() for e in self.lore_entries],
+            "snippets": [s.to_dict() for s in self.snippets],
         }
 
     def to_json(self) -> str:
@@ -634,6 +738,11 @@ class Project:
                 proj.lore_entries.append(LoreEntry.from_dict(item, where=f"lorebook {i + 1}: "))
             except ValueError:
                 logger.warning("Entrada de lorebook %d invalida; se omite", i + 1)
+        for i, item in enumerate(_list_field(data, "snippets")):
+            try:
+                proj.snippets.append(Snippet.from_dict(item, where=f"nota {i + 1}: "))
+            except ValueError:
+                logger.warning("Nota %d invalida; se omite", i + 1)
         return proj
 
     @staticmethod

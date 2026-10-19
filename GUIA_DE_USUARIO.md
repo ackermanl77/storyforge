@@ -179,6 +179,36 @@ coincidencias entran primero las de mayor prioridad). Después de generar,
 cada entrada usada muestra "✓ usada en la última generación" y por qué. El
 buscador filtra por nombre o palabra clave.
 
+**Cambios** (progresiones): una entrada puede cambiar a lo largo de la
+historia. Por ejemplo, la princesa que se corona, la ciudad que se quema o el
+secreto que se revela. En el cuadro "Cambios" escribe una línea
+`== Desde el capítulo 5 ==` y debajo el texto nuevo. Al escribir el capítulo 5
+y los siguientes se usa ese texto en lugar del de arriba. Puede haber varios
+cambios, uno por capítulo. Las palabras clave son las mismas.
+
+### Pestaña "Notas"
+
+Apuntes del proyecto: ideas, reglas propias de tu mundo, lo que no quieres
+olvidar. Cada nota tiene título, texto e **Incluir en el prompt**:
+
+- Las notas marcadas se envían con cada capítulo como "notas del autor",
+  hasta unas 400 palabras en total, las primeras de la lista primero.
+- Las demás son solo para ti.
+- En un prompt propio, el marcador `{notas}` las inserta.
+
+### Matriz de la historia (menú Ver)
+
+**Ver → Matriz de la historia...** muestra una tabla con una fila por capítulo
+y una columna por personaje y por cada entrada activa del lorebook, con
+cuántas veces aparece cada uno:
+
+- Los personajes salen de la pestaña Personajes, de las líneas que empiezan con
+  un nombre: "Mara Vell: la guardiana", "- Tomás — su hermano".
+- Un capítulo sin texto cuenta su esquema y su resumen (marcado "esquema").
+- Abajo se avisa quién desaparece tres capítulos seguidos o más.
+- Doble clic en una fila abre ese capítulo.
+- **Exportar CSV** la guarda para una hoja de cálculo.
+
 ### 6. Pestaña "Capítulos"
 
 Donde generas y editas la prosa de cada capítulo. Se edita **un capítulo a
@@ -506,6 +536,18 @@ reemplazan al generar:
 | `{anterior}` | Lo que pasó antes: resumen del capítulo anterior, sus últimas líneas y los resúmenes previos |
 | `{título}`, `{capítulo}`, `{palabras}` | Título, número y objetivo de palabras del capítulo |
 | `{nota_autor}` | La nota del autor de este capítulo |
+| `{notas}` | Las notas del proyecto marcadas "Incluir en el prompt" |
+| `{@nombre}` | Un **componente de prompt** (abajo) |
+
+**Componentes de prompt** (menú **Editar → Componentes de prompt...**) son
+textos con nombre que reutilizas en cualquier proyecto: una guía de estilo,
+el tono de una saga, reglas de formato.
+
+- Escribe `{@nombre}` en un prompt propio, o en cualquier campo del
+  **generador de historias**, y al generar se reemplaza por su texto.
+- El texto de un componente puede usar a su vez los marcadores de arriba.
+- Un nombre que no existe queda tal cual, para que se note.
+- La ventana tiene **Copiar {@nombre}** para pegarlo donde quieras.
 
 **"Insertar plantilla"** pone un prompt de ejemplo que usa todos los
 marcadores: es un buen punto de partida para editar. Recuerda que el texto

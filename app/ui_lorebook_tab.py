@@ -14,6 +14,8 @@ from . import strings_es as S
 from .project import (
     MAX_LORE_ENTRIES,
     LoreEntry,
+    format_progressions,
+    parse_progressions,
 )
 from .prompts import (
     build_lore_scan_text,
@@ -94,6 +96,14 @@ class LoreEntryPanel(ctk.CTkFrame):
         self.text_box.insert("1.0", entry.text)
         self.text_box.edit_reset()
         self.text_box.grid(row=3, column=1, columnspan=2, padx=8, pady=(2, 8), sticky="ew")
+        # Progresiones (F17): versiones desde un capitulo, editadas como texto.
+        ctk.CTkLabel(self, text=S.PROGRESIONES_ETIQUETA).grid(row=4, column=0, padx=8, pady=(0, 8), sticky="nw")
+        self.progressions_box = ctk.CTkTextbox(self, height=60, wrap="word", **UNDO_TEXTBOX_OPTIONS)
+        self.progressions_box.insert("1.0", format_progressions(entry.progressions))
+        self.progressions_box.edit_reset()
+        self.progressions_box.grid(row=4, column=1, columnspan=2, padx=8, pady=(0, 2), sticky="ew")
+        ctk.CTkLabel(self, text=S.PROGRESIONES_AYUDA, text_color=COLOR_MUTED, wraplength=640, justify="left",
+                     font=ctk.CTkFont(size=11)).grid(row=5, column=1, columnspan=2, padx=8, pady=(0, 8), sticky="w")
         apply_tab_order(self, self.focus_order_widgets())
 
     def set_match(self, matched: bool, reason: str = "") -> None:
@@ -109,6 +119,7 @@ class LoreEntryPanel(ctk.CTkFrame):
         self.entry.text = self.text_box.get("1.0", "end-1c")
         self.entry.enabled = bool(self.enabled_var.get())
         self.entry.constant = bool(self.constant_var.get())
+        self.entry.progressions = parse_progressions(self.progressions_box.get("1.0", "end-1c"))
         try:
             self.entry.priority = max(-100, min(int(self.priority_entry.get()), 100))
         except ValueError:
@@ -122,7 +133,7 @@ class LoreEntryPanel(ctk.CTkFrame):
     def focus_order_widgets(self):
         return [
             self.name_entry, self.remove_btn, self.keywords_entry,
-            self.enabled_check, self.constant_check, self.priority_entry, self.text_box,
+            self.enabled_check, self.constant_check, self.priority_entry, self.text_box, self.progressions_box,
         ]
 
 
