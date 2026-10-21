@@ -39,7 +39,8 @@ A single `Llama` instance is not safe for concurrent inference calls. `StoryForg
 | Capítulos tab (sidebar, focus mode, project search/replace) | `app/ui_chapters_tab.py` (`ChaptersTabMixin`) |
 | One chapter's editor, version history | `app/ui_chapter_editor.py` (`ChapterPanel`, `VersionHistoryDialog`) |
 | Shared GUI constants, text-box helpers, `LimitedTextBox` | `app/ui_common.py` |
-| Generation engine (outline, chapter, summary) | `app/engine.py` (`LocalStoryEngine`) |
+| Generation engine (outline, chapter, summary, refine, side chat): the story operations | `app/engine.py` (`LocalStoryEngine`) |
+| Engine parts split out of `engine.py` (R6, 2026-10-21; `engine.py` re-exports their names): completion core (token counting, context budgets, guarded/shrinking completion, logits processors) / model loading and server connection / types, errors and constants / CUDA DLL discovery | `app/completion.py` (`CompletionMixin`), `app/engine_model.py` (`ModelMixin`), `app/engine_types.py`, `app/cuda_env.py` |
 | Prompt templates and context trimming | `app/prompts.py` |
 | Project data model, word-count limits, JSON persistence | `app/project.py` |
 | Word-repetition analysis/reduction (NLTK) | `app/repetition.py` |

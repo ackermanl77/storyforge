@@ -7,7 +7,9 @@ import unittest.mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import app.cuda_env as cuda_env
 import app.engine as engine_module
+import app.engine_model as engine_model
 from app.engine import (
     ContextOverflowError,
     LocalStoryEngine,
@@ -666,12 +668,12 @@ class TestCudaDllDiscovery(unittest.TestCase):
     """
 
     def setUp(self):
-        self._orig_prepared = engine_module._cuda_dlls_prepared
-        engine_module._cuda_dlls_prepared = False
+        self._orig_prepared = cuda_env._cuda_dlls_prepared
+        cuda_env._cuda_dlls_prepared = False
         self._orig_path = os.environ.get("PATH", "")
 
     def tearDown(self):
-        engine_module._cuda_dlls_prepared = self._orig_prepared
+        cuda_env._cuda_dlls_prepared = self._orig_prepared
         os.environ["PATH"] = self._orig_path
 
     def _make_fake_nvidia_dll_dir(self, tmp):
@@ -685,16 +687,16 @@ class TestCudaDllDiscovery(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             site_packages, dll_dir = self._make_fake_nvidia_dll_dir(tmp)
             with unittest.mock.patch.object(sys, "path", sys.path + [site_packages]):
-                engine_module._ensure_cuda_dlls_discoverable()
+                cuda_env._ensure_cuda_dlls_discoverable()
             self.assertIn(dll_dir, os.environ["PATH"])
 
     def test_is_idempotent(self):
         with tempfile.TemporaryDirectory() as tmp:
             site_packages, _dll_dir = self._make_fake_nvidia_dll_dir(tmp)
             with unittest.mock.patch.object(sys, "path", sys.path + [site_packages]):
-                engine_module._ensure_cuda_dlls_discoverable()
+                cuda_env._ensure_cuda_dlls_discoverable()
                 path_after_first = os.environ["PATH"]
-                engine_module._ensure_cuda_dlls_discoverable()
+                cuda_env._ensure_cuda_dlls_discoverable()
                 self.assertEqual(path_after_first, os.environ["PATH"])
 
     def test_finds_cuda12_layout_with_dlls_directly_in_bin(self):
@@ -708,12 +710,12 @@ class TestCudaDllDiscovery(unittest.TestCase):
                 os.makedirs(d)
                 open(os.path.join(d, dll), "wb").close()
             self.assertEqual(
-                sorted(engine_module.find_nvidia_dll_dirs(site_packages)), sorted([cublas_bin, runtime_bin])
+                sorted(cuda_env.find_nvidia_dll_dirs(site_packages)), sorted([cublas_bin, runtime_bin])
             )
             with unittest.mock.patch.object(sys, "path", sys.path + [site_packages]), \
-                    unittest.mock.patch.object(engine_module.sys, "platform", "win32"), \
-                    unittest.mock.patch.object(engine_module.os, "add_dll_directory", create=True):
-                engine_module._ensure_cuda_dlls_discoverable()
+                    unittest.mock.patch.object(cuda_env.sys, "platform", "win32"), \
+                    unittest.mock.patch.object(cuda_env.os, "add_dll_directory", create=True):
+                cuda_env._ensure_cuda_dlls_discoverable()
             self.assertIn(cublas_bin, os.environ["PATH"])
             self.assertIn(runtime_bin, os.environ["PATH"])
 
@@ -721,14 +723,14 @@ class TestCudaDllDiscovery(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             site_packages = os.path.join(tmp, "site-packages")
             os.makedirs(os.path.join(site_packages, "nvidia", "cublas", "bin"))
-            self.assertEqual(engine_module.find_nvidia_dll_dirs(site_packages), [])
+            self.assertEqual(cuda_env.find_nvidia_dll_dirs(site_packages), [])
 
     def test_no_op_when_no_nvidia_packages_present(self):
         with tempfile.TemporaryDirectory() as tmp:
             site_packages = os.path.join(tmp, "site-packages")
             os.makedirs(site_packages)
             with unittest.mock.patch.object(sys, "path", [site_packages]):
-                engine_module._ensure_cuda_dlls_discoverable()  # must not raise
+                cuda_env._ensure_cuda_dlls_discoverable()  # must not raise
             self.assertEqual(os.environ.get("PATH", ""), self._orig_path)
 
 
@@ -782,7 +784,7 @@ class TestLoadDllFailure(unittest.TestCase):
 
         engine = LocalStoryEngine()
         with unittest.mock.patch.dict(sys.modules, {"llama_cpp": _DllLoadFailure("llama_cpp")}), \
-                unittest.mock.patch.object(engine_module, "_ensure_cuda_dlls_discoverable"):
+                unittest.mock.patch.object(engine_model, "_ensure_cuda_dlls_discoverable"):
             with self.assertRaises(RuntimeError) as ctx:
                 engine.load("whatever.gguf")
         self.assertIn("no se pudo cargar su librería nativa", str(ctx.exception))

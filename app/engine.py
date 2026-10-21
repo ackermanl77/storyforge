@@ -5,37 +5,66 @@ internet en tiempo de generacion.
 """
 from __future__ import annotations
 
-import gc
-import glob
 import logging
-import os
 import random
 import re
-import sys
 import threading
 import time
 from collections import OrderedDict
-from dataclasses import dataclass, field, replace
-from typing import Callable, Dict, List, Optional, Sequence, Tuple, Union
+from dataclasses import replace
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 
 from . import strings_es as S
 from .chat_format import (
     CHAT_FORMAT_AUTO,
     ChatFormatter,
-    RawFormatter,
-    detect_formatter,
-    preset_formatter,
 )
-from .gguf import KV_CACHE_TYPES, friendly_load_error, list_model_entries, missing_shards, model_info
-from .project import MAX_CHAPTERS, MAX_WORDS_PER_CHAPTER, Project, count_words
+from .completion import CompletionMixin
+from .cuda_env import (  # noqa: F401 -- reexportados
+    _ensure_cuda_dlls_discoverable,
+    find_nvidia_dll_dirs,
+    supports_gpu_offload,
+)
+from .engine_model import ModelMixin
+from .engine_types import (  # noqa: F401 -- reexportados: engine.X sigue funcionando
+    CONTEXT_BUDGET_LEVELS,
+    DEFAULT_N_BATCH,
+    DEFAULT_PROSE_STOP,
+    GGML_KV_TYPES,
+    MAX_DANGLING_FRACTION,
+    MAX_EMPTY_SECTION_RETRIES,
+    MAX_SECTIONS_PER_CHAPTER,
+    MIN_SECTION_FRACTION,
+    NATURAL_END_FRACTION,
+    NEW_PARAGRAPH,
+    ONLY_END_MARKER_STOP,
+    OUTLINE_WORDS_PER_CHAPTER,
+    PHRASE_GUARD_TASKS,
+    REFINE_OUTPUT_HEADROOM,
+    SAFETY_MARGIN_TOKENS,
+    SECTION_TARGET_WORDS,
+    TOKEN_CACHE_SIZE,
+    TOKENS_PER_WORD_ESTIMATE,
+    WORD_ALTERNATIVES,
+    WORD_COMPLETION_TOKENS,
+    CompletionResult,
+    ContextOverflowError,
+    GenerationStats,
+    ModelNotLoadedError,
+    OperationCancelled,
+    PromptLike,
+    WordAlternative,
+)
+from .gguf import list_model_entries
 from .output_guard import clean_section
+from .phrase_guard import PhraseGuard
+from .project import MAX_CHAPTERS, MAX_WORDS_PER_CHAPTER, Project, count_words
 from .prompts import (
     FINAL_SECTION_HINT,
     NOT_OVER_NUDGE,
     SIDE_CHAT_BRAINSTORM,
     ChatPrompt,
     build_beat_progress_hint,
-    build_section_scope_hint,
     build_chapter_continuation_chat,
     build_chapter_start_chat,
     build_combine_summaries_chat,
@@ -45,6 +74,7 @@ from .prompts import (
     build_partial_summary_chat,
     build_refine_chapter_chat,
     build_rewrite_span_chat,
+    build_section_scope_hint,
     build_side_chat,
     build_summary_chat,
     parse_outline_response,
@@ -53,278 +83,12 @@ from .sampling import (
     MAX_SEED,
     TASK_EXPAND,
     TASK_OUTLINE,
-    TASK_PROSE,
     TASK_REFINE,
     TASK_SUMMARY,
     SamplingConfig,
 )
-from .phrase_guard import MAX_REWINDS, MAX_REWINDS_AT_ONE_POINT, PhraseGuard, PhraseMatch, word_variants
-
-PromptLike = Union[str, ChatPrompt]
-
-# Tareas de prosa donde se cortan las frases a evitar (B15): escribir y
-# continuar capitulos, expandir, refinar y reescribir; no esquemas ni resumenes.
-PHRASE_GUARD_TASKS = (TASK_PROSE, TASK_EXPAND, TASK_REFINE)
-
-# Valores de type_k/type_v de llama.cpp (enum ggml_type) para la cache KV.
-GGML_KV_TYPES = {"f16": 1, "q8_0": 8, "q4_0": 2}
-DEFAULT_N_BATCH = 512
-
 
 logger = logging.getLogger(__name__)
-
-
-class OperationCancelled(RuntimeError):
-    """El usuario detuvo la operacion (boton Detener / Cancelar / Esc). La
-    operacion no modifico nada: el llamador conserva el texto original."""
-
-
-@dataclass
-class GenerationStats:
-    """
-    Estadisticas de la operacion en curso (o la ultima), para la barra de
-    estado: tokens/s, ETA, uso de la ventana de contexto y el prompt exacto
-    enviado ("Ver prompt"). El motor las actualiza desde el hilo de trabajo;
-    la interfaz las lee cada ~250 ms desde el hilo principal (solo lectura de
-    atributos simples, seguro con el GIL).
-    """
-    operation: str = ""
-    started_at: float = 0.0
-    finished: bool = False
-    calls: int = 0
-    prompt_tokens: int = 0
-    max_tokens: int = 0
-    n_ctx: int = 0
-    budget_level: int = 1  # nivel de CONTEXT_BUDGET_LEVELS usado (1 = el mas completo)
-    prompt_text: str = ""
-    generated_tokens: int = 0
-    prompt_eval_seconds: float = 0.0  # de la ultima llamada (hasta el primer token)
-    decode_seconds: float = 0.0  # acumulado, todas las llamadas
-    phrase_rewinds: int = 0  # frases a evitar cortadas y reescritas (B15)
-    seed: Optional[int] = None
-    sampling: Dict[str, float] = field(default_factory=dict)
-    words_written: int = 0
-    target_words: int = 0
-    part: int = 0
-    total_parts: int = 0
-
-    @property
-    def tokens_per_second(self) -> Optional[float]:
-        if self.decode_seconds <= 0 or self.generated_tokens <= 1:
-            return None
-        return self.generated_tokens / self.decode_seconds
-
-    @property
-    def context_fraction(self) -> Optional[float]:
-        if not self.n_ctx:
-            return None
-        return min(1.0, (self.prompt_tokens + self.max_tokens) / self.n_ctx)
-
-    @property
-    def progress_fraction(self) -> Optional[float]:
-        if self.target_words > 0:
-            return min(1.0, self.words_written / self.target_words)
-        if self.total_parts > 0:
-            return min(1.0, max(0, self.part - 1) / self.total_parts)
-        return None
-
-    def eta_seconds(self) -> Optional[float]:
-        """Segundos restantes estimados (solo capitulos: palabras que faltan x
-        1.35 tokens/palabra / tokens por segundo)."""
-        tps = self.tokens_per_second
-        if not tps or self.target_words <= 0:
-            return None
-        remaining = max(0, self.target_words - self.words_written)
-        return remaining * 1.35 / tps
-
-
-@dataclass
-class CompletionResult:
-    """Texto generado (SIN recortar espacios) y por que termino: "stop"
-    (fin natural o secuencia de corte), "length" (se agoto max_tokens),
-    "cancelled", o None si el backend no lo informa (dobles de prueba)."""
-    text: str
-    finish_reason: Optional[str] = None
-
-# Palabras por "seccion" que le pedimos al modelo en cada llamada. Pedir de
-# mas puede degradar coherencia o exceder limites de generacion del modelo,
-# asi que un capitulo largo se construye en varias pasadas.
-SECTION_TARGET_WORDS = 900
-MAX_SECTIONS_PER_CHAPTER = 14  # 14 * 900 ~= 12,600 palabras de margen
-TOKENS_PER_WORD_ESTIMATE = 1.4
-SAFETY_MARGIN_TOKENS = 64  # colchon para no rozar el limite exacto del modelo
-OUTLINE_WORDS_PER_CHAPTER = 100  # presupuesto de salida por capitulo al generar el esquema
-# Margen de salida al refinar: la version revisada puede salir algo mas larga
-# que el original ("agrega mas dialogo"), asi que se reserva un 30% extra.
-REFINE_OUTPUT_HEADROOM = 1.3
-# Si el modelo termina una seccion por su cuenta (finish_reason "stop") y ya
-# hay al menos esta fraccion del objetivo escrita, el capitulo se da por
-# terminado en vez de pedir otra seccion (que tendia a escribir un segundo
-# "final"). Por debajo, se pide seguir con un aviso de que no termine aun.
-NATURAL_END_FRACTION = 0.8
-# Una seccion que vuelve vacia (el modelo cerro su turno enseguida) se
-# reintenta con otra semilla hasta estas veces por capitulo antes de rendirse;
-# antes, la primera respuesta vacia terminaba el capitulo muy por debajo del
-# objetivo (p.ej. 546 de 3000 palabras con Llama 3 8B).
-MAX_EMPTY_SECTION_RETRIES = 3
-NEW_PARAGRAPH = "\n\n"
-# Largo minimo de una seccion que no es la ultima, como fraccion de su
-# max_tokens: hasta ahi se bloquean los tokens de fin de turno del modelo.
-# Muchos modelos instruct (p.ej. Llama 3 8B) cierran su respuesta a las ~500
-# palabras pase lo que pase; sin esto, un capitulo de 3000 palabras terminaba
-# con ~550 o se completaba con parrafos de cierre repetidos.
-MIN_SECTION_FRACTION = 0.6
-# Al cortar un texto por max_tokens se descarta la oracion incompleta del
-# final solo si es corta (esta fraccion del texto como maximo): sin un
-# limite de oracion cerca, se conserva todo.
-MAX_DANGLING_FRACTION = 0.4
-# Cuantos conteos de tokens (texto -> tokens) se recuerdan (P4).
-TOKEN_CACHE_SIZE = 64
-
-# Secuencias de corte por defecto de _complete() (prosa de un capitulo: que el
-# modelo no empiece por su cuenta el capitulo siguiente). NO sirven para el
-# esquema (cuyo formato es justamente "...\n\nChapter 2: ..." -- con estas se
-# cortaba despues del capitulo 1), ni para refinar/expandir, donde un parrafo
-# que empieza con "Chapter" es texto legitimo. Esas llamadas usan
-# ONLY_END_MARKER_STOP.
-DEFAULT_PROSE_STOP = [
-    "\n\nCHAPTER", "\n\nChapter", "[END]",
-    # El modelo saliendose de la historia para "despedirse" (visto con Llama 3 8B
-    # cuando no lo dejaban terminar el turno): se corta ahi.
-    "(To be continued", "(End of", "[Your Name]",
-    # ...o para comentar el esquema ("(Note: this part continues with beat 4...").
-    "(Note:",
-    # ...o para hablarle al usuario (visto con daredevil-8b al cerrar una escena
-    # sin poder terminar su turno). Al principio de parrafo, para no cortar dialogo.
-    "\n\nPlease let me know", "\n\nLet me know if", "(Please note", "\n\nNext part:",
-    "Thank you for the prompt", "\n\nI hope this meets", "\n\nI hope you enjoy",
-    "Stay tuned for", "(still to come)", "\n\n**Note", "Note from the author",
-]
-ONLY_END_MARKER_STOP = ["[END]"]
-
-# Niveles de presupuesto de contexto (en palabras) para plot/personajes/
-# setting/resumen previo/esquema del capitulo/cola del capitulo en curso. Si
-# el prompt no cabe en la ventana de contexto del modelo con el primer nivel,
-# se reintenta con el siguiente (mas chico) antes de rendirse con un error
-# claro. max_outline_words cubre chapter.outline: a diferencia de plot/
-# personajes/setting, ese campo no tiene un limite propio en project.py (es
-# texto libre editable en la pestana Esquema), asi que sin este recorte un
-# esquema de capitulo inusualmente largo podia hacer que ni el nivel mas
-# chico de presupuesto cupiera, con un error que sugeria enganosamente que
-# "ya se redujo al minimo" cuando el esquema nunca se toco.
-# refine_chapter() no usa estos niveles: nunca recorta el capitulo a revisar
-# (antes lo hacia, y la version revisada reemplazaba el capitulo completo,
-# perdiendo en silencio el final) -- si no cabe entero, lo revisa por partes.
-# max_lore_words cubre el bloque de Lorebook / World Info (prompts.
-# build_lorebook_block): igual que max_outline_words, se reduce junto con
-# todo lo demas en cada nivel para que las entradas que coincidan (ver
-# prompts.find_relevant_lore_entries) no sean, por si solas, lo que hace que
-# ni el presupuesto mas chico quepa en la ventana de contexto del modelo.
-CONTEXT_BUDGET_LEVELS = [
-    dict(max_plot_words=1200, max_characters_words=600, max_setting_words=600, max_previous_words=500, max_outline_words=400, tail_words=400, max_lore_words=200, max_recall_words=400),
-    dict(max_plot_words=700, max_characters_words=400, max_setting_words=400, max_previous_words=300, max_outline_words=250, tail_words=250, max_lore_words=120, max_recall_words=250),
-    dict(max_plot_words=350, max_characters_words=200, max_setting_words=200, max_previous_words=150, max_outline_words=120, tail_words=150, max_lore_words=60, max_recall_words=120),
-]
-
-
-class ModelNotLoadedError(RuntimeError):
-    pass
-
-
-@dataclass(frozen=True)
-class WordAlternative:
-    """Una alternativa en una palabra del capitulo (F15): la palabra completa que el modelo
-    escribiria ahi, la probabilidad de su primer token y ese token tal cual."""
-    word: str
-    probability: float
-    token: str
-
-
-#: Cuantas alternativas se piden y cuantos tokens se usan para completar cada una a palabra.
-WORD_ALTERNATIVES = 8
-WORD_COMPLETION_TOKENS = 6
-
-
-class ContextOverflowError(RuntimeError):
-    """El prompt necesario no cabe en la ventana de contexto del modelo cargado."""
-
-
-_cuda_dlls_prepared = False
-
-
-def _ensure_cuda_dlls_discoverable() -> None:
-    """A CUDA-enabled llama-cpp-python wheel (see README's "Rendimiento / GPU"
-    section) bundles ggml-cuda.dll, which needs the CUDA runtime DLLs
-    (cudart64_*.dll/cublas64_*.dll/cublasLt64_*.dll) at import time -- not
-    just when a model is actually offloaded to GPU. Those DLLs aren't bundled
-    in the wheel itself; the standalone `nvidia-cuda-runtime`/`nvidia-cublas`
-    pip packages provide them instead (no full CUDA Toolkit install needed).
-
-    llama_cpp's own loader (_ctypes_extensions.py) calls
-    `ctypes.CDLL(..., winmode=ctypes.RTLD_GLOBAL)` -- on Windows RTLD_GLOBAL
-    is 0, and passing winmode=0 makes ctypes use the legacy DLL search order,
-    which ignores directories registered via `os.add_dll_directory()` (that
-    only applies under the "safe search mode" flags). The legacy search order
-    does still consult PATH, so prepending the DLL directory there (in
-    addition to add_dll_directory, for forward compatibility if that bug gets
-    fixed upstream) is what actually makes the import succeed -- confirmed by
-    reproducing llama_cpp's exact load call directly.
-
-    A CPU-only environment (no `nvidia-*` packages installed, or the default
-    PyPI CPU-only wheel) hits none of this: the glob below just finds nothing
-    and the import proceeds exactly as it always did.
-
-    Two package layouts exist: the CUDA 13 packages nest the DLLs one level
-    deeper (nvidia/cu13/bin/x86_64/*.dll), while the CUDA 12 ones
-    (nvidia-cublas-cu12 etc.) put them directly in nvidia/<pkg>/bin/*.dll --
-    both are checked (see find_nvidia_dll_dirs()).
-    """
-    global _cuda_dlls_prepared
-    if _cuda_dlls_prepared or sys.platform != "win32":
-        return
-    _cuda_dlls_prepared = True
-
-    for site_packages in (p for p in sys.path if p.endswith("site-packages")):
-        for dll_dir in find_nvidia_dll_dirs(site_packages):
-            try:
-                os.add_dll_directory(dll_dir)
-            except OSError:
-                pass
-            os.environ["PATH"] = dll_dir + os.pathsep + os.environ.get("PATH", "")
-
-
-def find_nvidia_dll_dirs(site_packages: str) -> List[str]:
-    """Carpetas bajo site-packages/nvidia que contienen DLLs, en cualquiera de
-    los dos layouts conocidos: nvidia/<pkg>/bin/*.dll (CUDA 12) o
-    nvidia/<pkg>/bin/<arch>/*.dll (CUDA 13)."""
-    found: List[str] = []
-    patterns = (
-        os.path.join(site_packages, "nvidia", "*", "bin"),
-        os.path.join(site_packages, "nvidia", "*", "bin", "*"),
-    )
-    for pattern in patterns:
-        for dll_dir in sorted(glob.glob(pattern)):
-            if os.path.isdir(dll_dir) and glob.glob(os.path.join(dll_dir, "*.dll")):
-                found.append(dll_dir)
-    return found
-
-
-def supports_gpu_offload() -> bool:
-    """Whether the installed llama-cpp-python build can actually offload
-    layers to a GPU -- used by the GUI to pick a sensible default for
-    n_gpu_layers instead of always defaulting to CPU-only (0)."""
-    _ensure_cuda_dlls_discoverable()
-    try:
-        from llama_cpp import llama_cpp as _llama_cpp_lib
-    except Exception:
-        # Not just ImportError: when a CUDA build's DLLs can't be resolved, llama_cpp raises
-        # RuntimeError("Failed to load shared library ...") from its import. This runs while the
-        # GUI is being built, so it must degrade to "no GPU" rather than crash the app at startup.
-        return False
-    try:
-        return bool(_llama_cpp_lib.llama_supports_gpu_offload())
-    except Exception:
-        return False
 
 
 def find_local_models(models_dir: str) -> List[str]:
@@ -335,7 +99,7 @@ def find_local_models(models_dir: str) -> List[str]:
     return [e.path for e in list_model_entries(models_dir) if e.complete]
 
 
-class LocalStoryEngine:
+class LocalStoryEngine(ModelMixin, CompletionMixin):
     """Envuelve un modelo GGUF cargado con llama-cpp-python."""
 
     def __init__(self) -> None:
@@ -408,248 +172,6 @@ class LocalStoryEngine:
     def _end_operation(self) -> None:
         self.stats.finished = True
 
-    @property
-    def is_loaded(self) -> bool:
-        return self._llm is not None
-
-    @property
-    def model_path(self) -> Optional[str]:
-        return self._model_path
-
-    @property
-    def n_ctx(self) -> int:
-        return self._n_ctx
-
-    @property
-    def is_server(self) -> bool:
-        """True when the model runs on an OpenAI-compatible server (connect_server)."""
-        from .server_backend import ServerLlama
-
-        return isinstance(self._llm, ServerLlama)
-
-    def connect_server(self, base_url: str, model: str = "", api_key: str = "", n_ctx: Optional[int] = None,
-                       chat_format: Optional[str] = None) -> None:
-        """
-        Usa un modelo de un servidor compatible con OpenAI (B14, app/server_backend.py):
-        LM Studio, Ollama, KoboldCpp, llama-server... `model` vacio = el primero que
-        ofrece el servidor; `n_ctx` vacio = el que publica el servidor (o 8192).
-        Lanza ServerError con un mensaje para el usuario si no se puede conectar.
-        """
-        from .server_backend import ServerLlama
-
-        if chat_format is not None:
-            self.set_chat_format(chat_format)
-        llm = ServerLlama(base_url, model=model, api_key=api_key, n_ctx=n_ctx)
-        self.unload()
-        self._llm = llm
-        self._model_path = f"{llm.root} ({llm.model or 'servidor'})"
-        self._n_ctx = llm.n_ctx()
-        self.model_info = None
-        self.load_options = dict(n_ctx=self._n_ctx, server=llm.root, model=llm.model)
-
-    def load(self, model_path: str, n_ctx: int = 8192, n_threads: Optional[int] = None,
-              n_gpu_layers: int = 0, chat_format: Optional[str] = None,
-              flash_attn: Optional[bool] = None, n_batch: Optional[int] = None,
-              n_ubatch: Optional[int] = None, kv_cache_type: str = "f16") -> None:
-        """
-        Carga un GGUF. `n_ctx=0` usa el contexto con el que se entreno el
-        modelo (leido de la cabecera). Opciones de rendimiento (pestana
-        Modelo > Avanzado): `flash_attn` (por defecto: activado si hay
-        offload a GPU), `n_batch`/`n_ubatch` (tamano de lote al procesar el
-        prompt) y `kv_cache_type` ("f16", "q8_0" o "q4_0"; las cuantizadas
-        requieren flash attention, porque llama.cpp no admite una cache V
-        cuantizada sin ella).
-        """
-        if kv_cache_type not in KV_CACHE_TYPES:
-            raise ValueError(S.CACHE_KV_DESCONOCIDA.format(kv_cache_type=kv_cache_type))
-        if flash_attn is None:
-            flash_attn = n_gpu_layers != 0
-        if kv_cache_type != "f16" and not flash_attn:
-            raise ValueError(
-                S.CACHE_KV_REQUIERE_FLASH_ATTENTION.format(kv_cache_type=kv_cache_type)
-            )
-        for name, value in (("n_batch", n_batch), ("n_ubatch", n_ubatch)):
-            if value is not None and value <= 0:
-                raise ValueError(S.DEBE_SER_ENTERO_POSITIVO.format(name=name))
-        if n_ctx < 0:
-            raise ValueError(S.N_CTX_NEGATIVO)
-        if chat_format is not None:
-            self.set_chat_format(chat_format)
-        try:
-            _ensure_cuda_dlls_discoverable()
-            from llama_cpp import Llama
-        except ImportError as exc:  # pragma: no cover - environment dependent
-            raise RuntimeError(
-                S.FALTA_LLAMA_CPP
-            ) from exc
-        except Exception as exc:
-            # Un build de llama-cpp-python con CUDA cuyas DLLs de runtime
-            # (cudart/cublas) no se encuentran NO lanza ImportError, sino
-            # RuntimeError("Failed to load shared library ...") u OSError
-            # desde el propio import -- antes eso llegaba al usuario como un
-            # mensaje crudo en ingles sin pista de como resolverlo.
-            raise RuntimeError(
-                S.LLAMA_CPP_SIN_LIBRERIA.format(exc=exc)
-            ) from exc
-
-        if not os.path.isfile(model_path):
-            raise FileNotFoundError(S.MODELO_NO_ENCONTRADO.format(model_path=model_path))
-        missing = missing_shards(model_path)
-        if missing:
-            raise RuntimeError(
-                S.MODELO_FALTAN_PARTES.format(parts=', '.join(map(str, missing)))
-            )
-        info = model_info(model_path)
-        if n_ctx == 0 and not info.trained_context:
-            n_ctx = 8192
-
-        # Soltamos el modelo anterior (si habia uno) antes de reservar memoria
-        # para el nuevo: construir el Llama nuevo antes de liberar el viejo
-        # tendria ambos modelos completos en RAM/VRAM a la vez, lo cual para
-        # modelos de varios GB puede agotar la memoria disponible.
-        self.unload()
-
-        kwargs = dict(
-            model_path=model_path,
-            n_ctx=n_ctx,
-            n_threads=n_threads,
-            n_gpu_layers=n_gpu_layers,
-            verbose=False,
-        )
-        # Solo se pasan si difieren de los valores por defecto de llama.cpp,
-        # asi un doble de prueba (o una version vieja) sin esos argumentos
-        # sigue funcionando.
-        if flash_attn:
-            kwargs["flash_attn"] = True
-        if n_batch:
-            kwargs["n_batch"] = n_batch
-        if n_ubatch:
-            kwargs["n_ubatch"] = n_ubatch
-        if kv_cache_type != "f16":
-            kwargs["type_k"] = GGML_KV_TYPES[kv_cache_type]
-            kwargs["type_v"] = GGML_KV_TYPES[kv_cache_type]
-        try:
-            self._llm = Llama(**kwargs)
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(friendly_load_error(exc, model_path)) from exc
-        self._model_path = model_path
-        # El contexto REAL (con n_ctx=0, llama.cpp usa el del entrenamiento).
-        actual = None
-        n_ctx_getter = getattr(self._llm, "n_ctx", None)
-        if callable(n_ctx_getter):
-            try:
-                actual = int(n_ctx_getter())
-            except Exception:  # noqa: BLE001
-                actual = None
-        self._n_ctx = actual if actual and actual > 0 else (n_ctx or info.trained_context or 8192)
-        self.model_info = info
-        self.load_options = dict(
-            n_ctx=self._n_ctx, n_threads=n_threads, n_gpu_layers=n_gpu_layers,
-            flash_attn=bool(flash_attn), n_batch=n_batch, n_ubatch=n_ubatch, kv_cache_type=kv_cache_type,
-        )
-        self._ensure_prompt_cache()
-
-    def unload(self) -> None:
-        llm = self._llm
-        self._llm = None
-        self._model_path = None
-        self._formatter = None
-        self._formatter_llm = None
-        self.model_info = None
-        self._token_cache.clear()
-        self._prompt_cache = None
-        self._prompt_cache_llm = None
-        # Llama.close() (llama-cpp-python >= 0.2.8x) libera la VRAM/RAM del
-        # modelo en el momento, en vez de depender de cuando pase el
-        # recolector de basura -- load() llama a unload() justamente para no
-        # tener dos modelos residentes a la vez.
-        close = getattr(llm, "close", None)
-        if callable(close):
-            try:
-                close()
-            except Exception:  # noqa: BLE001
-                pass
-        if llm is not None:
-            del llm
-            gc.collect()
-
-    # ---------------- formato de chat ----------------
-    @property
-    def chat_format_choice(self) -> str:
-        return self._chat_format_choice
-
-    def set_chat_format(self, choice: str) -> None:
-        """Elige el formato de chat ("auto", "llama3", "raw", ... -- ver
-        app/chat_format.py). Se aplica en la proxima llamada al modelo."""
-        self._chat_format_choice = choice or CHAT_FORMAT_AUTO
-        self._formatter = None
-        self._formatter_llm = None
-
-    def _has_special_token(self, text: str) -> bool:
-        """True si `text` es UN solo token especial del vocabulario del
-        modelo cargado (p.ej. "<|start_header_id|>" en Llama 3)."""
-        try:
-            tokens = self._llm.tokenize(text.encode("utf-8"), add_bos=False, special=True)
-        except Exception:  # noqa: BLE001 - dobles de prueba sin tokenize()
-            return False
-        return len(tokens) == 1
-
-    def _end_token_ids(self) -> List[int]:
-        """Ids de los tokens con los que el modelo termina su turno: el EOS y
-        los de corte del formato de chat que son un solo token especial
-        (<|eot_id|>, <|im_end|>...). Vacio si no se pueden leer."""
-        ids = set()
-        try:
-            eos = self._llm.token_eos()
-            if eos is not None and eos >= 0:
-                ids.add(int(eos))
-        except Exception:  # noqa: BLE001 - dobles de prueba sin token_eos()
-            pass
-        for text in self.formatter.stop:
-            try:
-                tokens = self._llm.tokenize(text.encode("utf-8"), add_bos=False, special=True)
-            except Exception:  # noqa: BLE001
-                continue
-            if len(tokens) == 1:
-                ids.add(int(tokens[0]))
-        return sorted(ids)
-
-    def _min_length_processor(self, min_tokens: int, prompt_tokens: int):
-        """logits_processor de llama.cpp que prohibe los tokens de fin de turno
-        hasta que se generaron `min_tokens` tokens; None si no hace falta."""
-        return self._logits_processor(min_tokens, prompt_tokens)
-
-    def _logits_processor(self, min_tokens: int, prompt_tokens: int, banned_first: Sequence[int] = ()):
-        """logits_processor de llama.cpp: prohibe los tokens de fin de turno
-        hasta generar `min_tokens` tokens, y los `banned_first` como primer
-        token generado (frases a evitar, B15). None si no hace falta."""
-        if self.is_server:
-            return None  # a server can't run a local logits processor (see app/server_backend.py)
-        end_ids = self._end_token_ids() if min_tokens > 0 else []
-        first_ids = list(banned_first)
-        if not end_ids and not first_ids:
-            return None
-        # llama.cpp llama al procesador una vez por token generado, el primero
-        # con el prompt ya evaluado: su largo en ese momento es el del prompt
-        # tal como lo tokenizo llama.cpp (special=True, su BOS), que
-        # _count_tokens() solo aproxima. Asi "primer token" y el minimo son exactos.
-        start: List[int] = []
-
-        def processor(input_ids, scores):
-            if not start:
-                start.append(len(input_ids))
-            generated = len(input_ids) - start[0]
-            if end_ids and generated < min_tokens:
-                scores[end_ids] = -float("inf")
-            if first_ids and generated == 0:
-                scores[first_ids] = -float("inf")
-            return scores
-
-        try:  # llama-cpp-python iterates over a LogitsProcessorList
-            from llama_cpp import LogitsProcessorList
-        except Exception:  # noqa: BLE001 - dobles de prueba / sin llama_cpp
-            return [processor]
-        return LogitsProcessorList([processor])
 
     # ---- alternativas en una palabra (F15) ----
     def _alternatives_prompt(self, project: Project, chapter_index: int, text_before: str) -> str:
@@ -673,47 +195,6 @@ class LocalStoryEngine:
                 return rendered
         raise ContextOverflowError(S.CONTEXTO_NO_CABE_NI_REDUCIDO)
 
-    def _top_tokens(self, rendered: str, top_k: int) -> List[Tuple[str, float]]:
-        """Los `top_k` primeros tokens mas probables tras `rendered`, con su probabilidad (sin
-        temperatura). Local: un logits processor copia los logits de la primera posicion (asi no
-        hace falta logits_all=True); servidor: sus logprobs."""
-        top_tokens = getattr(self._llm, "top_tokens", None)
-        if callable(top_tokens):  # ServerLlama
-            return top_tokens(rendered, top_k)
-        import numpy as np
-
-        captured: Dict[str, object] = {}
-
-        def grab(input_ids, scores):
-            if "scores" not in captured:
-                captured["scores"] = np.array(scores, dtype=np.float64, copy=True)
-            return scores
-
-        try:
-            from llama_cpp import LogitsProcessorList
-            processors = LogitsProcessorList([grab])
-        except Exception:  # noqa: BLE001 - dobles de prueba
-            processors = [grab]
-        self._llm(rendered, max_tokens=1, temperature=0.0, logits_processor=processors)
-        scores = captured.get("scores")
-        if scores is None:
-            return []
-        scores = np.asarray(scores, dtype=np.float64)
-        scores[np.isinf(scores)] = -1e30
-        probs = np.exp(scores - scores.max())
-        probs /= probs.sum()
-        skip = set(self._end_token_ids())
-        out: List[Tuple[str, float]] = []
-        for token_id in np.argsort(probs)[::-1][: top_k * 3]:
-            if int(token_id) in skip:
-                continue
-            text = self._llm.detokenize([int(token_id)]).decode("utf-8", errors="ignore")
-            if not text or not text.strip(" ") and "\n" not in text:
-                continue
-            out.append((text, float(probs[token_id])))
-            if len(out) >= top_k:
-                break
-        return out
 
     def word_alternatives(self, project: Project, chapter_index: int, text_before: str,
                           top_k: int = WORD_ALTERNATIVES) -> List[WordAlternative]:
@@ -748,446 +229,6 @@ class LocalStoryEngine:
         finally:
             self._end_operation()
 
-    def _special_token_text(self, token_id_getter: str) -> str:
-        try:
-            token_id = getattr(self._llm, token_id_getter)()
-            if token_id is None or token_id < 0:
-                return ""
-            return self._llm.detokenize([token_id], special=True).decode("utf-8", errors="ignore")
-        except Exception:  # noqa: BLE001
-            return ""
-
-    @property
-    def formatter(self) -> ChatFormatter:
-        """Formateador de chat para el modelo cargado ahora (resuelto una vez
-        por modelo). Sin modelo, o con un doble de prueba sin metadatos ni
-        tokenizador, "auto" resuelve a completion cruda."""
-        if self._formatter is not None and self._formatter_llm is self._llm:
-            return self._formatter
-        if self._llm is None:
-            return RawFormatter()
-        if self._chat_format_choice == CHAT_FORMAT_AUTO:
-            metadata = getattr(self._llm, "metadata", None)
-            formatter = detect_formatter(
-                metadata if isinstance(metadata, dict) else {},
-                self._has_special_token,
-                bos_token=self._special_token_text("token_bos"),
-                eos_token=self._special_token_text("token_eos"),
-            )
-        else:
-            formatter = preset_formatter(self._chat_format_choice)
-        self._formatter = formatter
-        self._formatter_llm = self._llm
-        return formatter
-
-    def render_prompt(self, prompt: PromptLike) -> str:
-        """El texto exacto que se enviaria al modelo para `prompt`."""
-        if isinstance(prompt, str):
-            return prompt
-        return self.formatter.render(prompt)
-
-    def _ensure_prompt_cache(self) -> None:
-        """
-        Habilita la cache de estados de llama-cpp-python cuando existe.
-
-        La misma instancia de `Llama` ya reutiliza el prefijo comun de dos
-        llamadas consecutivas; esta cache amplifica ese beneficio cuando se
-        intercalan otras llamadas (por ejemplo resumenes) y luego se vuelve a
-        un prompt que comparte gran parte de su prefijo.
-        """
-        if self._llm is None or self._prompt_cache_llm is self._llm:
-            return
-        self._prompt_cache = None
-        set_cache = getattr(self._llm, "set_cache", None)
-        if callable(set_cache):
-            try:
-                from llama_cpp import LlamaRAMCache
-                self._prompt_cache = LlamaRAMCache()
-                set_cache(self._prompt_cache)
-            except Exception:  # noqa: BLE001
-                self._prompt_cache = None
-        self._prompt_cache_llm = self._llm
-
-    # ---------------- manejo de contexto / tokens ----------------
-    def _count_tokens(self, text: str) -> int:
-        """
-        Cuenta tokens usando el tokenizador real del modelo cuando esta
-        disponible; si no (modelo no soporta tokenize, o esta simulado en
-        pruebas), cae a una estimacion por palabras.
-        """
-        if self._llm is not None:
-            if self._token_cache_llm is not self._llm:
-                self._token_cache.clear()
-                self._token_cache_llm = self._llm
-            cached = self._token_cache.get(text)
-            if cached is not None:
-                self._token_cache.move_to_end(text)
-                return cached
-            try:
-                count = len(self._llm.tokenize(text.encode("utf-8", errors="ignore")))
-            except Exception:
-                count = None
-            if count is not None:
-                self._token_cache[text] = count
-                while len(self._token_cache) > TOKEN_CACHE_SIZE:
-                    self._token_cache.popitem(last=False)
-                return count
-        return int(len(text.split()) * TOKENS_PER_WORD_ESTIMATE)
-
-    def _available_context(self, reserved_for_output: int) -> int:
-        """Tokens que quedan libres para el prompt de entrada."""
-        return self._n_ctx - reserved_for_output - SAFETY_MARGIN_TOKENS
-
-    def _fit_text_to_token_budget(self, text: str, available_tokens: int) -> str:
-        """
-        Recorta `text` para que quepa en `available_tokens`, conservando el
-        inicio (planteamiento) y el final (lo mas reciente/desenlace) en vez
-        de cortar a ciegas por un solo extremo.
-        """
-        if available_tokens <= 0:
-            return ""
-        if self._count_tokens(text) <= available_tokens:
-            return text
-        words = text.split()
-        approx_words = max(int(available_tokens / TOKENS_PER_WORD_ESTIMATE), 40)
-        if len(words) <= approx_words:
-            return text
-        trimmed = self._head_tail_join(words, approx_words)
-        # Si el tokenizador real cuenta mas tokens por palabra que la
-        # estimacion, hay que achicar el TOTAL de palabras conservadas en cada
-        # pasada (antes solo se movian palabras de la cabeza a la cola, con el
-        # total constante, asi que el bucle nunca lograba que cupiera).
-        while self._count_tokens(trimmed) > available_tokens and approx_words > 1:
-            approx_words = int(approx_words * 0.8)
-            trimmed = self._head_tail_join(words, approx_words)
-        return trimmed
-
-    @staticmethod
-    def _head_tail_join(words: List[str], keep_words: int) -> str:
-        head = keep_words // 2
-        tail = keep_words - head
-        # words[-0:] devolveria la lista COMPLETA, no una vacia.
-        tail_words = words[-tail:] if tail > 0 else []
-        return " ".join(words[:head]) + " [...] " + " ".join(tail_words)
-
-    def _complete(
-        self,
-        prompt: PromptLike,
-        max_tokens: int,
-        stop: Optional[List[str]] = None,
-        on_token: Optional[Callable[[str], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
-        task: str = TASK_PROSE,
-    ) -> str:
-        """Igual que _complete_ex(), pero devuelve solo el texto, recortado.
-        Si el usuario detuvo la operacion, lanza OperationCancelled (el texto
-        parcial de un resumen/refinado/esquema no sirve)."""
-        result = self._complete_ex(prompt, max_tokens, stop, on_token, cancel_check, task=task)
-        if result.finish_reason == "cancelled":
-            raise OperationCancelled(S.OPERACION_DETENIDA_POR_EL_USUARIO)
-        return result.text.strip()
-
-    def _is_cancelled(self, cancel_check: Optional[Callable[[], bool]]) -> bool:
-        return self._stop_event.is_set() or bool(cancel_check and cancel_check())
-
-    def _sampling_kwargs(self, task: str) -> dict:
-        kwargs = self.sampling.for_task(task).to_kwargs()
-        seed = self._op_seed if self._op_seed is not None else self.sampling.seed
-        if seed is not None:
-            kwargs["seed"] = seed
-        return kwargs
-
-    def _complete_ex(
-        self,
-        prompt: PromptLike,
-        max_tokens: int,
-        stop: Optional[List[str]] = None,
-        on_token: Optional[Callable[[str], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
-        task: str = TASK_PROSE,
-        min_tokens: int = 0,
-    ) -> CompletionResult:
-        """
-        Una llamada al modelo. `min_tokens`: el modelo no puede terminar su
-        turno antes de generar esos tokens (ver MIN_SECTION_FRACTION). `prompt` puede ser texto ya armado o un
-        ChatPrompt, que se renderiza con el formato de chat del modelo (ver
-        render_prompt). Devuelve el texto SIN recortar (al continuar desde un
-        texto pre-llenado, el espacio inicial es parte de la continuacion) y
-        el finish_reason que informa llama.cpp ("cancelled" si se detuvo).
-
-        Usa el muestreo de `task` (app/sampling.py) y la semilla de la
-        operacion (begin_operation). Se pide streaming si hay alguien
-        escuchando tokens o alguien que pueda cancelar (cancel_check), asi
-        "Detener" corta a mitad de la respuesta.
-        """
-        if self._llm is None:
-            raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
-        self._ensure_prompt_cache()
-
-        text_prompt = self.render_prompt(prompt)
-        prompt_tokens = self._count_tokens(text_prompt)
-        available = self._available_context(max_tokens)
-        if prompt_tokens > available:
-            raise ContextOverflowError(
-                S.CONTEXTO_NO_CABE.format(prompt_tokens=prompt_tokens, n_ctx=self._n_ctx, max_tokens=max_tokens)
-            )
-        if self._is_cancelled(cancel_check):
-            self.last_finish_reason = "cancelled"
-            return CompletionResult("", "cancelled")
-
-        stops = list(stop or DEFAULT_PROSE_STOP)
-        if not isinstance(prompt, str):
-            stops += [s for s in self.formatter.stop if s and s not in stops]
-        guard = self.phrase_guard if task in PHRASE_GUARD_TASKS else None
-        if guard:
-            return self._complete_guarded(guard, text_prompt, max_tokens, stops, task, min_tokens, on_token, cancel_check)
-        result, _used = self._run_completion(
-            text_prompt, prompt_tokens, max_tokens, stops, task, min_tokens, on_token, cancel_check,
-        )
-        return result
-
-    def _complete_guarded(
-        self, guard: PhraseGuard, text_prompt: str, max_tokens: int, stops: List[str], task: str,
-        min_tokens: int, on_token: Optional[Callable[[str], None]], cancel_check: Optional[Callable[[], bool]],
-    ) -> CompletionResult:
-        """
-        _complete_ex con frases a evitar (B15, app/phrase_guard.py). Cuando el
-        texto completa una frase de la lista, se detiene la generacion, se
-        retrocede hasta justo antes de la frase y se sigue desde ahi (el texto
-        aceptado se agrega al prompt, asi llama.cpp reutiliza su cache) con la
-        primera palabra de la frase prohibida en esa posicion. Al transmitir se
-        retienen los ultimos `guard.max_span` caracteres, asi una frase que se
-        va a cortar nunca llega a `on_token`. Si el modelo insiste
-        (MAX_REWINDS_AT_ONE_POINT en el mismo lugar, o MAX_REWINDS en total),
-        el texto se acepta como quedo.
-        """
-        hold = guard.max_span
-        accepted = ""          # texto ya aceptado en esta llamada
-        emitted = 0            # caracteres de `accepted + actual` ya pasados a on_token
-        allowed_until = 0      # coincidencias que empiezan antes de esto se aceptan
-        bans: dict = {}        # posicion en `accepted` -> ids prohibidos ahi
-        tries_at: dict = {}    # posicion -> retrocesos en ese lugar
-        remaining, generated, rewinds = max_tokens, 0, 0
-
-        def emit(text: str, final: bool = False) -> None:
-            nonlocal emitted
-            safe = len(text) if final else max(emitted, len(text) - hold)
-            if on_token is not None and safe > emitted:
-                on_token(text[emitted:safe])
-            emitted = max(emitted, safe)
-
-        while True:
-            prompt_text = text_prompt + accepted
-            prompt_tokens = self._count_tokens(prompt_text)
-            current: List[str] = []
-            hit: List[PhraseMatch] = []
-
-            def watch(delta: str, _current=current, _hit=hit, _accepted=accepted) -> bool:
-                _current.append(delta)
-                text = _accepted + "".join(_current)
-                found = guard.search(text, max(allowed_until, len(text) - len(delta) - hold))
-                if found is not None and found.start >= emitted:
-                    _hit.append(found)
-                    return True  # detener: se retrocede
-                emit(text)
-                return False
-
-            result, used = self._run_completion(
-                prompt_text, prompt_tokens, remaining, stops, task, max(0, min_tokens - generated),
-                None, cancel_check, banned_first=bans.get(len(accepted), ()), watch=watch,
-            )
-            generated += used
-            remaining -= used
-            # Siempre transmitido (watch), asi una frase se detecta al aparecer y no
-            # despues de escribir toda la seccion; una respuesta entera (un doble de
-            # prueba) pasa por watch() de una vez.
-            text = accepted + "".join(current)
-            logger.debug("frases a evitar: llamada con %d caracteres aceptados -> %d tokens, %s, termina en %r",
-                         len(accepted), used, result.finish_reason, text[-60:])
-            match = hit[0] if hit else None
-            done = (match is None or result.finish_reason == "cancelled" or remaining <= 0
-                    or rewinds >= MAX_REWINDS)
-            if match is not None and not done:
-                cut = text[: match.start].rstrip()
-                cut = text[: max(len(cut), emitted)]
-                if tries_at.get(len(cut), 0) >= MAX_REWINDS_AT_ONE_POINT:
-                    # El modelo insiste en esta frase aqui: se acepta y se sigue.
-                    allowed_until = match.end
-                    accepted = text
-                    if result.finish_reason != "phrase":
-                        done = True
-                else:
-                    tries_at[len(cut)] = tries_at.get(len(cut), 0) + 1
-                    ids = set(bans.get(len(cut), ()))
-                    ids.update(self._first_token_ids(match.first_word))
-                    bans[len(cut)] = tuple(sorted(ids))
-                    rewinds += 1
-                    self.stats.phrase_rewinds += 1
-                    logger.info("Frase a evitar %r: se retrocede y se sigue de otra forma", match.phrase)
-                    accepted = cut
-                    continue
-            if done or match is None:
-                finish = result.finish_reason if result.finish_reason != "phrase" else "length"
-                emit(text, final=True)
-                self.last_finish_reason = finish
-                return CompletionResult(text, finish)
-
-    def _first_token_ids(self, word: str) -> List[int]:
-        """Los primeros tokens con los que el modelo empezaria `word` (con y sin
-        espacio, minuscula y mayuscula inicial). Vacio si no se puede tokenizar."""
-        if self.is_server:
-            return []  # the ban needs a logits processor, which a server doesn't run
-        ids = set()
-        for form in word_variants(word):
-            try:
-                tokens = self._llm.tokenize(form.encode("utf-8"), add_bos=False, special=False)
-            except Exception:  # noqa: BLE001 - dobles de prueba
-                continue
-            if tokens:
-                ids.add(int(tokens[0]))
-        return sorted(ids)
-
-    def _run_completion(
-        self, text_prompt: str, prompt_tokens: int, max_tokens: int, stops: List[str], task: str,
-        min_tokens: int, on_token: Optional[Callable[[str], None]], cancel_check: Optional[Callable[[], bool]],
-        banned_first: Sequence[int] = (), watch: Optional[Callable[[str], bool]] = None,
-    ) -> Tuple[CompletionResult, int]:
-        """Una sola llamada a llama.cpp: devuelve el resultado y los tokens
-        generados. `banned_first`: ids prohibidos como PRIMER token generado.
-        `watch(delta)` (solo al transmitir) puede detener la generacion
-        devolviendo True; el resultado lleva entonces finish_reason "phrase"."""
-        call_kwargs = dict(max_tokens=max_tokens, stop=stops)
-        call_kwargs.update(self._sampling_kwargs(task))
-        processor = self._logits_processor(min_tokens, prompt_tokens, banned_first)
-        if processor is not None:
-            call_kwargs["logits_processor"] = processor
-        # Solo pedimos streaming token a token (llama_cpp.Llama.__call__(...,
-        # stream=True), que devuelve un generador en vez de un dict) cuando
-        # hay alguien escuchando o alguien que puede cancelar.
-        if on_token is not None or cancel_check is not None or watch is not None:
-            call_kwargs["stream"] = True
-
-        stats = self.stats
-        stats.calls += 1
-        stats.prompt_tokens = prompt_tokens
-        stats.max_tokens = max_tokens
-        stats.n_ctx = self._n_ctx
-        stats.prompt_text = text_prompt
-        stats.seed = call_kwargs.get("seed")
-        stats.sampling = {k: v for k, v in call_kwargs.items() if k not in ("stop", "stream", "max_tokens", "seed", "logits_processor")}
-        call_start = time.monotonic()
-
-        response = self._llm(text_prompt, **call_kwargs)
-
-        if isinstance(response, dict):
-            # Respuesta no incremental: ya sea porque no se pidio streaming,
-            # o porque _llm (p.ej. un doble de prueba) devolvio el resultado
-            # completo de una. Si hay on_token, se le entrega el texto
-            # completo de una sola vez.
-            choice = response["choices"][0]
-            text = choice.get("text", "")
-            elapsed = time.monotonic() - call_start
-            usage = response.get("usage") or {}
-            used = int(usage.get("completion_tokens") or (self._count_tokens(text) if text else 0))
-            stats.generated_tokens += used
-            stats.decode_seconds += elapsed
-            if watch is not None and text:
-                watch(text)
-            if on_token is not None and text:
-                on_token(text)
-            self.last_finish_reason = choice.get("finish_reason")
-            return CompletionResult(text, self.last_finish_reason), used
-
-        # Streaming real: `response` es un generador de fragmentos, cada uno
-        # con un delta incremental de texto (NO acumulado; ~1 token cada
-        # uno). El ultimo trae finish_reason. La cancelacion se revisa en
-        # cada fragmento, asi que Cancelar/Detener corta a mitad de una seccion.
-        pieces: List[str] = []
-        finish_reason: Optional[str] = None
-        first_token_at: Optional[float] = None
-        used = 0
-        try:
-            for chunk in response:
-                if self._is_cancelled(cancel_check):
-                    finish_reason = "cancelled"
-                    break
-                now = time.monotonic()
-                if first_token_at is None:
-                    first_token_at = now
-                    stats.prompt_eval_seconds = now - call_start
-                    decode_base = stats.decode_seconds
-                stats.generated_tokens += 1
-                used += 1
-                stats.decode_seconds = decode_base + (now - first_token_at)
-                choice = chunk["choices"][0]
-                if choice.get("finish_reason"):
-                    finish_reason = choice["finish_reason"]
-                delta = choice.get("text", "")
-                if not delta:
-                    continue
-                pieces.append(delta)
-                if on_token is not None:
-                    on_token(delta)
-                if watch is not None and watch(delta):
-                    finish_reason = "phrase"
-                    break
-        finally:
-            # Cortar el generador de llama-cpp-python lo cierra limpiamente.
-            close = getattr(response, "close", None)
-            if finish_reason in ("cancelled", "phrase") and callable(close):
-                try:
-                    close()
-                except Exception:  # noqa: BLE001
-                    pass
-        self.last_finish_reason = finish_reason
-        return CompletionResult("".join(pieces), finish_reason), used
-
-    def _complete_with_shrinking_budget(
-        self,
-        prompt_for_budget: Callable[[dict], PromptLike],
-        max_tokens: int,
-        on_token: Optional[Callable[[str], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
-        stop: Optional[List[str]] = None,
-        task: str = TASK_PROSE,
-    ) -> str:
-        result = self._complete_with_shrinking_budget_ex(
-            prompt_for_budget, max_tokens, on_token, cancel_check, stop, task=task,
-        )
-        if result.finish_reason == "cancelled":
-            raise OperationCancelled(S.OPERACION_DETENIDA_POR_EL_USUARIO)
-        return result.text.strip()
-
-    def _complete_with_shrinking_budget_ex(
-        self,
-        prompt_for_budget: Callable[[dict], PromptLike],
-        max_tokens: int,
-        on_token: Optional[Callable[[str], None]] = None,
-        cancel_check: Optional[Callable[[], bool]] = None,
-        stop: Optional[List[str]] = None,
-        task: str = TASK_PROSE,
-        min_tokens: int = 0,
-    ) -> CompletionResult:
-        """
-        Intenta completar con cada nivel de CONTEXT_BUDGET_LEVELS (de mayor a
-        menor contexto incluido) hasta que uno quepa en la ventana de
-        contexto del modelo. `prompt_for_budget` recibe un dict de budget y
-        devuelve el prompt completo a intentar con ese nivel.
-        """
-        last_error: Optional[Exception] = None
-        for level, budget in enumerate(CONTEXT_BUDGET_LEVELS, start=1):
-            self.stats.budget_level = level
-            try:
-                return self._complete_ex(
-                    prompt_for_budget(budget), max_tokens=max_tokens, stop=stop,
-                    on_token=on_token, cancel_check=cancel_check, task=task, min_tokens=min_tokens,
-                )
-            except ContextOverflowError as exc:
-                last_error = exc
-                continue
-        raise ContextOverflowError(
-            S.CONTEXTO_NO_CABE_NI_REDUCIDO
-        ) from last_error
 
     def generate_outline(
         self, project: Project, num_chapters: int,
