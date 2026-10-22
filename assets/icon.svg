@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <!-- StoryForge Local: an open book and a gold quill, simplified for small sizes (dark plum tile, gold rim). -->
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a2650"/>
+      <stop offset="1" stop-color="#22162f"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="56" fill="url(#bg)"/>
+  <rect x="14" y="14" width="228" height="228" rx="50" fill="none" stroke="#f0b94a" stroke-width="8"/>
+  <!-- open book -->
+  <path d="M128 92 C104 76 72 74 44 80 L44 192 C72 186 104 188 128 204 Z" fill="#fff4dc"/>
+  <path d="M128 92 C152 76 184 74 212 80 L212 192 C184 186 152 188 128 204 Z" fill="#f6e3bb"/>
+  <path d="M128 92 L128 204" stroke="#8a6a3a" stroke-width="5"/>
+  <g stroke="#b89a6a" stroke-width="7" stroke-linecap="round">
+    <path d="M64 108 L108 112"/>
+    <path d="M64 132 L108 136"/>
+    <path d="M64 156 L96 158"/>
+  </g>
+  <!-- quill -->
+  <path d="M218 34 C186 50 162 80 150 118 L162 124 C182 92 204 64 218 34 Z" fill="#f0b94a"/>
+  <path d="M150 118 L142 150" stroke="#f0b94a" stroke-width="7" stroke-linecap="round"/>
+</svg>
