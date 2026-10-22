@@ -640,6 +640,10 @@ MAXIMO_DE_ENTRADAS_LOREBOOK = 'No se pueden tener más de {maximum} entradas de 
 MODELO_FALTAN_PARTES = 'Este modelo está partido en varios archivos y faltan las partes {parts} en la carpeta. Descarga todas las partes y ponlas juntas; se carga la parte 00001.'
 MODELO_NO_ENCONTRADO = 'No se encontró el modelo en: {model_path}'
 NO_HAY_TEXTO_SELECCIONADO = 'No hay texto seleccionado.'
+# Escenas y tramos privados (F23)
+REFINAR_CON_PRIVADO = ('Este capítulo tiene tramos privados o escenas archivadas, que nunca se mandan al modelo; '
+                       'refinarlo entero los perdería. Refina una selección o quítalos antes.')
+SELECCION_CON_PRIVADO = 'La selección incluye un tramo privado, que nunca se manda al modelo.'
 NO_SE_PUDO_GENERAR_SECCION = 'No fue posible generar esta sección del capítulo: {exc}'
 N_CTX_NEGATIVO = 'n_ctx no puede ser negativo (0 = el contexto entrenado del modelo).'
 REFINAR_PARTE_VACIA = 'El modelo devolvió un texto vacío al refinar la parte {part} de {total} del capítulo. No se modificó el capítulo; inténtalo de nuevo.'
@@ -910,3 +914,62 @@ MATRIZ_SIN_COLUMNAS = (
 )
 MATRIZ_AUSENCIAS = "Desaparecen varios capítulos seguidos: {items}."
 MATRIZ_AUSENCIA = "{label} ({chapters})"
+
+# ---------------- 2026-10-21: comentarios, personajes, escenas, relaciones, visualizar, serie ----------------
+# Comentarios del editor (F21)
+COMENTARIOS_DEL_EDITOR = "Comentarios del editor"
+COMENTARIOS_OPERACION = "Comentarios del editor"
+COMENTARIOS_DEL_CAPITULO = "Comentarios del capítulo {number}"
+COMENTARIOS_LISTOS = "Comentarios listos: {n} nota(s)"
+LEYENDO_EL_CAPITULO = "Leyendo el capítulo…"
+CAPITULO_VACIO_PARA_COMENTARIOS = "El capítulo no tiene texto para comentar."
+NO_SE_PUDIERON_GENERAR_COMENTARIOS = "No se pudieron generar los comentarios: {exc}"
+SIN_COMENTARIOS = "El modelo no devolvió notas con el formato esperado. Prueba otra vez o con otro modelo."
+IR_AL_PASAJE = "Ir al pasaje"
+CITA_NO_ENCONTRADA = "No se encontró ese pasaje tal cual en el capítulo (el modelo no lo citó literalmente)."
+CANCELADO = "Cancelado"
+# Deteccion de personajes (F22)
+DETECTAR_PERSONAJES = "Detectar personajes…"
+DETECTAR_PERSONAJES_OPERACION = "Describir entradas nuevas"
+PERSONAJES_DETECTADOS = "Nombres nuevos en el capítulo {number}"
+PERSONAJES_DETECTADOS_AYUDA = ("Nombres propios que se repiten en el capítulo y que ninguna entrada del lorebook "
+                               "reconoce. Marca los que quieras agregar.")
+NOMBRE_Y_VECES = "{name} ({veces} veces)"
+DESCRIBIR_CON_EL_MODELO = "Escribir una descripción breve de cada uno con el modelo"
+CREAR_ENTRADAS = "Crear entradas"
+NO_HAY_CAPITULOS_PARA_DETECTAR = "Todavía no hay capítulos."
+NO_HAY_NOMBRES_NUEVOS = "No hay nombres nuevos en el capítulo {number}: el lorebook ya los reconoce."
+NO_SE_PUDIERON_DESCRIBIR = "No se pudieron escribir las descripciones: {exc}"
+# Escenas y tramos privados (F23)
+ESCENAS_MENU = "Escenas ▾"
+NUEVA_ESCENA = "Nueva escena"
+SIN_ESCENAS = "Sin escenas (usa «Nueva escena»)"
+NOMBRE_DE_LA_ESCENA = "Nombre de la escena:"
+POV_DE_LA_ESCENA = "Punto de vista (opcional, p. ej. Ana):"
+MARCAR_PRIVADO = "Marcar como privado"
+SELECCIONA_TEXTO_PRIVADO = ("Selecciona el texto que el modelo no debe ver nunca (notas, un borrador): quedará entre "
+                            "[[privado]] y [[/privado]].")
+# Alias, relaciones y menciones (F24)
+ALIAS_ETIQUETA = "Alias:"
+P_EJ_ALIAS = "p. ej. la Reina, Su Majestad"
+RELACIONES_ETIQUETA = "Relaciones:"
+VER_MENCIONES = "Menciones"
+MENCIONES_EN = "Aparece en: {lista}"
+CAP_N_VECES = "cap. {n} ({veces})"
+SIN_MENCIONES = "No aparece en ningún capítulo todavía."
+# Visualizar con PixelFlow (F25)
+VISUALIZAR = "Visualizar"
+ESCRIBE_UNA_DESCRIPCION_PRIMERO = "Escribe primero el texto de la entrada: es lo que se dibuja."
+PIXELFLOW_SIN_FLUJOS = "PixelFlow no tiene flujos guardados: guarda uno que genere una imagen."
+ELIGE_FLUJO_PIXELFLOW = "Flujo de PixelFlow a usar ({lista}):"
+FLUJO_NO_EXISTE = "PixelFlow no tiene un flujo llamado «{name}»."
+# Serie (F26)
+VINCULAR_SERIE = "Lorebook de serie…"
+DESVINCULAR_SERIE = "Desvincular"
+DESVINCULAR_SERIE_PREGUNTA = ("¿Desvincular el lorebook de la serie? Sus entradas siguen en su archivo, pero esta "
+                              "historia deja de usarlas.")
+SERIE_VINCULADA = "Serie: {name}"
+LOREBOOK_DE_SERIE = "Lorebook de serie"
+NO_SE_PUDO_VINCULAR_SERIE = "No se pudo vincular el lorebook de la serie: {exc}"
+NO_ES_UN_LOREBOOK_DE_SERIE = "El archivo no es un lorebook de serie de StoryForge."
+COMPARTIDA_EN_LA_SERIE = "Compartida en la serie"

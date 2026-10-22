@@ -5,8 +5,11 @@ de la ultima generacion).
 """
 from __future__ import annotations
 
-from tkinter import messagebox
+import tkinter as tk
+from tkinter import filedialog, messagebox, simpledialog
 from typing import TYPE_CHECKING
+
+from pathlib import Path
 
 import customtkinter as ctk
 
@@ -31,6 +34,9 @@ from .ui_dialogs import (
     COLOR_MUTED,
     COLOR_OK,
 )
+from .settings import get_pixelflow_settings, set_pixelflow_workflow
+from .lore_tools import detect_new_names, format_relations, mention_counts, parse_relations
+from .task_runner import call_supported
 from .ui_focus import apply_tab_order
 
 if TYPE_CHECKING:
@@ -104,7 +110,53 @@ class LoreEntryPanel(ctk.CTkFrame):
         self.progressions_box.grid(row=4, column=1, columnspan=2, padx=8, pady=(0, 2), sticky="ew")
         ctk.CTkLabel(self, text=S.PROGRESIONES_AYUDA, text_color=COLOR_MUTED, wraplength=640, justify="left",
                      font=ctk.CTkFont(size=11)).grid(row=5, column=1, columnspan=2, padx=8, pady=(0, 8), sticky="w")
+        # Alias y relaciones (F24).
+        ctk.CTkLabel(self, text=S.ALIAS_ETIQUETA).grid(row=6, column=0, padx=8, pady=2, sticky="w")
+        self.aliases_entry = ctk.CTkEntry(self, placeholder_text=S.P_EJ_ALIAS)
+        self.aliases_entry.insert(0, entry.aliases)
+        self.aliases_entry.grid(row=6, column=1, columnspan=2, padx=8, pady=2, sticky="ew")
+        ctk.CTkLabel(self, text=S.RELACIONES_ETIQUETA).grid(row=7, column=0, padx=8, pady=2, sticky="nw")
+        self.relations_box = ctk.CTkTextbox(self, height=48, wrap="word", **UNDO_TEXTBOX_OPTIONS)
+        self.relations_box.insert("1.0", format_relations(entry.relations))
+        self.relations_box.edit_reset()
+        self.relations_box.grid(row=7, column=1, columnspan=2, padx=8, pady=2, sticky="ew")
+        # Menciones (F24), visualizar (F25) y serie (F26).
+        tools = ctk.CTkFrame(self, fg_color="transparent")
+        tools.grid(row=8, column=1, columnspan=3, sticky="w", padx=8, pady=(2, 8))
+        self.mentions_btn = ctk.CTkButton(tools, text=S.VER_MENCIONES, width=110,
+                                          command=lambda: app.show_lore_mentions(self))
+        self.mentions_btn.pack(side="left", padx=(0, 6))
+        self.visualize_btn = ctk.CTkButton(tools, text=S.VISUALIZAR, width=110,
+                                           command=lambda: app.visualize_lore_entry(self))
+        self.visualize_btn.pack(side="left", padx=(0, 6))
+        self.shared_var = ctk.BooleanVar(value=entry.shared)
+        self.shared_check = ctk.CTkCheckBox(tools, text=S.COMPARTIDA_EN_LA_SERIE, variable=self.shared_var,
+                                            command=lambda: app.set_lore_entry_shared(self, bool(self.shared_var.get())))
+        if app.project.series_path:
+            self.shared_check.pack(side="left", padx=(0, 6))
+        self.mentions_label = ctk.CTkLabel(self, text="", text_color=COLOR_MUTED, wraplength=640, justify="left",
+                                           font=ctk.CTkFont(size=11))
+        self.mentions_label.grid(row=9, column=1, columnspan=2, padx=8, pady=(0, 6), sticky="w")
+        self.thumbnail_label = tk.Label(self, borderwidth=0)
+        self._thumbnail_image = None
+        self.show_thumbnail()
         apply_tab_order(self, self.focus_order_widgets())
+
+    def show_thumbnail(self) -> None:
+        """La miniatura de la entrada (F25), con el PNG de Tk (sin Pillow)."""
+        if not self.entry.thumbnail:
+            self.thumbnail_label.grid_remove()
+            return
+        try:
+            self._thumbnail_image = tk.PhotoImage(master=self, data=self.entry.thumbnail)
+        except tk.TclError:
+            self.thumbnail_label.grid_remove()
+            return
+        factor = max(1, -(-max(self._thumbnail_image.width(), self._thumbnail_image.height()) // 128))
+        if factor > 1:
+            self._thumbnail_image = self._thumbnail_image.subsample(factor)
+        self.thumbnail_label.configure(image=self._thumbnail_image)
+        self.thumbnail_label.grid(row=3, column=3, rowspan=4, padx=8, pady=4, sticky="ne")
 
     def set_match(self, matched: bool, reason: str = "") -> None:
         self.matched_last_generation = matched
@@ -120,6 +172,8 @@ class LoreEntryPanel(ctk.CTkFrame):
         self.entry.enabled = bool(self.enabled_var.get())
         self.entry.constant = bool(self.constant_var.get())
         self.entry.progressions = parse_progressions(self.progressions_box.get("1.0", "end-1c"))
+        self.entry.aliases = self.aliases_entry.get().strip()
+        self.entry.relations = parse_relations(self.relations_box.get("1.0", "end-1c"))
         try:
             self.entry.priority = max(-100, min(int(self.priority_entry.get()), 100))
         except ValueError:
@@ -134,6 +188,7 @@ class LoreEntryPanel(ctk.CTkFrame):
         return [
             self.name_entry, self.remove_btn, self.keywords_entry,
             self.enabled_check, self.constant_check, self.priority_entry, self.text_box, self.progressions_box,
+            self.aliases_entry, self.relations_box, self.mentions_btn, self.visualize_btn,
         ]
 
 
@@ -170,6 +225,16 @@ class LorebookTabMixin:
         self.add_lore_btn = ctk.CTkButton(top, text=S.AGREGAR_ENTRADA, command=self.add_lore_entry)
         self.add_lore_btn.pack(side="left")
         ctk.CTkLabel(top, text=S.MAXIMO_ENTRADAS.format(MAX_LORE_ENTRIES=MAX_LORE_ENTRIES)).pack(side="left", padx=8)
+        # F22: nombres del capitulo actual que el lorebook no conoce.
+        self.detect_btn = ctk.CTkButton(top, text=S.DETECTAR_PERSONAJES, width=170, command=self.detect_characters)
+        self.detect_btn.pack(side="left", padx=8)
+        # F26: un lorebook compartido por varios proyectos.
+        self.series_btn = ctk.CTkButton(top, text=S.VINCULAR_SERIE, width=150, command=self.link_series)
+        self.series_btn.pack(side="left", padx=8)
+        self.unlink_series_btn = ctk.CTkButton(top, text=S.DESVINCULAR_SERIE, width=120, command=self.unlink_series)
+        self.series_label = ctk.CTkLabel(top, text="", text_color=COLOR_MUTED)
+        self.series_label.pack(side="left", padx=8)
+        self._refresh_series_row()
 
         search_row = ctk.CTkFrame(tab, fg_color="transparent")
         search_row.grid(row=2, column=0, sticky="ew", padx=10, pady=(0, 10))
@@ -205,7 +270,11 @@ class LorebookTabMixin:
 
     def remove_lore_entry(self, index: int) -> None:
         self._sync_lore_panels()
-        entry = self.project.lore_entries.pop(index)
+        entry = self._displayed_lore_entries()[index]
+        if entry in self.project.series_entries:
+            self.project.series_entries.remove(entry)
+        else:
+            self.project.lore_entries.remove(entry)
         panel = self._lore_panel_cache.pop(id(entry), None)
         if panel is not None:
             panel.destroy()
@@ -228,13 +297,13 @@ class LorebookTabMixin:
         recrear todos en cada tecla (F11); crea solo los que faltan."""
         self._lore_filter_after = None
         self._sync_lore_panels()
-        current = {id(e): (i, e) for i, e in enumerate(self.project.lore_entries)}
+        current = {id(e): (i, e) for i, e in enumerate(self._displayed_lore_entries())}
         for key in [k for k in self._lore_panel_cache if k not in current]:
             self._lore_panel_cache.pop(key).destroy()
         query = self.lore_search_entry.get().strip().lower() if hasattr(self, "lore_search_entry") else ""
         self.lore_panels = []
         row = 0
-        for i, entry in enumerate(self.project.lore_entries):
+        for i, entry in enumerate(self._displayed_lore_entries()):
             panel = self._lore_panel_cache.get(id(entry))
             matched = id(entry) in self.last_lore_match_ids
             reason = self.last_lore_reasons.get(id(entry), "")
@@ -251,7 +320,7 @@ class LorebookTabMixin:
                 row += 1
             else:
                 panel.grid_remove()
-        if not self.project.lore_entries:
+        if not self._displayed_lore_entries():
             self._lore_placeholder.configure(text=S.AUN_NO_HAY_ENTRADAS_DE)
             self._lore_placeholder.grid(row=0, column=0, sticky="w", padx=8, pady=8)
         elif not self.lore_panels:
@@ -268,6 +337,154 @@ class LorebookTabMixin:
             [panel.focus_order_widgets() for panel in self.lore_panels],
         )
 
+    # ---------------- serie, deteccion, menciones, visualizar (F22, F24-F26) ----------------
+    def _displayed_lore_entries(self):
+        """Las entradas del proyecto y, debajo, las de la serie (F26)."""
+        return list(self.project.lore_entries) + list(self.project.series_entries)
+
+    def _refresh_series_row(self) -> None:
+        if self.project.series_path:
+            self.series_label.configure(text=S.SERIE_VINCULADA.format(name=Path(self.project.series_path).name))
+            self.unlink_series_btn.pack(side="left", padx=4, before=self.series_label)
+        else:
+            self.series_label.configure(text="")
+            self.unlink_series_btn.pack_forget()
+
+    def link_series(self) -> None:
+        path = filedialog.asksaveasfilename(
+            title=S.VINCULAR_SERIE, defaultextension=".sflore", confirmoverwrite=False,
+            filetypes=[(S.LOREBOOK_DE_SERIE, "*.sflore"), (S.TODOS_LOS_ARCHIVOS, "*.*")],
+        )
+        if not path:
+            return
+        self._sync_lore_panels()
+        try:
+            self.project.link_series(path)
+        except (OSError, ValueError) as exc:
+            messagebox.showerror(APP_TITLE, S.NO_SE_PUDO_VINCULAR_SERIE.format(exc=exc))
+            return
+        self._clear_lore_panels()
+        self._refresh_series_row()
+        self._render_lore_entries()
+        self.schedule_dirty_check()
+
+    def unlink_series(self) -> None:
+        if not messagebox.askyesno(APP_TITLE, S.DESVINCULAR_SERIE_PREGUNTA):
+            return
+        self._sync_lore_panels()
+        self.project.unlink_series()
+        self._clear_lore_panels()
+        self._refresh_series_row()
+        self._render_lore_entries()
+        self.schedule_dirty_check()
+
+    def set_lore_entry_shared(self, panel, shared: bool) -> None:
+        panel.sync_to_model()
+        self.project.set_entry_shared(panel.entry, shared)
+        self._render_lore_entries()
+        self.schedule_dirty_check()
+
+    def show_lore_mentions(self, panel) -> None:
+        panel.sync_to_model()
+        counts = mention_counts(self.project.chapters, panel.entry)
+        text = (S.MENCIONES_EN.format(lista=", ".join(S.CAP_N_VECES.format(n=n, veces=c) for n, c in counts))
+                if counts else S.SIN_MENCIONES)
+        panel.mentions_label.configure(text=text)
+
+    def _current_chapter_index(self) -> int:
+        index = getattr(self, "selected_chapter_index", None)
+        if isinstance(index, int) and 0 <= index < len(self.project.chapters):
+            return index
+        return len(self.project.chapters) - 1
+
+    def detect_characters(self) -> None:
+        self._sync_lore_panels()
+        index = self._current_chapter_index()
+        if index < 0:
+            messagebox.showinfo(APP_TITLE, S.NO_HAY_CAPITULOS_PARA_DETECTAR)
+            return
+        chapter = self.project.chapters[index]
+        candidates = detect_new_names(chapter.content, self.project.all_lore_entries())
+        if not candidates:
+            messagebox.showinfo(APP_TITLE, S.NO_HAY_NOMBRES_NUEVOS.format(number=index + 1))
+            return
+        CharacterDetectionDialog(self, index, candidates)
+
+    def create_lore_entries(self, picks, draft_with_model: bool) -> None:
+        """Las entradas elegidas en la deteccion (F22); con el modelo, una descripcion breve de cada una."""
+        created = []
+        for candidate in picks:
+            if not self.project.can_add_lore_entry():
+                break
+            created.append((self.project.add_lore_entry(name=candidate.name, keywords=candidate.name), candidate))
+        self._render_lore_entries()
+        self.schedule_dirty_check()
+        if not draft_with_model or not created or not self.engine.is_loaded or self.busy:
+            return
+        engine, project = self.engine, self.project
+
+        def work(cancel_check):
+            drafts = []
+            for entry, candidate in created:
+                if cancel_check():
+                    break
+                drafts.append((entry, call_supported(engine.draft_lore_entry, project, candidate.name,
+                                                      [candidate.example], cancel_check=cancel_check)))
+            return drafts
+
+        def on_success(drafts) -> None:
+            for entry, text in drafts:
+                if not entry.text.strip():
+                    entry.text = text
+                panel = self._lore_panel_cache.pop(id(entry), None)
+                if panel is not None:
+                    panel.destroy()
+            self._render_lore_entries()
+            self.schedule_dirty_check()
+
+        self.task_runner.run(S.DETECTAR_PERSONAJES_OPERACION, work, on_success=on_success,
+                             on_error=lambda exc: S.NO_SE_PUDIERON_DESCRIBIR.format(exc=exc))
+
+    def visualize_lore_entry(self, panel) -> None:
+        """F25: la descripcion de la entrada a un PixelFlow local; la imagen queda de miniatura."""
+        from . import visualize
+
+        panel.sync_to_model()
+        entry = panel.entry
+        if not entry.text.strip():
+            messagebox.showinfo(APP_TITLE, S.ESCRIBE_UNA_DESCRIPCION_PRIMERO)
+            return
+        stored = get_pixelflow_settings()
+        url = stored["url"]
+        try:
+            workflows = visualize.list_workflows(url)
+        except visualize.VisualizeError as exc:
+            messagebox.showerror(APP_TITLE, str(exc))
+            return
+        if not workflows:
+            messagebox.showinfo(APP_TITLE, S.PIXELFLOW_SIN_FLUJOS)
+            return
+        default = stored["workflow"] if stored["workflow"] in workflows else workflows[0]
+        workflow = simpledialog.askstring(
+            APP_TITLE, S.ELIGE_FLUJO_PIXELFLOW.format(lista=", ".join(workflows)), initialvalue=default, parent=self)
+        if not workflow:
+            return
+        if workflow not in workflows:
+            messagebox.showerror(APP_TITLE, S.FLUJO_NO_EXISTE.format(name=workflow))
+            return
+        set_pixelflow_workflow(workflow)
+        prompt = visualize.portrait_prompt(entry.name, entry.text)
+
+        def work(cancel_check):
+            return visualize.generate_image(prompt, workflow, url, cancel_check=cancel_check)
+
+        def on_success(image_bytes) -> None:
+            entry.thumbnail = visualize.thumbnail_b64(image_bytes, master=self)
+            panel.show_thumbnail()
+            self.schedule_dirty_check()
+
+        self.task_runner.run(S.VISUALIZAR, work, on_success=on_success, on_error=lambda exc: str(exc))
+
     def _record_lore_matches(self, chapter_index: int) -> None:
         """
         Recalcula que entradas del lorebook coincidieron con el texto de
@@ -281,7 +498,44 @@ class LorebookTabMixin:
         chapter = self.project.chapters[chapter_index]
         previous = build_previous_context(self.project, chapter_index)
         scan_text = build_lore_scan_text(chapter, previous, chapter.content)
-        matches = match_lore_entries(self.project.lore_entries, scan_text)
+        matches = match_lore_entries(self.project.all_lore_entries(), scan_text)
         self.last_lore_match_ids = {id(m.entry) for m in matches}
         self.last_lore_reasons = {id(m.entry): m.reason_es() for m in matches}
         self._render_lore_entries()
+
+
+class CharacterDetectionDialog(ctk.CTkToplevel):
+    """F22: los nombres nuevos del capitulo, para crear sus entradas del lorebook."""
+
+    def __init__(self, app, chapter_index: int, candidates):
+        super().__init__(app)
+        self.app = app
+        self.candidates = candidates
+        self.title(S.PERSONAJES_DETECTADOS.format(number=chapter_index + 1))
+        self.geometry("560x460")
+        ctk.CTkLabel(self, text=S.PERSONAJES_DETECTADOS_AYUDA, wraplength=520, justify="left").pack(
+            anchor="w", padx=10, pady=(10, 4))
+        scroll = ctk.CTkScrollableFrame(self)
+        scroll.pack(fill="both", expand=True, padx=10, pady=4)
+        self.vars = []
+        for candidate in candidates:
+            var = ctk.BooleanVar(value=True)
+            ctk.CTkCheckBox(scroll, text=S.NOMBRE_Y_VECES.format(name=candidate.name, veces=candidate.count),
+                            variable=var).pack(anchor="w", pady=(4, 0))
+            ctk.CTkLabel(scroll, text=candidate.example, text_color=COLOR_MUTED, wraplength=480, justify="left",
+                         font=ctk.CTkFont(size=11)).pack(anchor="w", padx=24)
+            self.vars.append(var)
+        self.draft_var = ctk.BooleanVar(value=app.engine.is_loaded)
+        draft = ctk.CTkCheckBox(self, text=S.DESCRIBIR_CON_EL_MODELO, variable=self.draft_var)
+        if not app.engine.is_loaded:
+            draft.configure(state="disabled")
+        draft.pack(anchor="w", padx=10, pady=4)
+        buttons = ctk.CTkFrame(self, fg_color="transparent")
+        buttons.pack(fill="x", padx=10, pady=(0, 10))
+        ctk.CTkButton(buttons, text=S.CREAR_ENTRADAS, command=self._create).pack(side="right")
+        ctk.CTkButton(buttons, text=S.CANCELAR, command=self.destroy).pack(side="right", padx=6)
+
+    def _create(self) -> None:
+        picks = [c for c, var in zip(self.candidates, self.vars) if var.get()]
+        self.destroy()
+        self.app.create_lore_entries(picks, bool(self.draft_var.get()))

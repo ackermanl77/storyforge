@@ -13,6 +13,7 @@ from typing import List, Optional, Sequence, Tuple
 from . import strings_es as S
 from .project import MAX_SNIPPET_PROMPT_WORDS, count_words  # noqa: F401  (notas, F19)
 from .project import Chapter, LoreEntry, Project
+from .scenes import ai_text
 
 
 @dataclass
@@ -263,7 +264,7 @@ def build_previous_context(project: Project, upto_index: int, max_words: int = 5
     """
     upto_index = max(0, min(upto_index, len(project.chapters)))
     has_material = any(
-        project.chapters[i].summary.strip() or project.chapters[i].content.strip()
+        project.chapters[i].summary.strip() or ai_text(project.chapters[i].content).strip()
         for i in range(upto_index)
     )
     if not has_material:
@@ -272,8 +273,9 @@ def build_previous_context(project: Project, upto_index: int, max_words: int = 5
     last_index = upto_index - 1
     last = project.chapters[last_index]
     handoff = ""
-    if last.content.strip():
-        handoff = tail_preserving_format(last.content, _handoff_words(max_words))
+    last_text = ai_text(last.content)  # F23: sin tramos privados ni escenas archivadas
+    if last_text.strip():
+        handoff = tail_preserving_format(last_text, _handoff_words(max_words))
     remaining = max_words - len(handoff.split())
 
     def label(i: int) -> str:
@@ -291,7 +293,7 @@ def build_previous_context(project: Project, upto_index: int, max_words: int = 5
 
     for i in range(last_index - 1, -1, -1):
         ch = project.chapters[i]
-        body = ch.summary.strip() or _trim_words_tail(ch.content.strip(), _MISSING_SUMMARY_EXCERPT_WORDS)
+        body = ch.summary.strip() or _trim_words_tail(ai_text(ch.content).strip(), _MISSING_SUMMARY_EXCERPT_WORDS)
         if not body:
             continue
         if omitted:
@@ -458,7 +460,8 @@ def build_lorebook_block(
     for entry in matched:
         name = entry.name.strip() or "(sin nombre)"
         text = _trim_words(entry.text_for_chapter(chapter_number).strip(), max_entry_words)
-        lines.append(f"{name}: {text}")
+        relations = entry.relations_text()  # F24
+        lines.append(f"{name}: {text}" + (f" (Relations: {relations})" if relations else ""))
     return "RELEVANT WORLD INFO (only what applies to this part of the story):\n" + "\n".join(lines) + "\n\n"
 
 
@@ -529,7 +532,7 @@ def _chapter_prompt_parts(
     # de incluir el lorebook completo (que podria no caber en absoluto en el
     # contexto de un modelo local con un elenco/mundo grande).
     lore_scan_text = build_lore_scan_text(chapter, previous, recent_text)
-    lore_block = build_lorebook_block(project.lore_entries, lore_scan_text, max_entry_words=max_lore_words,
+    lore_block = build_lorebook_block(project.all_lore_entries(), lore_scan_text, max_entry_words=max_lore_words,
                                       chapter_number=chapter_index + 1)
     snippets_block = build_snippets_block(project, max_words=min(MAX_SNIPPET_PROMPT_WORDS, 2 * max_lore_words))
     style_emphasis = build_writing_style_instruction(project)
@@ -1185,7 +1188,7 @@ def build_side_chat(project: Project, chapter_index: Optional[int], history: Seq
         if previous.strip():
             parts.append(previous)
         chapter = project.chapters[chapter_index]
-        tail = " ".join(chapter.content.split()[-chapter_tail_words:]) if chapter_tail_words > 0 else ""
+        tail = " ".join(ai_text(chapter.content).split()[-chapter_tail_words:]) if chapter_tail_words > 0 else ""
         if tail:
             parts.append(f"CURRENT CHAPTER ({chapter.title or chapter_index + 1}), LATEST TEXT:\n{tail}")
     bible = "\n\n".join(p.strip() for p in parts if p.strip())
@@ -1234,6 +1237,61 @@ def build_summary_chat(text: str, max_words: int) -> ChatPrompt:
 
 
 SUMMARY_SUFFIX = "\n\nSummary:"
+
+# ---------------- comentarios del editor (F21) ----------------
+
+FEEDBACK_NOTES = 5
+
+
+def build_feedback_chat(project: Project, chapter_index: int, budget: dict) -> ChatPrompt:
+    """Una lectura critica del capitulo: hasta FEEDBACK_NOTES notas accionables, cada una
+    con el area, una cita literal breve del pasaje y la sugerencia. La continuidad se
+    revisa contra la biblia (personajes, mundo) y el lorebook que aplica al capitulo."""
+    chapter = project.chapters[chapter_index]
+    text = _trim_words(ai_text(chapter.content).strip(), budget.get("max_chapter_words", 3000))
+    previous = build_previous_context(project, chapter_index, budget.get("max_previous_words", 400))
+    lore = build_lorebook_block(project.all_lore_entries(), build_lore_scan_text(chapter, previous, text),
+                                max_entry_words=budget.get("max_lore_words", 120), chapter_number=chapter_index + 1)
+    bible = []
+    if project.characters.strip():
+        bible.append("CHARACTERS:\n" + _trim_words(project.characters.strip(), budget.get("max_characters_words", 400)))
+    if project.setting.strip():
+        bible.append("SETTING:\n" + _trim_words(project.setting.strip(), budget.get("max_setting_words", 300)))
+    if lore:
+        bible.append(lore.strip())
+    if previous.strip():
+        bible.append(previous.strip())
+    areas = ", ".join(("pacing", "clarity", "dialogue", "voice", "continuity", "description", "structure"))
+    instructions = (
+        f"Read the chapter below as a developmental editor and give at most {FEEDBACK_NOTES} actionable notes, "
+        "the most important first. Check continuity against the story bible. One note per line, exactly in "
+        "this form:\n"
+        "- [area] «a short exact quote from the chapter (3-12 words)» — what to change and why\n"
+        f"Areas: {areas}. Write the notes in the language the chapter is written in. "
+        "Quote the chapter word for word; do not rewrite it. No introduction or closing remarks."
+    )
+    context = "\n\n".join(bible)
+    user = (f"STORY BIBLE:\n{context}\n\n" if context else "") + f"CHAPTER {chapter_index + 1} " \
+        f"({chapter.title or 'untitled'}):\n{text}\n\n{instructions}"
+    return ChatPrompt(
+        system="You are an experienced, honest fiction editor. You give specific, actionable notes, never praise "
+               "padding.",
+        user=user,
+        raw=f"{user}\n\nNotes:\n-",
+    )
+
+
+def build_lore_draft_chat(project: Project, name: str, examples: Sequence[str]) -> ChatPrompt:
+    """Una descripcion de una o dos oraciones para una entrada nueva del lorebook (F22),
+    a partir de las oraciones del manuscrito donde aparece."""
+    passages = "\n".join(f"- {_trim_words(e, 60)}" for e in list(examples)[:6] if e.strip())
+    user = (
+        f"These passages from a story mention \"{name}\":\n{passages}\n\n"
+        f"Write a one- or two-sentence world-info entry describing who or what \"{name}\" is, using only what "
+        "the passages say. Write it in the language of the passages. Output only the description."
+    )
+    return ChatPrompt(system="You keep a story's world-info notes: short, factual, no speculation.",
+                      user=user, raw=f"{user}\n\nDescription:")
 
 
 def summary_instructions(max_words: int) -> str:

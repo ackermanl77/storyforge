@@ -40,6 +40,7 @@ from .ui_common import (
     _set_text_readonly_content,
 )
 from .ui_focus import apply_tab_order
+from .ui_story_tools import StoryToolsMixin
 from .ui_dialogs import (
     COLOR_ERROR,
     COLOR_MUTED,
@@ -61,7 +62,7 @@ logger = logging.getLogger("app.gui")
 CHAPTER_STREAM_UI_INTERVAL_SECONDS = 0.15
 
 
-class ChapterPanel(ctk.CTkFrame):
+class ChapterPanel(StoryToolsMixin, ctk.CTkFrame):
     """Un capitulo: metadatos, barra de acciones, editor, buscar/reemplazar,
     refinamiento y resumen. Se muestra uno a la vez (ver _jump_to_chapter)."""
 
@@ -177,6 +178,7 @@ class ChapterPanel(ctk.CTkFrame):
             hover_color="#6e2f2f", command=self._on_remove,
         )
         self.remove_btn.pack(side="right", padx=(6, 0), pady=2)
+        self._build_story_tools()  # F21 comentarios, F23 escenas y tramos privados
         self.tools_visible = False
 
         # Buscar / reemplazar en este capitulo (F5), oculto hasta Ctrl+F.
@@ -411,7 +413,7 @@ class ChapterPanel(ctk.CTkFrame):
     def _set_busy(self, busy: bool, status: str = "") -> None:
         state = "disabled" if busy else "normal"
         for btn in (self.generate_btn, self.continue_btn, self.continue_cursor_btn, self.regen_summary_btn,
-                    self.reduce_btn, self.remove_btn, self.refine_btn, self.history_btn):
+                    self.reduce_btn, self.remove_btn, self.refine_btn, self.history_btn, self.feedback_btn):
             btn.configure(state=state)
         self._refresh_retry_controls(busy)
         self.cancel_btn.configure(state=("normal" if busy else "disabled"))

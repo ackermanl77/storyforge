@@ -270,7 +270,7 @@ class ChaptersTabMixin:
                 if fresh:
                     ch.summary_source_hash = content_hash(ch.content)
                 total += n3
-        for entry in self.project.lore_entries:
+        for entry in self.project.all_lore_entries():
             entry.text, n = rep(entry.text)
             entry.name, n2 = rep(entry.name)
             entry.keywords, n3 = rep(entry.keywords)

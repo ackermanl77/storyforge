@@ -172,3 +172,22 @@ def set_ui_preferences(prefs: dict) -> None:
         current.update({k: v for k, v in prefs.items() if k in UI_DEFAULTS})
         data["ui"] = current
     _update(mutate)
+
+
+# ---------------- PixelFlow (F25: visualizar entradas del lorebook) ----------------
+
+def get_pixelflow_settings() -> dict:
+    """{"url", "workflow"}: el PixelFlow local y el ultimo flujo usado."""
+    stored = load_settings().get("pixelflow")
+    stored = stored if isinstance(stored, dict) else {}
+    url = stored.get("url") if isinstance(stored.get("url"), str) and stored.get("url").strip() else ""
+    workflow = stored.get("workflow") if isinstance(stored.get("workflow"), str) else ""
+    return {"url": url or "http://127.0.0.1:8288", "workflow": workflow}
+
+
+def set_pixelflow_workflow(workflow: str) -> None:
+    def mutate(data: dict) -> None:
+        current = data.get("pixelflow") if isinstance(data.get("pixelflow"), dict) else {}
+        current["workflow"] = workflow
+        data["pixelflow"] = current
+    _update(mutate)

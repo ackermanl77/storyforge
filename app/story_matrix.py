@@ -94,7 +94,7 @@ def _columns(project: Project) -> List[Column]:
             terms.append(first)
         columns.append(Column(name, terms, "character"))
         seen.add(name.lower())
-    for entry in project.lore_entries:
+    for entry in project.all_lore_entries():
         label = entry.name.strip()
         if not entry.enabled or not label or label.lower() in seen:
             continue

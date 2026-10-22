@@ -244,7 +244,7 @@ def _project_fields(project: Project):
         yield "chapter", i, S.CAPITULO_N_TITULO.format(number=i + 1, title=title), ch.content
         yield "outline", i, S.ESQUEMA_N_TITULO.format(number=i + 1, title=title), ch.outline
         yield "summary", i, S.RESUMEN_N_TITULO.format(number=i + 1, title=title), ch.summary
-    for i, entry in enumerate(project.lore_entries):
+    for i, entry in enumerate(project.all_lore_entries()):
         yield "lore", i, S.LOREBOOK_ENTRADA.format(name=entry.name.strip() or S.ENTRADA.format(number=i + 1)), entry.text
 
 

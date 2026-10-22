@@ -59,6 +59,8 @@ from .gguf import list_model_entries
 from .output_guard import clean_section
 from .phrase_guard import PhraseGuard
 from .project import MAX_CHAPTERS, MAX_WORDS_PER_CHAPTER, Project, count_words
+from .lore_tools import parse_feedback
+from .scenes import ai_text, has_hidden, has_private
 from .prompts import (
     FINAL_SECTION_HINT,
     NOT_OVER_NUDGE,
@@ -69,6 +71,8 @@ from .prompts import (
     build_chapter_start_chat,
     build_combine_summaries_chat,
     build_expand_field_chat,
+    build_feedback_chat,
+    build_lore_draft_chat,
     build_outline_chat,
     build_outline_completion_chat,
     build_partial_summary_chat,
@@ -448,7 +452,9 @@ class LocalStoryEngine(ModelMixin, CompletionMixin):
             elif full_text and final_part:
                 hints.append(FINAL_SECTION_HINT)
 
-            def prompt_for_budget(budget: dict, _text=full_text, _remaining=remaining, _hints=hints) -> ChatPrompt:
+            # F23: el modelo ve el capitulo sin tramos privados ni escenas archivadas; lo
+            # nuevo se sigue agregando al texto completo.
+            def prompt_for_budget(budget: dict, _text=ai_text(full_text), _remaining=remaining, _hints=hints) -> ChatPrompt:
                 if not _text:
                     return build_chapter_start_chat(project, chapter_index, budget, hints=_hints)
 
@@ -600,7 +606,7 @@ class LocalStoryEngine(ModelMixin, CompletionMixin):
             raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
         self.begin_operation("Resumen")
         try:
-            return self._summarize(text, max_words, cancel_check, progress_callback)
+            return self._summarize(ai_text(text), max_words, cancel_check, progress_callback)
         finally:
             self._end_operation()
 
@@ -687,6 +693,55 @@ class LocalStoryEngine(ModelMixin, CompletionMixin):
         finally:
             self._end_operation()
 
+    def feedback(
+        self, project: Project, chapter_index: int, cancel_check: Optional[Callable[[], bool]] = None,
+        on_token: Optional[Callable[[str], None]] = None,
+    ) -> list:
+        """F21: una lectura de editor del capitulo -- hasta prompts.FEEDBACK_NOTES notas
+        (lore_tools.FeedbackNote: area, cita del pasaje, sugerencia), con la continuidad
+        revisada contra la biblia y el lorebook. No toca el proyecto."""
+        if self._llm is None:
+            raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
+        if not ai_text(project.chapters[chapter_index].content).strip():
+            raise ValueError(S.CAPITULO_VACIO_PARA_COMENTARIOS)
+        self.begin_operation(S.COMENTARIOS_OPERACION)
+        try:
+            max_out_tokens = 700
+            limit = self._available_context(max_out_tokens)
+            prompt = None
+            for budget in CONTEXT_BUDGET_LEVELS:
+                for chapter_words in (3000, 1800, 900):
+                    candidate = build_feedback_chat(project, chapter_index, {**budget, "max_chapter_words": chapter_words})
+                    if self._count_tokens(self.render_prompt(candidate)) <= limit:
+                        prompt = candidate
+                        break
+                if prompt is not None:
+                    break
+            if prompt is None:
+                raise ContextOverflowError(S.CONTEXTO_NO_CABE_NI_REDUCIDO)
+            text = self._complete(prompt, max_tokens=max_out_tokens, stop=ONLY_END_MARKER_STOP,
+                                  on_token=on_token, cancel_check=cancel_check, task=TASK_EXPAND)
+            if not self.formatter.is_chat and not text.lstrip().startswith(("-", "[")):
+                text = "-" + text  # el prompt crudo termina en "-": la primera nota llega sin el guion
+            return parse_feedback(text)
+        finally:
+            self._end_operation()
+
+    def draft_lore_entry(
+        self, project: Project, name: str, examples, cancel_check: Optional[Callable[[], bool]] = None,
+    ) -> str:
+        """F22: una descripcion breve para una entrada nueva del lorebook, a partir de
+        las oraciones donde aparece `name`."""
+        if self._llm is None:
+            raise ModelNotLoadedError(S.NO_HAY_MODELO_CARGADO)
+        self.begin_operation(S.DETECTAR_PERSONAJES_OPERACION)
+        try:
+            prompt = build_lore_draft_chat(project, name, examples)
+            return self._complete(prompt, max_tokens=120, stop=ONLY_END_MARKER_STOP, cancel_check=cancel_check,
+                                  task=TASK_EXPAND).strip()
+        finally:
+            self._end_operation()
+
     def expand_field(
         self, field_key: str, text: str, max_words: int = 400,
         cancel_check: Optional[Callable[[], bool]] = None,
@@ -749,6 +804,10 @@ class LocalStoryEngine(ModelMixin, CompletionMixin):
 
     def _refine_chapter(self, project, chapter_index, instruction, cancel_check, progress_callback, on_token) -> str:
         content = project.chapters[chapter_index].content.strip()
+        if has_hidden(content):
+            # El resultado reemplaza el capitulo entero: un tramo privado o una escena
+            # archivada tendria que mandarse al modelo, o se perderia (F23).
+            raise ValueError(S.REFINAR_CON_PRIVADO)
         max_tokens = self._refine_output_tokens(count_words(content))
         prompt = build_refine_chapter_chat(project, chapter_index, instruction)
         kw = dict(stop=ONLY_END_MARKER_STOP, cancel_check=cancel_check, on_token=on_token, task=TASK_REFINE)
@@ -797,6 +856,9 @@ class LocalStoryEngine(ModelMixin, CompletionMixin):
         self.phrase_guard = PhraseGuard.for_project(project)
         if not selection.strip():
             raise ValueError(S.NO_HAY_TEXTO_SELECCIONADO)
+        if has_private(selection):
+            raise ValueError(S.SELECCION_CON_PRIVADO)
+        before, after = ai_text(before), ai_text(after)  # F23
         self.begin_operation("Reescribir selección")
         try:
             words = count_words(selection)

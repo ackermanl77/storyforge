@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from .fileutil import atomic_write_text, is_under
+from .lore_tools import clean_relations
 from .sampling import SamplingConfig
 
 logger = logging.getLogger(__name__)
@@ -356,9 +357,24 @@ class LoreEntry:
     # escribir el capitulo N se usa el texto de la ultima con from_chapter <= N (y `text` antes
     # de la primera): un personaje que cambia de cargo, un lugar destruido, un secreto revelado.
     progressions: List[Dict[str, Any]] = field(default_factory=list)
+    # Alias (F24): otros nombres de la entrada ("la Reina, Su Majestad"), separados por
+    # coma; cuentan como palabras clave.
+    aliases: str = ""
+    # Relaciones (F24): [{"type": "familia", "target": "Ana"}] -- van con la entrada al prompt.
+    relations: List[Dict[str, str]] = field(default_factory=list)
+    # Miniatura (F25): PNG en base64 hecho con PixelFlow (app/visualize.py), o "".
+    thumbnail: str = ""
+    # De la serie (F26): vive en el lorebook compartido de la serie, no en el proyecto.
+    # No se guarda en la entrada: lo decide en que lista esta (Project.series_entries).
+    shared: bool = field(default=False, compare=False)
 
     def keyword_list(self) -> List[str]:
-        return [k.strip() for k in self.keywords.split(",") if k.strip()]
+        terms = [k.strip() for k in self.keywords.split(",") if k.strip()]
+        return terms + [a.strip() for a in self.aliases.split(",") if a.strip() and a.strip() not in terms]
+
+    def relations_text(self) -> str:
+        """Las relaciones en una linea para el prompt ("familia: Ana; faccion: Los Lobos")."""
+        return "; ".join(f"{r['type']}: {r['target']}" for r in self.relations)
 
     def word_count(self) -> int:
         return count_words(self.text)
@@ -380,6 +396,12 @@ class LoreEntry:
         }
         if self.progressions:
             data["progressions"] = [dict(step) for step in self.progressions]
+        if self.aliases.strip():
+            data["aliases"] = self.aliases
+        if self.relations:
+            data["relations"] = [dict(r) for r in self.relations]
+        if self.thumbnail:
+            data["thumbnail"] = self.thumbnail
         return data
 
     @staticmethod
@@ -394,7 +416,20 @@ class LoreEntry:
             constant=_bool_field(d, "constant", False),
             priority=max(-100, min(_int_field(d, "priority", 0, where), 100)),
             progressions=clean_progressions(d.get("progressions")),
+            aliases=_str_field(d, "aliases", "", where),
+            relations=clean_relations(d.get("relations")),
+            thumbnail=_clean_thumbnail(d.get("thumbnail")),
         )
+
+
+MAX_THUMBNAIL_B64 = 1_500_000
+
+
+def _clean_thumbnail(value: Any) -> str:
+    """Una miniatura PNG en base64 razonable, o "" (no se confia en el archivo)."""
+    if not isinstance(value, str) or len(value) > MAX_THUMBNAIL_B64 or not value.startswith("iVBOR"):
+        return ""
+    return value
 
 
 def clean_progressions(value: Any) -> List[Dict[str, Any]]:
@@ -512,6 +547,41 @@ class Project:
     # Encabezado de capitulo al exportar ("Chapter", "Capítulo" o "" = solo el titulo).
     chapter_heading: str = "Chapter"
     history_limit: int = MAX_CHAPTER_HISTORY
+    # Serie (F26): un lorebook compartido por varios proyectos (archivo .sflore). La ruta
+    # se guarda en el proyecto; las entradas, en ese archivo (se cargan al abrir).
+    series_path: str = ""
+    series_entries: List[LoreEntry] = field(default_factory=list)
+
+    def all_lore_entries(self) -> List[LoreEntry]:
+        """Las entradas que valen para esta historia: las propias y las de la serie
+        (si una propia tiene el mismo nombre, gana la propia)."""
+        own = {e.name.strip().lower() for e in self.lore_entries if e.name.strip()}
+        return list(self.lore_entries) + [e for e in self.series_entries
+                                          if not e.name.strip() or e.name.strip().lower() not in own]
+
+    def set_entry_shared(self, entry: LoreEntry, shared: bool) -> None:
+        """Pasa una entrada del lorebook del proyecto al de la serie, o al reves (F26)."""
+        if shared and entry in self.lore_entries:
+            self.lore_entries.remove(entry)
+            self.series_entries.append(entry)
+        elif not shared and entry in self.series_entries:
+            self.series_entries.remove(entry)
+            self.lore_entries.append(entry)
+        entry.shared = entry in self.series_entries
+
+    def link_series(self, path: str | Path) -> None:
+        """Vincula el lorebook de serie `path` (lo crea vacio si no existe)."""
+        path = Path(path)
+        self.series_entries = load_series_lore(path) if path.exists() else []
+        for entry in self.series_entries:
+            entry.shared = True
+        self.series_path = str(path)
+        if not path.exists():
+            save_series_lore(path, self.series_entries)
+
+    def unlink_series(self) -> None:
+        self.series_path = ""
+        self.series_entries = []
 
     # ---------------- validaciones ----------------
     def plot_words(self) -> int:
@@ -677,6 +747,7 @@ class Project:
             "history_limit": self.history_limit,
             "lore_entries": [e.to_dict() for e in self.lore_entries],
             "snippets": [s.to_dict() for s in self.snippets],
+            **({"series_path": self.series_path} if self.series_path else {}),
         }
 
     def to_json(self) -> str:
@@ -690,6 +761,9 @@ class Project:
         de reemplazarlo, la version anterior se conserva como `<archivo>.bak`.
         """
         save_json_text(path, self.to_json())
+        if self.series_path:
+            # El lorebook de la serie se guarda junto con el proyecto (F26).
+            save_series_lore(self.series_path, self.series_entries)
 
     @staticmethod
     def from_dict(data: Any) -> "Project":
@@ -749,7 +823,40 @@ class Project:
     def load(path: str | Path) -> "Project":
         path = Path(path)
         data = json.loads(path.read_text(encoding="utf-8"))
-        return Project.from_dict(data)
+        project = Project.from_dict(data)
+        series = data.get("series_path") if isinstance(data, dict) else None
+        if isinstance(series, str) and series.strip():
+            project.series_path = series
+            try:
+                project.series_entries = load_series_lore(series)
+            except (OSError, ValueError) as exc:
+                logger.warning("No se pudo leer el lorebook de la serie %s: %s", series, exc)
+            for entry in project.series_entries:
+                entry.shared = True
+        return project
+
+
+SERIES_FORMAT = "storyforge_series_lore"
+
+
+def load_series_lore(path: str | Path) -> List[LoreEntry]:
+    """Las entradas del lorebook de una serie (F26): {"format", "version", "entries"}."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or data.get("format") != SERIES_FORMAT:
+        raise ValueError(S.NO_ES_UN_LOREBOOK_DE_SERIE)
+    entries = []
+    for i, item in enumerate(_list_field(data, "entries")):
+        try:
+            entries.append(LoreEntry.from_dict(item, where=f"serie {i + 1}: "))
+        except ValueError:
+            logger.warning("Entrada %d de la serie invalida; se omite", i + 1)
+    return entries
+
+
+def save_series_lore(path: str | Path, entries: List[LoreEntry]) -> None:
+    text = json.dumps({"format": SERIES_FORMAT, "format_version": 1, "entries": [e.to_dict() for e in entries]},
+                      ensure_ascii=False, indent=2)
+    atomic_write_text(path, text, backup=True)
 
 
 def save_json_text(path: str | Path, text: str) -> None:

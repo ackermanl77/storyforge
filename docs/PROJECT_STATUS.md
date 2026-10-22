@@ -107,6 +107,27 @@ See the README's "Limitaciones reales que debes conocer" section for the user-fa
 
 ## Recently Fixed
 
+- **2026-10-21 -- comentarios del editor (F21), personajes nuevos (F22), escenas y texto privado (F23),
+  alias/relaciones/menciones (F24), visualizar con PixelFlow (F25), lorebook de serie (F26).**
+  - F21: `engine.feedback()` + `prompts.build_feedback_chat()` -- hasta 5 notas `[área] «cita» — nota`,
+    continuidad contra la biblia y el lorebook; `lore_tools.parse_feedback/locate_quote`; "Comentarios del
+    editor" en Más herramientas abre las notas y "Ir al pasaje" selecciona la cita.
+  - F22: `lore_tools.detect_new_names()` (nombres con mayúscula fuera de inicio de oración, repetidos, que
+    ninguna entrada reconoce); "Detectar personajes…" en Lorebook; con modelo, `engine.draft_lore_entry()`.
+  - F23: `app/scenes.py` -- encabezados `### Escena [POV: X] [archivada]` y tramos `[[privado]]…[[/privado]]`
+    en el propio texto. `ai_text()` (lo que ve el modelo) se aplica al contexto de capítulos previos, la
+    continuación, el resumen, la recuperación de pasajes, la conversación lateral y reescribir selección;
+    refinar un capítulo con texto oculto se rechaza (lo perdería). `export_text()` quita escenas archivadas
+    y marcas.
+  - F24: `LoreEntry.aliases` (claves de búsqueda), `relations` (van al prompt como "Relations: …"),
+    `lore_tools.mention_counts()` ("Menciones").
+  - F25: `app/visualize.py` -- el flujo guardado de un PixelFlow local con el texto de la entrada como
+    prompt positivo; la miniatura se guarda en la entrada (PNG base64 hecho con Tk, sin Pillow). Probado
+    contra el servidor de PixelFlow en modo prueba (un flujo Empty Image → Text Overlay → Save Image).
+  - F26: `Project.series_path` + archivo `.sflore`; `all_lore_entries()` (las propias ganan); la casilla
+    "Compartida en la serie" mueve una entrada; el archivo se guarda con el proyecto.
+  - Pruebas: `tests/test_story_tools.py` (14, incluidas dos de ventana).
+
 - **Exe resources and a smaller bundle** (2026-10-18, K5).
   - **Publisher:** one name, the version resource's CompanyName is "MELEJ" like the installer's
     AppPublisher.

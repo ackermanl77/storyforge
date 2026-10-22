@@ -23,6 +23,8 @@ from collections import Counter, OrderedDict
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence
 
+from .scenes import ai_text
+
 logger = logging.getLogger(__name__)
 
 MIN_PASSAGE_WORDS = 30
@@ -55,7 +57,7 @@ def split_passages(project, upto_index: int) -> List[Passage]:
     passages: List[Passage] = []
     for index, chapter in enumerate(project.chapters[:max(0, upto_index)]):
         buffer: List[str] = []
-        for paragraph in re.split(r"\n\s*\n", chapter.content or ""):
+        for paragraph in re.split(r"\n\s*\n", ai_text(chapter.content or "")):
             words = paragraph.split()
             while len(words) > MAX_PASSAGE_WORDS:
                 passages.append(Passage(index, " ".join(words[:MAX_PASSAGE_WORDS])))

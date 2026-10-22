@@ -19,6 +19,8 @@ Exportacion de la historia a .docx, .txt, Markdown (.md) y EPUB.
 from __future__ import annotations
 
 import html
+
+from .scenes import export_text  # F23: sin escenas archivadas ni marcas de privado
 import io
 import re
 import uuid
@@ -133,7 +135,7 @@ def build_txt(project: Project) -> str:
         lines.append(heading)
         lines.append("-" * max(len(heading), 10))
         lines.append("")
-        lines.append("\n\n".join(chapter_paragraphs(chapter.content)))
+        lines.append("\n\n".join(chapter_paragraphs(export_text(chapter.content))))
         lines.append("")
         lines.append("")
     return "\n".join(lines).rstrip() + "\n"
@@ -149,7 +151,7 @@ def build_markdown(project: Project) -> str:
         parts.append(f"*{project.author.strip()}*")
     for i, chapter in enumerate(project.chapters, start=1):
         parts.append(f"## {chapter_heading(project, i, chapter)}")
-        parts.extend(chapter_paragraphs(chapter.content))
+        parts.extend(chapter_paragraphs(export_text(chapter.content)))
     return "\n\n".join(parts) + "\n"
 
 
@@ -183,7 +185,7 @@ def export_docx(project: Project, path: str | Path) -> None:
     for i, chapter in enumerate(project.chapters, start=1):
         doc.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
         doc.add_heading(chapter_heading(project, i, chapter), level=1)
-        for paragraph_text in chapter_paragraphs(chapter.content):
+        for paragraph_text in chapter_paragraphs(export_text(chapter.content)):
             p = doc.add_paragraph()
             _add_runs(p, paragraph_text)
 
@@ -243,7 +245,7 @@ def build_epub_bytes(project: Project, lang: str = "en") -> bytes:
     chapters = []
     for i, chapter in enumerate(project.chapters, start=1):
         heading = chapter_heading(project, i, chapter)
-        paras = "\n".join(f"<p>{_inline_html(p)}</p>" for p in chapter_paragraphs(chapter.content))
+        paras = "\n".join(f"<p>{_inline_html(p)}</p>" for p in chapter_paragraphs(export_text(chapter.content)))
         chapters.append((f"chapter_{i:02d}.xhtml", heading, _xhtml(heading, f"<h2>{html.escape(heading)}</h2>\n{paras}", lang)))
 
     title_body = f"<h1>{html.escape(title)}</h1>"
