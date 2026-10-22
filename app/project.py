@@ -840,7 +840,7 @@ SERIES_FORMAT = "storyforge_series_lore"
 
 
 def load_series_lore(path: str | Path) -> List[LoreEntry]:
-    """Las entradas del lorebook de una serie (F26): {"format", "version", "entries"}."""
+    """Las entradas del lorebook de una serie (F26): {"format", "format_version", "entries"}."""
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(data, dict) or data.get("format") != SERIES_FORMAT:
         raise ValueError(S.NO_ES_UN_LOREBOOK_DE_SERIE)

@@ -35,6 +35,16 @@ correspondiente mas abajo.
   reescribir una seleccion, reemplazar, reducir repeticion o restaurar
   guarda la version previa (hasta 20 por capitulo, con origen y fecha),
   recuperable desde un boton en cada capitulo.
+- **Comentarios del editor**: una lectura crítica del capítulo (ritmo,
+  claridad, diálogo, continuidad contra el lorebook...) en notas que citan
+  el pasaje, con "Ir al pasaje".
+- **Escenas** dentro de un capítulo (`### Nombre [POV: Ana]`, archivables) y
+  **tramos privados** (`[[privado]]…[[/privado]]`) que nunca van al modelo.
+- **Lorebook**: alias, relaciones entre entradas, en qué capítulos aparece
+  cada una, **Detectar personajes** (propone entradas para nombres nuevos de
+  un capítulo), **Visualizar** (un retrato de la entrada generado con un
+  PixelFlow local, guardado como miniatura) y un **lorebook de serie**
+  (`.sflore`) compartido entre varias historias.
 - **Lorebook** (entradas que solo entran al prompt cuando se mencionan),
   **Nota del autor**, reescritura de una seleccion con clic derecho,
   **buscar y reemplazar** (en el capitulo y en todo el proyecto), modo
@@ -65,6 +75,16 @@ correspondiente mas abajo.
   en la PC; se conecta escaneando un QR. Ver la guía de usuario.
 
 ## Historial de cambios
+
+**Revisión y lorebook (2026-10-21, F21-F26):**
+- **Comentarios del editor** sobre un capítulo, con notas enlazadas al pasaje.
+- **Detectar personajes**: nombres nuevos de un capítulo como entradas del lorebook, con una
+  descripción opcional escrita por el modelo.
+- **Escenas** (`### Nombre [POV: X] [archivada]`) y **tramos privados** que no van al modelo ni,
+  si están archivados, a la exportación.
+- **Alias, relaciones y menciones** en cada entrada del lorebook.
+- **Visualizar**: un retrato de la entrada con PixelFlow, como miniatura.
+- **Lorebook de serie** (`.sflore`) compartido entre proyectos.
 
 **Herramientas de la historia (2026-10-18, F17-F20):**
 - **Lorebook con cambios por capítulo:** una entrada puede tener versiones "desde el capítulo N", y el
@@ -548,7 +568,7 @@ python -m pytest -q
 ruff check app tests
 ```
 
-Resultado el 2026-10-17: **429 passed, 4 skipped, 21 subtests** (los 4
+Resultado el 2026-10-22: **492 passed, 4 skipped, 21 subtests** (los 4
 saltados son la prueba opcional con un modelo real); corre la suite tú
 mismo antes de confiar en este número. `scripts\run_coverage.ps1` genera el
 reporte de cobertura (usa `.venv`). Las pruebas

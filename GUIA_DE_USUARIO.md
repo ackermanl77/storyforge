@@ -24,6 +24,8 @@ rendimiento/GPU, limitaciones) y [docs/](docs/PROJECT_STATUS.md)
    - [Versiones anteriores](#versiones-anteriores)
    - [Expandir con IA / Importar desde archivo](#expandir-con-ia--importar-desde-archivo)
    - [Reducir repetición / Reporte de repetición](#reducir-repetición--reporte-de-repetición)
+   - [Comentarios del editor](#comentarios-del-editor)
+   - [Escenas y tramos privados](#escenas-y-tramos-privados)
 5. [Guardar, abrir y exportar](#guardar-abrir-y-exportar)
 6. [Autoguardado y recuperación](#autoguardado-y-recuperación)
    - [Usar StoryForge desde el celular](#usar-storyforge-desde-el-celular)
@@ -186,6 +188,42 @@ secreto que se revela. En el cuadro "Cambios" escribe una línea
 y los siguientes se usa ese texto en lugar del de arriba. Puede haber varios
 cambios, uno por capítulo. Las palabras clave son las mismas.
 
+**Alias y relaciones**: en **Alias** van otros nombres de la entrada
+("la Reina, Su Majestad"), separados por coma; cuentan como palabras clave.
+En **Relaciones**, una por línea, `tipo: otra entrada` (o `tipo -> otra
+entrada`): "hermana: Tomás", "facción -> Los Lobos". Las relaciones van al
+prompt junto con el texto de la entrada.
+
+**Menciones** muestra en qué capítulos aparece la entrada (por su nombre,
+palabras clave o alias) y cuántas veces.
+
+**Visualizar** dibuja la entrada con un **PixelFlow** local (la app de
+imágenes por nodos) y guarda la imagen como miniatura de la entrada:
+
+1. Abre PixelFlow y guarda en él un flujo que genere una imagen (por ejemplo
+   el ejemplo de texto a imagen).
+2. En StoryForge, escribe el texto de la entrada (es lo que se dibuja) y
+   pulsa **Visualizar**.
+3. Elige el flujo (se recuerda el último). StoryForge reemplaza su prompt por
+   la descripción de la entrada, lo ejecuta y espera la imagen.
+
+Todo queda en tu PC. StoryForge busca PixelFlow en `http://127.0.0.1:8288`;
+otra dirección va en `settings.json`, como `"pixelflow": {"url": "..."}`.
+
+**Detectar personajes…** (arriba de la pestaña) busca en el capítulo
+seleccionado nombres propios que se repiten y que ninguna entrada reconoce
+todavía. Marca los que quieras y pulsa **Crear entradas**; con "Escribir una
+descripción breve de cada uno con el modelo", el modelo escribe un primer
+texto para cada una a partir del capítulo.
+
+**Lorebook de serie…** comparte entradas entre varias historias (una saga):
+elige o crea un archivo `.sflore` y marca **Compartida en la serie** en cada
+entrada que deba valer para todos los libros. Esas entradas se guardan en el
+archivo de la serie, no en el proyecto, y cualquier proyecto vinculado al
+mismo archivo las usa. Si una entrada propia tiene el mismo nombre que una de
+la serie, gana la propia. **Desvincular** deja de usar la serie (el archivo
+queda como está).
+
 ### Pestaña "Notas"
 
 Apuntes del proyecto: ideas, reglas propias de tu mundo, lo que no quieres
@@ -281,6 +319,9 @@ deshabilitados se saltan).
   venía después se descarta, tras preguntarte). El cambio se guarda en el
   historial de versiones. Tarda alrededor de un segundo con el modelo en la
   GPU.
+- **Comentarios del editor**, **Escenas ▾**, **Nueva escena** y **Marcar
+  como privado**: ver [Comentarios del editor](#comentarios-del-editor) y
+  [Escenas y tramos privados](#escenas-y-tramos-privados).
 - **Más herramientas**: Reducir repetición, Reporte de repetición, Buscar y
   reemplazar y Eliminar capítulo.
 - La lista de la izquierda muestra palabras escritas / objetivo de cada
@@ -671,6 +712,46 @@ resultado, un sinónimo ocasionalmente no encaja gramaticalmente con el
 tiempo verbal o la función de la palabra en esa oración específica.
 
 ---
+
+### Comentarios del editor
+
+**Comentarios del editor** (en las herramientas del capítulo) le pide al
+modelo una lectura crítica del capítulo, como la de un editor: notas
+concretas sobre ritmo, claridad, diálogo, voz, continuidad (contra el
+plot, los personajes, el setting y el lorebook), descripción y estructura,
+las más importantes primero. Cada nota cita el pasaje al que se refiere;
+**Ir al pasaje** lo selecciona en el texto. El modelo no cambia nada: las
+notas son para que decidas tú (por ejemplo, refinar ese pasaje con clic
+derecho). Si el modelo no citó el texto tal cual, se avisa que no se
+encontró. Los tramos privados y las escenas archivadas no se mandan.
+
+### Escenas y tramos privados
+
+Un capítulo puede dividirse en **escenas** con una línea de encabezado en el
+propio texto:
+
+```
+### La huida [POV: Ana]
+### El sótano [archivada]
+```
+
+- **Nueva escena** inserta ese encabezado al principio de la línea del cursor (pide el nombre y,
+  opcional, el punto de vista). **Escenas ▾** lista las escenas del capítulo
+  y salta a la elegida.
+- `[POV: nombre]` dice desde quién se narra la escena.
+- `[archivada]` aparta la escena: queda en el capítulo, pero no va al modelo
+  ni a la exportación.
+- Al exportar, cada encabezado se convierte en un separador `* * *` (el del
+  principio del capítulo se quita).
+
+Un **tramo privado** (notas, un borrador, algo que el modelo no debe ver)
+va entre `[[privado]]` y `[[/privado]]`: selecciona el texto y pulsa
+**Marcar como privado**. Nunca va al modelo (ni al generar, ni en los
+resúmenes, ni en la búsqueda de pasajes anteriores). Al exportar se
+conserva el texto y se quitan las marcas.
+
+Refinar un capítulo entero con tramos privados o escenas archivadas no se
+permite (los perdería): refina una selección, o quítalos antes.
 
 ## Guardar, abrir y exportar
 
