@@ -20,12 +20,13 @@ import os
 import platform
 import threading
 import time
+import webbrowser
 from tkinter import filedialog, messagebox
 from typing import Dict, Optional
 
 import customtkinter as ctk
 
-from . import __version__
+from . import __version__, update_check
 from . import strings_es as S
 from .error_text import describe_exception
 from .engine import (
@@ -286,6 +287,14 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
             self.after(0, lambda: self._report_unexpected_error(exc_type, exc, tb, S.EN_SEGUNDO_PLANO))
         except Exception:  # noqa: BLE001 - la ventana ya no existe
             logger.error("Error inesperado en segundo plano", exc_info=(exc_type, exc, tb))
+
+    def show_update(self, info) -> None:
+        """Hay una versión nueva (app/update_check.py; run() busca una vez al arrancar)."""
+        notas = f"\n\n{info.notes}" if info.notes else ""
+        if messagebox.askyesno(S.ACTUALIZACION_TITULO,
+                               S.ACTUALIZACION_TEXTO.format(nueva=info.version, actual=__version__, notas=notas),
+                               parent=self):
+            webbrowser.open(info.url)
 
     def _open_log_folder(self) -> None:
         folder = user_data_dir()
@@ -779,6 +788,8 @@ def run() -> None:
     app = StoryForgeApp()
     # Errores no capturados en hilos de trabajo: se registran y se muestran.
     threading.excepthook = app._thread_excepthook
+    # No hace nada hasta que app/update_check.py tenga un UPDATE_FEED_URL.
+    update_check.check_in_background(__version__, lambda info: app.after(0, app.show_update, info))
     app.mainloop()
 
 

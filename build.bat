@@ -77,6 +77,9 @@ if errorlevel 1 goto :fail
 
 echo.
 echo [5/7] Empaquetando con PyInstaller...
+REM THIRD_PARTY_NOTICES.md: las licencias de lo que se empaqueta (el .spec lo incluye).
+%PY% scripts\third_party_notices.py
+if errorlevel 1 goto :fail
 %PY% -m PyInstaller --noconfirm --clean storyforge.spec
 if errorlevel 1 goto :fail
 REM Prueba del .exe recien hecho (app/selftest.py): interfaz, llama.cpp/CUDA,

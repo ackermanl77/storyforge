@@ -981,3 +981,6 @@ COMPARTIDA_EN_LA_SERIE = "Compartida en la serie"
 # UI1: los ajustes finos de carga, plegados en la pestaña Modelo.
 AVANZADO_MOSTRAR = "▸ Avanzado: rendimiento y formato de chat"
 AVANZADO_OCULTAR = "▾ Avanzado: rendimiento y formato de chat"
+# Aviso de versión nueva (app/update_check.py).
+ACTUALIZACION_TITULO = "Actualización disponible"
+ACTUALIZACION_TEXTO = "Ya está disponible StoryForge {nueva} (tienes la {actual}).{notas}\n\n¿Abrir la página de descarga?"

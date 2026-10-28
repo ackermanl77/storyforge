@@ -186,3 +186,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${{ github.ref_name }}" artifacts/*.zip artifacts/*-setup.exe --repo "${{ github.repository }}" --title "StoryForge ${{ github.ref_name }}" --generate-notes
+
+  audit:
+    # Known vulnerabilities in the pinned/required Python packages (OSV / PyPI advisory data).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+      - name: pip-audit
+        run: |
+          # PYSEC-2026-2447 (diskcache, pickle in its cache files) has no fixed release; diskcache
+          # only arrives through llama-cpp-python, and StoryForge never uses its disk cache.
+          python -m pip install pip-audit==2.10.1
+          python -m pip_audit -r requirements.txt --progress-spinner off --ignore-vuln PYSEC-2026-2447

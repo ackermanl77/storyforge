@@ -8,7 +8,8 @@ from PyInstaller.utils.hooks import collect_all
 
 block_cipher = None
 
-datas = []
+# The license and third-party notices travel with every build (scripts/third_party_notices.py).
+datas = [("LICENSE", "."), ("THIRD_PARTY_NOTICES.md", ".")]
 binaries = []
 hiddenimports = []
 

@@ -63,6 +63,8 @@ Type: filesandordirs; Name: "{app}\_internal"
 
 [Files]
 Source: "{#AppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\THIRD_PARTY_NOTICES.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\models\README.txt"; DestDir: "{app}\models"; Flags: ignoreversion
 
 [Icons]
