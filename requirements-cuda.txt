@@ -1,7 +1,7 @@
 # DLLs de runtime de CUDA 13 que necesita el wheel cu130 de llama-cpp-python
 # (ver README > Rendimiento / GPU). Solo para la variante CUDA del build.
 nvidia-cuda-runtime==13.4.92
-nvidia-cublas==13.8.0.4
+nvidia-cublas==13.8.1.7
 # Dependencia de nvidia-cublas (pip la instala igual); fijada para que el build
 # sea reproducible. Ninguna DLL bundleada la importa, asi que el spec no la copia.
 nvidia-cuda-nvrtc==13.4.92
