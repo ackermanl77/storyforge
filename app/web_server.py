@@ -36,6 +36,7 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
+from functools import wraps
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -100,6 +101,15 @@ class ApiError(Exception):
         super().__init__(message)
         self.status = status
         self.message = message
+
+
+def _idle_mutation(fn):
+    @wraps(fn)
+    def wrapped(self, *args, **kwargs):
+        with self._lock:
+            self._require_idle()
+            return fn(self, *args, **kwargs)
+    return wrapped
 
 
 def models_dirs() -> List[str]:
@@ -260,6 +270,7 @@ class StoryForgeService:
                     models.append({"id": entry.path, "nombre": entry.label})
         return models
 
+    @_idle_mutation
     def load_model(self, model_id: str) -> Dict[str, Any]:
         self._require_idle()
         known = {m["id"] for m in self.list_models()}
@@ -285,6 +296,7 @@ class StoryForgeService:
 
         return self._start("load", S.WEB_TAREA_CARGAR_MODELO.format(name=name), work)
 
+    @_idle_mutation
     def unload_model(self) -> None:
         self._require_idle()
         self.engine.unload()
@@ -303,6 +315,7 @@ class StoryForgeService:
                           "palabras": project.total_words(), "modificado": path.stat().st_mtime})
         return items
 
+    @_idle_mutation
     def create_project(self, name: str) -> Dict[str, Any]:
         self._require_idle()
         name = (name or "").strip()
@@ -321,6 +334,7 @@ class StoryForgeService:
             self._save()
         return self.project_view()
 
+    @_idle_mutation
     def import_manuscript(self, filename: str, data_b64: str) -> Dict[str, Any]:
         """Importar manuscrito (F16): crea un proyecto nuevo con los capitulos del archivo y lo abre."""
         import base64
@@ -356,6 +370,7 @@ class StoryForgeService:
             view["mensaje"] += " " + S.MANUSCRITO_SECCIONES_UNIDAS.format(maximum=MAX_CHAPTERS, merged=manuscript.merged)
         return view
 
+    @_idle_mutation
     def open_project(self, filename: str) -> Dict[str, Any]:
         self._require_idle()
         path = self._project_path(filename)
@@ -407,6 +422,7 @@ class StoryForgeService:
             ],
         }
 
+    @_idle_mutation
     def update_project(self, data: Dict[str, Any]) -> Dict[str, Any]:
         self._require_idle()
         project = self._require_project()
@@ -439,6 +455,7 @@ class StoryForgeService:
                 "nota_autor": ch.author_note, "prompt": ch.custom_prompt, "resumen": ch.summary,
                 "resumen_desactualizado": ch.summary_is_stale(), "versiones": len(ch.history)}
 
+    @_idle_mutation
     def update_chapter(self, index: int, data: Dict[str, Any]) -> Dict[str, Any]:
         self._require_idle()
         ch = self._chapter(index)
@@ -473,6 +490,7 @@ class StoryForgeService:
             self._save()
         return self.chapter_view(index)
 
+    @_idle_mutation
     def add_chapter(self, data: Dict[str, Any]) -> Dict[str, Any]:
         self._require_idle()
         project = self._require_project()
@@ -486,6 +504,7 @@ class StoryForgeService:
             self.update_chapter(index, {"objetivo": data["objetivo"]})
         return self.chapter_view(index)
 
+    @_idle_mutation
     def delete_chapter(self, index: int) -> None:
         self._require_idle()
         self._chapter(index)
@@ -567,6 +586,7 @@ class StoryForgeService:
             raise ApiError(HTTPStatus.BAD_REQUEST, "\n".join(errors))
         return project
 
+    @_idle_mutation
     def start_outline(self, num_chapters: Any) -> Dict[str, Any]:
         self._require_idle()
         project = self._check_ready()
@@ -591,6 +611,7 @@ class StoryForgeService:
 
         return self._start("outline", S.WEB_TAREA_ESQUEMA, work)
 
+    @_idle_mutation
     def start_chapter(self, index: int, resume: bool = False) -> Dict[str, Any]:
         """Generar (desde cero) o Continuar un capitulo, con los mismos pasos que
         ui_chapter_editor._start_generation; los resumenes desactualizados de los
@@ -659,6 +680,7 @@ class StoryForgeService:
         return self._start("chapter", S.WEB_TAREA_CAPITULO.format(number=index + 1), work, chapter=index)
 
     # ---------------- generador de historias (/generador, app/generator.py) ----------------
+    @_idle_mutation
     def start_story(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Escribe una historia del formulario del generador con el motor de los
         capítulos (un proyecto temporal de un capítulo con prompt propio) y la
@@ -720,6 +742,7 @@ class StoryForgeService:
 
         return self._start("story", S.GENERADOR_TAREA, work)
 
+    @_idle_mutation
     def start_story_revision(self, entry_id: str, request: Any) -> Dict[str, Any]:
         """Pedir cambios sobre un resultado del generador: el modelo reescribe la historia según el
         pedido; el resultado es una entrada nueva del historial unida a la original."""
@@ -756,6 +779,7 @@ class StoryForgeService:
 
         return self._start("story", S.GENERADOR_TAREA_REVISION, work)
 
+    @_idle_mutation
     def story_to_project(self, entry_id: str) -> Dict[str, Any]:
         """Convierte un resultado del generador en un proyecto de StoryForge (archivo nuevo en la carpeta
         de proyectos); no cambia el proyecto abierto."""
@@ -773,6 +797,7 @@ class StoryForgeService:
         return {"archivo": filename, "nombre": project.name, "capitulos": len(project.chapters),
                 "mensaje": S.GENERADOR_PROYECTO_CREADO.format(name=project.name)}
 
+    @_idle_mutation
     def start_summary(self, index: int) -> Dict[str, Any]:
         """Regenerar resumen de un capitulo."""
         self._require_idle()
@@ -1092,7 +1117,12 @@ class _Handler(BaseHTTPRequestHandler):
         for method, pattern, fn in ROUTES:
             match = pattern.match(path)
             if match and method == self.command:
-                self._json(HTTPStatus.OK, fn(self.server.service, match, body, query))
+                service = self.server.service
+                with service._lock:
+                    if self.command in ("POST", "PUT", "DELETE") and path != "/api/detener":
+                        service._require_idle()
+                    result = fn(service, match, body, query)
+                self._json(HTTPStatus.OK, result)
                 return
         raise ApiError(HTTPStatus.NOT_FOUND, S.WEB_NO_ENCONTRADO)
 

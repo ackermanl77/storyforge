@@ -157,6 +157,61 @@ class SeriesTests(unittest.TestCase):
             self.assertEqual(reopened.all_lore_entries(), [own])  # the project's own entry wins
             self.assertNotIn("series_entries", json.loads(reopened.to_json()))
 
+    def test_a_loaded_project_cannot_write_its_untrusted_series_path(self):
+        with tempfile.TemporaryDirectory() as folder:
+            series = Path(folder) / "shared.sflore"
+            original = json.dumps({
+                "format": "storyforge_series_lore",
+                "format_version": 1,
+                "entries": [{"name": "Mara", "keywords": "Mara", "text": "Original."}],
+            })
+            series.write_text(original, encoding="utf-8")
+            project_path = Path(folder) / "untrusted.json"
+            project_path.write_text(json.dumps({"name": "Imported", "series_path": str(series)}), encoding="utf-8")
+
+            project = Project.load(project_path)
+            self.assertEqual(project.series_path, str(series))
+            self.assertFalse(project._series_write_authorized)
+            project.series_entries[0].text = "Changed by project data."
+            project.save(project_path)
+
+            self.assertEqual(series.read_text(encoding="utf-8"), original)
+            project.authorize_series_writes()
+            project.save(project_path)
+            self.assertEqual(
+                json.loads(series.read_text(encoding="utf-8"))["entries"][0]["text"],
+                "Changed by project data.",
+            )
+
+    def test_project_and_series_save_roll_back_together_on_second_write_failure(self):
+        from unittest import mock
+        from app import project as project_module
+
+        with tempfile.TemporaryDirectory() as folder:
+            series = Path(folder) / "shared.sflore"
+            project_path = Path(folder) / "book.json"
+            project = Project(name="Original")
+            project.link_series(series)
+            entry = project.add_lore_entry(name="Mara", text="Original.")
+            project.set_entry_shared(entry, True)
+            project.save(project_path)
+            original_project = project_path.read_bytes()
+            original_series = series.read_bytes()
+            project.name = "Changed"
+            project.series_entries[0].text = "Changed."
+            save_series = project_module.save_series_lore
+
+            def fail_after_write(path, entries):
+                save_series(path, entries)
+                raise OSError("injected second-write failure")
+
+            with mock.patch.object(project_module, "save_series_lore", side_effect=fail_after_write):
+                with self.assertRaisesRegex(OSError, "injected second-write failure"):
+                    project.save(project_path)
+
+            self.assertEqual(project_path.read_bytes(), original_project)
+            self.assertEqual(series.read_bytes(), original_series)
+
 
 class _Response(io.BytesIO):
     def __enter__(self):

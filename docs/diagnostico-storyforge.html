@@ -1,0 +1,269 @@
+<title>Diagnóstico StoryForge</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: una columna de informe (max 980px); KPIs en rejilla de 4, después arquitectura, gráfico, matriz y listas. */
+:root {
+  --bg: #f6f6fa;
+  --surface: #ffffff;
+  --fg: #1c1d2b;
+  --muted: #5d5f75;
+  --line: #e0e0ea;
+  --accent: #3f3fa8;        /* índigo del icono */
+  --accent-soft: #e7e7f7;
+  --ember: #b5651d;         /* oro de la pluma */
+  --ok: #1f7a4d;   --ok-bg: #e2f3ea;
+  --warn: #8a5a00; --warn-bg: #fbf0d6;
+  --bad: #b3261e;  --bad-bg: #fbe4e2;
+  --info: #4a4c66; --info-bg: #ececf3;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #13131c; --surface: #1c1c29; --fg: #e8e8f2; --muted: #a0a2b8; --line: #2e2f42;
+  --accent: #9d9df0; --accent-soft: #272848; --ember: #e3a35a;
+  --ok: #6fd3a0; --ok-bg: #173327; --warn: #f0c060; --warn-bg: #362b12;
+  --bad: #ff8f86; --bad-bg: #3d1a18; --info: #b9bbd2; --info-bg: #26273a;
+  color-scheme: dark;
+} }
+:root[data-theme="dark"] {
+  --bg: #13131c; --surface: #1c1c29; --fg: #e8e8f2; --muted: #a0a2b8; --line: #2e2f42;
+  --accent: #9d9df0; --accent-soft: #272848; --ember: #e3a35a;
+  --ok: #6fd3a0; --ok-bg: #173327; --warn: #f0c060; --warn-bg: #362b12;
+  --bad: #ff8f86; --bad-bg: #3d1a18; --info: #b9bbd2; --info-bg: #26273a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--fg); font: 15px/1.55 var(--f-body);
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 40px 56px;
+}
+main { max-width: 980px; margin: 0 auto; display: flex; flex-direction: column; gap: 44px; }
+h1, h2 { font-family: var(--f-display); text-wrap: balance; margin: 0; line-height: 1.15; }
+h1 { font-size: clamp(2rem, 5vw, 2.8rem); letter-spacing: -0.01em; }
+h2 { font-size: 1.35rem; }
+p { margin: 0; }
+code, .mono { font-family: var(--f-mono); font-size: 0.88em; }
+.eyebrow { font-family: var(--f-mono); font-size: 0.78rem; color: var(--muted); letter-spacing: 0.02em; }
+.lede { color: var(--muted); max-width: 64ch; font-size: 1.05rem; }
+header { display: flex; flex-direction: column; gap: 12px; }
+.sec-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.sec-head .hint { font-size: 0.85rem; color: var(--muted); }
+
+/* KPIs */
+.kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.kpi { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.kpi .val { font-family: var(--f-display); font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.kpi .lbl { font-weight: 600; }
+.kpi .sub { font-size: 0.82rem; color: var(--muted); }
+.kpi.alert { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
+.kpi.alert .val { color: var(--warn); }
+.ring-row { display: flex; align-items: center; gap: 14px; }
+.ring { width: 64px; height: 64px; flex: none; }
+.ring text { fill: var(--muted); font: 9px var(--f-mono); }
+
+/* Arquitectura */
+.arch { display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; gap: 10px; align-items: stretch; }
+.node { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+.node b { display: block; font-family: var(--f-display); font-size: 1.02rem; margin-bottom: 4px; }
+.node p { font-size: 0.85rem; color: var(--muted); }
+.arrow { align-self: center; color: var(--accent); font-size: 1.3rem; }
+.side { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 12px; }
+.node.edge { border-style: dashed; background: transparent; }
+.node.edge .tag { font-family: var(--f-mono); font-size: 0.72rem; color: var(--accent); }
+
+/* Gráfico de barras */
+.bars { display: flex; flex-direction: column; gap: 7px; }
+.bar { display: grid; grid-template-columns: 170px 1fr 52px; gap: 12px; align-items: center; font-size: 0.88rem; }
+.bar .name { font-family: var(--f-mono); font-size: 0.82rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar .track { height: 14px; background: var(--accent-soft); border-radius: 3px; overflow: hidden; }
+.bar .fill { height: 100%; background: var(--accent); border-radius: 3px; }
+.bar.top .fill { background: var(--ember); }
+.bar .n { font-family: var(--f-mono); text-align: right; font-variant-numeric: tabular-nums; }
+.note { margin-top: 14px; font-size: 0.9rem; color: var(--muted); max-width: 70ch; }
+
+/* Matriz */
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 0.9rem; }
+th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 600; }
+td:first-child { font-weight: 600; white-space: nowrap; }
+td:last-child { color: var(--muted); }
+.pill { display: inline-block; font-size: 0.75rem; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.p-ok { background: var(--ok-bg); color: var(--ok); }
+.p-warn { background: var(--warn-bg); color: var(--warn); }
+.p-bad { background: var(--bad-bg); color: var(--bad); }
+.p-info { background: var(--info-bg); color: var(--info); }
+
+/* Listas */
+.two { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: 32px; }
+.fixed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.fixed li { display: grid; grid-template-columns: 20px 1fr; gap: 6px; font-size: 0.92rem; }
+.fixed li::before { content: "✓"; color: var(--ok); font-weight: 700; }
+.fixed .d { display: block; font-family: var(--f-mono); font-size: 0.74rem; color: var(--muted); }
+.issues { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.issue { display: grid; grid-template-columns: 74px 1fr; gap: 12px; align-items: start; padding: 12px 14px; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; }
+.issue b { display: block; }
+.issue p { font-size: 0.87rem; color: var(--muted); margin-top: 2px; }
+.issue .pill { justify-self: start; }
+
+/* Pasos */
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; counter-reset: s; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 36px 1fr; gap: 14px; }
+.steps li::before { content: counter(s); width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); font-family: var(--f-display); font-weight: 700; }
+.steps b { display: block; font-family: var(--f-display); font-size: 1.05rem; }
+.steps p { color: var(--muted); font-size: 0.92rem; max-width: 70ch; }
+footer { font-size: 0.82rem; color: var(--muted); border-top: 1px solid var(--line); padding-top: 16px; }
+
+@media (max-width: 820px) {
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .arch { grid-template-columns: 1fr; }
+  .arrow { transform: rotate(90deg); justify-self: center; }
+  .side { grid-template-columns: 1fr; }
+  .two { grid-template-columns: 1fr; }
+}
+@media (max-width: 480px) {
+  .kpis { grid-template-columns: 1fr; }
+  .bar { grid-template-columns: 120px 1fr 44px; gap: 8px; }
+  .issue { grid-template-columns: 1fr; gap: 6px; }
+}
+</style>
+
+<main>
+  <header>
+    <span class="eyebrow">app/ · requirements.txt · docs/PROJECT_STATUS.md — 2026‑10‑27</span>
+    <h1>Diagnóstico StoryForge</h1>
+    <p class="lede">Estado actual del escritor de novelas local (CustomTkinter + llama.cpp sobre un GGUF): qué funciona, qué solo se probó con dobles, y qué falta para publicar la v0.4.0.</p>
+  </header>
+
+  <section class="kpis" aria-label="Indicadores">
+    <div class="kpi">
+      <div class="ring-row">
+        <svg class="ring" viewBox="0 0 64 64" role="img" aria-label="494 de 496 tests pasan">
+          <circle cx="32" cy="32" r="26" fill="none" stroke="var(--line)" stroke-width="7"/>
+          <circle cx="32" cy="32" r="26" fill="none" stroke="var(--ok)" stroke-width="7" stroke-dasharray="162.7 163.4" transform="rotate(-90 32 32)"/>
+          <circle cx="32" cy="32" r="26" fill="none" stroke="var(--bad)" stroke-width="7" stroke-dasharray="0.7 163.4" stroke-dashoffset="-162.7" transform="rotate(-90 32 32)"/>
+          <text x="32" y="35" text-anchor="middle">99.6%</text>
+        </svg>
+        <div class="val">494 / 496</div>
+      </div>
+      <div class="lbl">Tests pasando</div>
+      <div class="sub">1 fallo · 1 error intermitente · 4 omitidos · 163 s en .venv</div>
+    </div>
+    <div class="kpi">
+      <div class="val">16 952</div>
+      <div class="lbl">Líneas en app/</div>
+      <div class="sub">52 módulos Python + 1 719 en app/web</div>
+    </div>
+    <div class="kpi">
+      <div class="val">86.5%</div>
+      <div class="lbl">Cobertura de líneas</div>
+      <div class="sub">coverage.xml del 14‑oct · ruff sin avisos</div>
+    </div>
+    <div class="kpi alert">
+      <div class="val">6</div>
+      <div class="lbl">Archivos sin commitear</div>
+      <div class="sub">+208 / −11 · 92 commits, master = origin/master</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>Arquitectura</h2><span class="hint">un proceso, un modelo, un candado de ocupado</span></div>
+    <div class="arch">
+      <div class="node"><b>GUI CustomTkinter</b><p><code>gui.py</code> + 15 mixins <code>ui_*.py</code>. Textos en <code>strings_es.py</code>.</p></div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="node"><b>LocalStoryEngine</b><p><code>engine.py</code>, <code>completion.py</code>, <code>prompts.py</code>, <code>chat_format.py</code>; generación por secciones en un hilo.</p></div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="node"><b>llama_cpp.Llama</b><p>GGUF del usuario en <code>models/</code>, CPU o CUDA 13.</p></div>
+    </div>
+    <div class="side">
+      <div class="node edge"><span class="tag">--servidor / --generador</span><b>StoryForgeService</b><p><code>web_server.py</code>: teléfono y navegador sobre el mismo motor.</p></div>
+      <div class="node edge"><span class="tag">B14</span><b>Servidor OpenAI</b><p><code>server_backend.py</code>: LM Studio, Ollama, llama-server en la red.</p></div>
+      <div class="node edge"><span class="tag">F25</span><b>PixelFlow local</b><p><code>visualize.py</code>: retratos del lorebook por HTTP.</p></div>
+    </div>
+    <p class="note">PROJECT_STATUS.md todavía dice que no hay CLI ni servicio de red; las tres entradas punteadas existen y están en uso.</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>Composición del código</h2><span class="hint">top 8 de 52 archivos, por líneas</span></div>
+    <div class="bars">
+      <div class="bar top"><span class="name">prompts.py</span><span class="track"><span class="fill" style="width:100%; display:block"></span></span><span class="n">1 464</span></div>
+      <div class="bar"><span class="name">ui_chapter_editor.py</span><span class="track"><span class="fill" style="width:84%; display:block"></span></span><span class="n">1 230</span></div>
+      <div class="bar"><span class="name">web_server.py</span><span class="track"><span class="fill" style="width:82.7%; display:block"></span></span><span class="n">1 210</span></div>
+      <div class="bar"><span class="name">strings_es.py</span><span class="track"><span class="fill" style="width:66.8%; display:block"></span></span><span class="n">978</span></div>
+      <div class="bar"><span class="name">engine.py</span><span class="track"><span class="fill" style="width:64.3%; display:block"></span></span><span class="n">941</span></div>
+      <div class="bar"><span class="name">project.py</span><span class="track"><span class="fill" style="width:63.4%; display:block"></span></span><span class="n">928</span></div>
+      <div class="bar"><span class="name">gui.py</span><span class="track"><span class="fill" style="width:52.5%; display:block"></span></span><span class="n">768</span></div>
+      <div class="bar"><span class="name">ui_model_tab.py</span><span class="track"><span class="fill" style="width:40.6%; display:block"></span></span><span class="n">594</span></div>
+    </div>
+    <p class="note">No hay un archivo dios: <code>prompts.py</code> es solo 1.2× el segundo, y los tres mayores suman el 23% de app/. Tras el corte de <code>engine.py</code> (R6), el tamaño está repartido; <code>web_server.py</code> es el que más crece con el cambio pendiente.</p>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>Matriz de funcionalidades</h2><span class="hint">implementado vs. verificado de verdad</span></div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Funcionalidad</th><th>Estado</th><th>Detalle</th></tr></thead>
+        <tbody>
+          <tr><td>Esquema y capítulos por secciones</td><td><span class="pill p-warn">Solo con dobles</span></td><td>~900 palabras por sección, reuso de prefijo KV; nada desde P1 corrió contra un GGUF real</td></tr>
+          <tr><td>Exportar docx / EPUB / md / txt</td><td><span class="pill p-ok">Funciona</span></td><td>Escritura atómica; cubierto por tests y por <code>--self-test</code></td></tr>
+          <tr><td>Lorebook, alias y relaciones</td><td><span class="pill p-ok">Funciona</span></td><td>F24: alias como claves, relaciones en el prompt, conteo de menciones</td></tr>
+          <tr><td>Lorebook de serie (.sflore)</td><td><span class="pill p-warn">En curso</span></td><td>Cambio sin commitear: escritura autorizada y reversión de ambos archivos si falla</td></tr>
+          <tr><td>Escenas y texto privado</td><td><span class="pill p-ok">Funciona</span></td><td>F23: <code>ai_text()</code> oculta lo privado al modelo; <code>export_text()</code> lo quita</td></tr>
+          <tr><td>Comentarios del editor</td><td><span class="pill p-ok">Funciona</span></td><td>F21: hasta 5 notas con cita y «Ir al pasaje»</td></tr>
+          <tr><td>Ajustes de historia (POV, diálogo, tono)</td><td><span class="pill p-warn">Parcial</span></td><td>POV funciona; el balance de diálogo apenas mueve al modelo 12B</td></tr>
+          <tr><td>Servidor web (teléfono)</td><td><span class="pill p-warn">En curso</span></td><td>Cambio pendiente: candado de “ocupado” en cada mutación de la API</td></tr>
+          <tr><td>Retratos con PixelFlow</td><td><span class="pill p-info">Sin probar real</span></td><td>F25: probado solo contra PixelFlow en modo prueba</td></tr>
+          <tr><td>Instalador y firma de código</td><td><span class="pill p-info">Sin probar real</span></td><td>Firma nunca ejecutada de punta a punta; .exe local del 19‑oct, anterior a F21‑F26</td></tr>
+          <tr><td>Release por tag v0.4.0</td><td><span class="pill p-bad">Bloqueado</span></td><td>Cuota de artifacts de GitHub agotada hasta el 1‑nov</td></tr>
+          <tr><td>Prompt‑lookup decoding</td><td><span class="pill p-info">Descartado</span></td><td>Medido: −5% a −12% de tokens/s en RTX 5080</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="two">
+    <div>
+      <div class="sec-head"><h2>Resuelto recientemente</h2></div>
+      <ul class="fixed">
+        <li><span>Comentarios del editor, detección de personajes, escenas, relaciones, retratos y serie<span class="d">F21–F26 · 22‑oct</span></span></li>
+        <li><span><code>engine.py</code> dividido en núcleo de completado, carga de modelo, tipos y CUDA<span class="d">R6 · 21‑oct</span></span></li>
+        <li><span><code>StoryForge.exe --self-test</code> revisa GUI, llama.cpp, NLTK, exportes y web tras cada build<span class="d">19‑oct</span></span></li>
+        <li><span>Bundle más pequeño: omw‑1.4 fuera, manifiesto UTF‑8 + PerMonitorV2<span class="d">K5 · 18‑oct</span></span></li>
+        <li><span>Recuperación de pasajes previos (BM25 o embeddings GGUF) en los prompts<span class="d">B16 · 18‑oct</span></span></li>
+        <li><span>Importar un manuscrito .docx/.md/.txt como proyecto<span class="d">F16 · 18‑oct</span></span></li>
+      </ul>
+    </div>
+    <div>
+      <div class="sec-head"><h2>Problemas abiertos</h2></div>
+      <ul class="issues">
+        <li class="issue"><span class="pill p-bad">Alto</span><div><b>El cambio pendiente rompe un test</b><p><code>project.py:807</code> trae un mensaje en línea; <code>test_backend_messages_come_from_strings_es</code> exige moverlo a <code>strings_es.py</code>.</p></div></li>
+        <li class="issue"><span class="pill p-bad">Alto</span><div><b>Sin prueba contra un modelo real desde P1</b><p>Plantillas de chat, muestreo y flash_attn solo se ejercen con dobles de <code>Llama</code>.</p></div></li>
+        <li class="issue"><span class="pill p-warn">Medio</span><div><b>La GUI nunca se abrió en una ventana real</b><p>Diseño, vista de diff, modo foco y tema claro solo se construyeron sin pantalla.</p></div></li>
+        <li class="issue"><span class="pill p-warn">Medio</span><div><b>Test de GUI intermitente</b><p><code>test_complete_missing_chapters</code> da error en la suite completa y pasa aislado.</p></div></li>
+        <li class="issue"><span class="pill p-warn">Medio</span><div><b>PROJECT_STATUS.md desactualizado</b><p>Dice “sin CLI ni servicio de red”, 492 tests y que no hay build en <code>StoryForge-App\</code>; los tres datos cambiaron.</p></div></li>
+        <li class="issue"><span class="pill p-info">Bajo</span><div><b>Mixins sin encapsulación</b><p>Las pestañas comparten <code>self</code> y se llaman entre sí; el corte es por archivo, no por componente.</p></div></li>
+        <li class="issue"><span class="pill p-info">Bajo</span><div><b>pytest fuera de .venv da 10 fallos falsos</b><p>El Python 3.14 global no tiene <code>python-docx</code> ni NLTK; siempre correr en <code>.venv</code>.</p></div></li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="sec-head"><h2>Próximos pasos recomendados</h2><span class="hint">en orden</span></div>
+    <ol class="steps">
+      <li><div><b>Cerrar el cambio pendiente</b><p>Mover el mensaje de <code>project.py:807</code> a <code>strings_es.py</code>, volver a correr la suite y commitear el endurecimiento de la serie y del servidor web.</p></div></li>
+      <li><div><b>Correr <code>test_real_model.py</code> con un GGUF pequeño</b><p>Con <code>STORYFORGE_TEST_MODEL</code> y la rueda CUDA. Es la única forma de saber si las plantillas y el muestreo funcionan fuera de los dobles.</p></div></li>
+      <li><div><b>Reconstruir y abrir el .exe</b><p><code>build.bat</code> y una sesión real en la ventana: el build actual es del 19‑oct y no incluye F21‑F26. Aprovechar para revisar la GUI a ojo.</p></div></li>
+      <li><div><b>Publicar v0.4.0 después del 1‑nov</b><p>Cuando se reinicie la cuota de artifacts, empujar el tag y vigilar el primer release automático.</p></div></li>
+      <li><div><b>Poner al día PROJECT_STATUS.md y estabilizar el test de GUI</b><p>Arquitectura con servidor y backends externos, nuevo conteo de tests, y aislar el estado que comparte <code>test_gui_p2</code>.</p></div></li>
+    </ol>
+  </section>
+
+  <footer>Fuente: docs/PROJECT_STATUS.md, <code>.venv\Scripts\python -m pytest -q</code> (494 passed, 1 failed, 1 error, 4 skipped), <code>ruff check app tests</code>, coverage.xml, conteo de líneas de app/*.py y <code>git status</code> — snapshot local del 27‑oct‑2026.</footer>
+</main>

@@ -820,6 +820,7 @@ corriendo en tu PC (no hace falta instalar nada en el celular).
 
 Cosas a tener en cuenta:
 
+- El servidor usa **HTTP sin cifrar**: alguien que observe la red podría ver la clave del enlace, el texto y otros datos. Úsalo solo en una Wi-Fi privada y de confianza; no uses una red pública ni abras el puerto a Internet. Para acceder desde fuera de la LAN hace falta decidir un mecanismo seguro externo (por ejemplo, una VPN privada o HTTPS con un certificado confiable); StoryForge no configura TLS ni administra certificados.
 - El enlace lleva una **clave de acceso**: quien lo tenga y esté en tu red
   puede usar StoryForge. No lo compartas. Sigue sirviendo después de
   reiniciar el servidor.

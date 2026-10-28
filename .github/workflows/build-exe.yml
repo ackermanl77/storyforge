@@ -110,6 +110,25 @@ jobs:
       - name: Build with PyInstaller
         run: pyinstaller --noconfirm --clean storyforge.spec
 
+      - name: Smoke-test packaged executable
+        shell: pwsh
+        run: |
+          $report = Join-Path $env:TEMP "StoryForge-selftest.txt"
+          Remove-Item -LiteralPath $report -Force -ErrorAction SilentlyContinue
+          $exe = Join-Path $PWD "dist\StoryForge\StoryForge.exe"
+          $process = Start-Process -FilePath $exe -ArgumentList "--self-test" -Wait -PassThru
+          if ($process.ExitCode -ne 0) {
+            if (Test-Path -LiteralPath $report) { Get-Content -LiteralPath $report }
+            throw "Packaged self-test failed with exit code $($process.ExitCode)."
+          }
+          if (-not (Test-Path -LiteralPath $report)) {
+            throw "Packaged self-test exited without writing its report."
+          }
+          if (-not (Select-String -Path $report -SimpleMatch "RESULT: PASS" -Quiet)) {
+            Get-Content -LiteralPath $report
+            throw "Packaged self-test did not report PASS."
+          }
+
       - name: Package zip
         shell: pwsh
         run: |

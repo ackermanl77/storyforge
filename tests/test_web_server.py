@@ -181,6 +181,66 @@ class TestService(unittest.TestCase):
         self.assertEqual(self.engine.summarized[0], "Earlier chapter text.")
         self.assertEqual(project.chapters[0].summary, "summary of 3 words")
 
+    def test_job_admission_and_project_mutation_share_one_lock(self):
+        self.service.create_project("X")
+        self.service.add_chapter({})
+        self.engine.release.clear()
+        original_require_idle = self.service._require_idle
+        mutation_checked = threading.Event()
+        allow_mutation = threading.Event()
+        generation_checked = threading.Event()
+        mutation_done = threading.Event()
+        generation_done = threading.Event()
+        errors = []
+
+        def gate_idle_check():
+            if threading.current_thread().name == "project-edit" and not mutation_checked.is_set():
+                original_require_idle()
+                mutation_checked.set()
+                if not allow_mutation.wait(5):
+                    errors.append(AssertionError("the mutation barrier timed out"))
+                return
+            if threading.current_thread().name == "job-start":
+                generation_checked.set()
+            original_require_idle()
+
+        def edit_project():
+            try:
+                self.service.update_project({"plot": "Changed before generation."})
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+            finally:
+                mutation_done.set()
+
+        def start_generation():
+            try:
+                self.service.start_chapter(0)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+            finally:
+                generation_done.set()
+
+        with mock.patch.object(self.service, "_require_idle", side_effect=gate_idle_check):
+            mutation = threading.Thread(target=edit_project, name="project-edit")
+            mutation.start()
+            self.assertTrue(mutation_checked.wait(5))
+            generation = threading.Thread(target=start_generation, name="job-start")
+            generation.start()
+            self.assertFalse(generation_checked.wait(0.1))
+            self.assertIsNone(self.service.job)
+
+            allow_mutation.set()
+            self.assertTrue(mutation_done.wait(5))
+            self.assertTrue(generation_done.wait(5))
+            mutation.join(5)
+            generation.join(5)
+
+        self.assertEqual(errors, [])
+        self.assertEqual(self.saved().plot, "Changed before generation.")
+        self.assertEqual(self.service.job_snapshot()["estado"], "running")
+        self.engine.release.set()
+        self.assertEqual(wait_for_job(self.service)["estado"], "ok")
+
     def test_continue_resumes_from_the_saved_text(self):
         self.service.create_project("X")
         self.service.add_chapter({})
@@ -296,6 +356,10 @@ class TestHttp(unittest.TestCase):
         for path in ("/app.js", "/style.css", "/manifest.webmanifest", "/icon.svg", "/conectar"):
             status, _ = self.request(conn, "GET", path, token="")
             self.assertEqual(status, 200, path)
+        status, body = self.request(conn, "GET", "/conectar", token="")
+        self.assertEqual(status, 200)
+        self.assertIn(b"HTTP sin cifrar", body)
+        self.assertIn(b"no expongas el puerto a Internet", body)
         status, _ = self.request(conn, "GET", "/../app/web_server.py", token="")
         self.assertEqual(status, 404)
         # The connect page's data (with the key) answers the PC itself only.
@@ -322,6 +386,10 @@ class TestMisc(unittest.TestCase):
         self.assertEqual(args.puerto, 9000)
         self.assertTrue(args.sin_navegador)
         self.assertFalse(_parse_args([]).servidor)
+
+    def test_phone_server_startup_message_warns_about_plain_http(self):
+        self.assertIn("HTTP no cifra el tráfico", web_server.S.WEB_SERVIDOR_LISTO)
+        self.assertIn("No abras el puerto a Internet", web_server.S.WEB_SERVIDOR_LISTO)
 
     def test_models_are_also_found_next_to_the_last_loaded_model_and_in_the_models_option(self):
         with tempfile.TemporaryDirectory() as tmp:

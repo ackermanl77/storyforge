@@ -15,7 +15,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .fileutil import atomic_write_text, is_under
+from .fileutil import atomic_write_bytes, atomic_write_text, is_under
 from .lore_tools import clean_relations
 from .sampling import SamplingConfig
 
@@ -551,6 +551,7 @@ class Project:
     # se guarda en el proyecto; las entradas, en ese archivo (se cargan al abrir).
     series_path: str = ""
     series_entries: List[LoreEntry] = field(default_factory=list)
+    _series_write_authorized: bool = field(default=False, init=False, repr=False, compare=False)
 
     def all_lore_entries(self) -> List[LoreEntry]:
         """Las entradas que valen para esta historia: las propias y las de la serie
@@ -572,16 +573,25 @@ class Project:
     def link_series(self, path: str | Path) -> None:
         """Vincula el lorebook de serie `path` (lo crea vacio si no existe)."""
         path = Path(path)
-        self.series_entries = load_series_lore(path) if path.exists() else []
+        if path.suffix.lower() != ".sflore":
+            raise ValueError(S.NO_ES_UN_LOREBOOK_DE_SERIE)
+        entries = load_series_lore(path) if path.exists() else []
+        if not path.exists():
+            save_series_lore(path, entries)
+        self.series_entries = entries
         for entry in self.series_entries:
             entry.shared = True
         self.series_path = str(path)
-        if not path.exists():
-            save_series_lore(path, self.series_entries)
+        self._series_write_authorized = True
 
     def unlink_series(self) -> None:
         self.series_path = ""
         self.series_entries = []
+        self._series_write_authorized = False
+
+    def authorize_series_writes(self) -> None:
+        """Authorize writes to a linked file after explicit user confirmation."""
+        self._series_write_authorized = bool(self.series_path)
 
     # ---------------- validaciones ----------------
     def plot_words(self) -> int:
@@ -759,11 +769,43 @@ class Project:
         temporal en la misma carpeta y se reemplaza el destino, con
         reintentos si OneDrive/el antivirus lo tiene tomado un instante. Antes
         de reemplazarlo, la version anterior se conserva como `<archivo>.bak`.
+        Los proyectos cargados no autorizan escrituras al lorebook externo de
+        serie hasta que la interfaz confirme el vinculo; los dos archivos se
+        revierten si falla la segunda escritura.
         """
-        save_json_text(path, self.to_json())
-        if self.series_path:
+        if not self.series_path or not self._series_write_authorized:
+            save_json_text(path, self.to_json())
+            return
+
+        project_path = Path(path)
+        series_path = Path(self.series_path)
+        if os.path.normcase(os.path.realpath(project_path)) == os.path.normcase(os.path.realpath(series_path)):
+            raise ValueError(S.NO_ES_UN_LOREBOOK_DE_SERIE)
+
+        destinations = (project_path, series_path)
+        previous = {
+            destination: destination.read_bytes() if destination.exists() else None
+            for destination in destinations
+        }
+        save_json_text(project_path, self.to_json())
+        try:
             # El lorebook de la serie se guarda junto con el proyecto (F26).
-            save_series_lore(self.series_path, self.series_entries)
+            save_series_lore(series_path, self.series_entries)
+        except BaseException as exc:
+            rollback_errors = []
+            for destination in reversed(destinations):
+                try:
+                    old_data = previous[destination]
+                    if old_data is None:
+                        destination.unlink(missing_ok=True)
+                    else:
+                        atomic_write_bytes(destination, old_data)
+                except OSError as rollback_exc:
+                    rollback_errors.append((destination, rollback_exc))
+            if rollback_errors:
+                details = "; ".join(f"{name}: {error}" for name, error in rollback_errors)
+                raise OSError(S.NO_SE_PUDO_REVERTIR_SERIE.format(details=details)) from exc
+            raise
 
     @staticmethod
     def from_dict(data: Any) -> "Project":
@@ -825,12 +867,14 @@ class Project:
         data = json.loads(path.read_text(encoding="utf-8"))
         project = Project.from_dict(data)
         series = data.get("series_path") if isinstance(data, dict) else None
-        if isinstance(series, str) and series.strip():
-            project.series_path = series
+        if isinstance(series, str) and series.strip() and Path(series).suffix.lower() == ".sflore":
             try:
-                project.series_entries = load_series_lore(series)
+                entries = load_series_lore(series)
             except (OSError, ValueError) as exc:
                 logger.warning("No se pudo leer el lorebook de la serie %s: %s", series, exc)
+            else:
+                project.series_path = series
+                project.series_entries = entries
             for entry in project.series_entries:
                 entry.shared = True
         return project

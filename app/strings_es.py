@@ -728,6 +728,7 @@ WEB_SERVIDOR_LISTO = (
     "  En la PC:      {local_url}\n"
     "  En el celular: {phone_url}\n"
     "  (el celular tiene que estar en la misma red Wi-Fi que la PC)\n"
+    "  Seguridad: HTTP no cifra el tráfico; usa solo una Wi-Fi privada y de confianza. No abras el puerto a Internet.\n"
     "  Proyectos en:  {projects_dir}\n"
     "Ctrl+C para detener el servidor."
 )
@@ -968,8 +969,12 @@ VINCULAR_SERIE = "Lorebook de serie…"
 DESVINCULAR_SERIE = "Desvincular"
 DESVINCULAR_SERIE_PREGUNTA = ("¿Desvincular el lorebook de la serie? Sus entradas siguen en su archivo, pero esta "
                               "historia deja de usarlas.")
+CONFIRMAR_ESCRITURA_SERIE = ("Este proyecto hace referencia a un archivo de serie externo:\n{path}\n\n"
+                             "¿Confiar en este archivo y permitir que StoryForge lea y actualice sus entradas? "
+                             "Si eliges No, la serie no se cargará.")
 SERIE_VINCULADA = "Serie: {name}"
 LOREBOOK_DE_SERIE = "Lorebook de serie"
 NO_SE_PUDO_VINCULAR_SERIE = "No se pudo vincular el lorebook de la serie: {exc}"
 NO_ES_UN_LOREBOOK_DE_SERIE = "El archivo no es un lorebook de serie de StoryForge."
+NO_SE_PUDO_REVERTIR_SERIE = "No se pudo revertir el guardado del proyecto y la serie: {details}"
 COMPARTIDA_EN_LA_SERIE = "Compartida en la serie"

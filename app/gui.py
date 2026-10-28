@@ -652,6 +652,11 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
             except Exception as exc2:  # noqa: BLE001
                 messagebox.showerror(APP_TITLE, S.TAMPOCO_SE_PUDO_ABRIR_LA.format(exc2=describe_exception(exc2)))
                 return False
+        if project.series_path:
+            if messagebox.askyesno(APP_TITLE, S.CONFIRMAR_ESCRITURA_SERIE.format(path=project.series_path)):
+                project.authorize_series_writes()
+            else:
+                project.unlink_series()
         self.project = project
         # La copia .bak se abre sin destino: "Guardar" pregunta donde, para
         # no pisar el archivo danado sin querer.
