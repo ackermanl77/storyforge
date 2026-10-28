@@ -145,16 +145,14 @@ footer { font-size: 0.82rem; color: var(--muted); border-top: 1px solid var(--li
   <section class="kpis" aria-label="Indicadores">
     <div class="kpi">
       <div class="ring-row">
-        <svg class="ring" viewBox="0 0 64 64" role="img" aria-label="494 de 496 tests pasan">
-          <circle cx="32" cy="32" r="26" fill="none" stroke="var(--line)" stroke-width="7"/>
-          <circle cx="32" cy="32" r="26" fill="none" stroke="var(--ok)" stroke-width="7" stroke-dasharray="162.7 163.4" transform="rotate(-90 32 32)"/>
-          <circle cx="32" cy="32" r="26" fill="none" stroke="var(--bad)" stroke-width="7" stroke-dasharray="0.7 163.4" stroke-dashoffset="-162.7" transform="rotate(-90 32 32)"/>
-          <text x="32" y="35" text-anchor="middle">99.6%</text>
+        <svg class="ring" viewBox="0 0 64 64" role="img" aria-label="495 de 495 tests pasan">
+          <circle cx="32" cy="32" r="26" fill="none" stroke="var(--ok)" stroke-width="7"/>
+          <text x="32" y="35" text-anchor="middle">100%</text>
         </svg>
-        <div class="val">494 / 496</div>
+        <div class="val">495 / 495</div>
       </div>
       <div class="lbl">Tests pasando</div>
-      <div class="sub">1 fallo · 1 error intermitente · 4 omitidos · 163 s en .venv</div>
+      <div class="sub">0 fallos · 4 omitidos · 137 s en .venv</div>
     </div>
     <div class="kpi">
       <div class="val">16 952</div>
@@ -166,10 +164,10 @@ footer { font-size: 0.82rem; color: var(--muted); border-top: 1px solid var(--li
       <div class="lbl">Cobertura de líneas</div>
       <div class="sub">coverage.xml del 14‑oct · ruff sin avisos</div>
     </div>
-    <div class="kpi alert">
-      <div class="val">6</div>
-      <div class="lbl">Archivos sin commitear</div>
-      <div class="sub">+208 / −11 · 92 commits, master = origin/master</div>
+    <div class="kpi">
+      <div class="val">93</div>
+      <div class="lbl">Commits</div>
+      <div class="sub">árbol limpio · master = origin/master</div>
     </div>
   </section>
 
@@ -202,7 +200,7 @@ footer { font-size: 0.82rem; color: var(--muted); border-top: 1px solid var(--li
       <div class="bar"><span class="name">gui.py</span><span class="track"><span class="fill" style="width:52.5%; display:block"></span></span><span class="n">768</span></div>
       <div class="bar"><span class="name">ui_model_tab.py</span><span class="track"><span class="fill" style="width:40.6%; display:block"></span></span><span class="n">594</span></div>
     </div>
-    <p class="note">No hay un archivo dios: <code>prompts.py</code> es solo 1.2× el segundo, y los tres mayores suman el 23% de app/. Tras el corte de <code>engine.py</code> (R6), el tamaño está repartido; <code>web_server.py</code> es el que más crece con el cambio pendiente.</p>
+    <p class="note">No hay un archivo dios: <code>prompts.py</code> es solo 1.2× el segundo, y los tres mayores suman el 23% de app/. Tras el corte de <code>engine.py</code> (R6), el tamaño está repartido; <code>web_server.py</code> es el que más creció en el último commit.</p>
   </section>
 
   <section>
@@ -214,11 +212,11 @@ footer { font-size: 0.82rem; color: var(--muted); border-top: 1px solid var(--li
           <tr><td>Esquema y capítulos por secciones</td><td><span class="pill p-warn">Solo con dobles</span></td><td>~900 palabras por sección, reuso de prefijo KV; nada desde P1 corrió contra un GGUF real</td></tr>
           <tr><td>Exportar docx / EPUB / md / txt</td><td><span class="pill p-ok">Funciona</span></td><td>Escritura atómica; cubierto por tests y por <code>--self-test</code></td></tr>
           <tr><td>Lorebook, alias y relaciones</td><td><span class="pill p-ok">Funciona</span></td><td>F24: alias como claves, relaciones en el prompt, conteo de menciones</td></tr>
-          <tr><td>Lorebook de serie (.sflore)</td><td><span class="pill p-warn">En curso</span></td><td>Cambio sin commitear: escritura autorizada y reversión de ambos archivos si falla</td></tr>
+          <tr><td>Lorebook de serie (.sflore)</td><td><span class="pill p-ok">Funciona</span></td><td>Escritura solo tras confirmar el vínculo; si falla, se revierten ambos archivos (0fc197d)</td></tr>
           <tr><td>Escenas y texto privado</td><td><span class="pill p-ok">Funciona</span></td><td>F23: <code>ai_text()</code> oculta lo privado al modelo; <code>export_text()</code> lo quita</td></tr>
           <tr><td>Comentarios del editor</td><td><span class="pill p-ok">Funciona</span></td><td>F21: hasta 5 notas con cita y «Ir al pasaje»</td></tr>
           <tr><td>Ajustes de historia (POV, diálogo, tono)</td><td><span class="pill p-warn">Parcial</span></td><td>POV funciona; el balance de diálogo apenas mueve al modelo 12B</td></tr>
-          <tr><td>Servidor web (teléfono)</td><td><span class="pill p-warn">En curso</span></td><td>Cambio pendiente: candado de “ocupado” en cada mutación de la API</td></tr>
+          <tr><td>Servidor web (teléfono)</td><td><span class="pill p-ok">Funciona</span></td><td>Candado de “ocupado” en cada mutación de la API (0fc197d)</td></tr>
           <tr><td>Retratos con PixelFlow</td><td><span class="pill p-info">Sin probar real</span></td><td>F25: probado solo contra PixelFlow en modo prueba</td></tr>
           <tr><td>Instalador y firma de código</td><td><span class="pill p-info">Sin probar real</span></td><td>Firma nunca ejecutada de punta a punta; .exe local del 19‑oct, anterior a F21‑F26</td></tr>
           <tr><td>Release por tag v0.4.0</td><td><span class="pill p-bad">Bloqueado</span></td><td>Cuota de artifacts de GitHub agotada hasta el 1‑nov</td></tr>
@@ -232,6 +230,7 @@ footer { font-size: 0.82rem; color: var(--muted); border-top: 1px solid var(--li
     <div>
       <div class="sec-head"><h2>Resuelto recientemente</h2></div>
       <ul class="fixed">
+        <li><span>Lorebook de serie con escritura confirmada y reversión; servidor web sin mutaciones concurrentes<span class="d">0fc197d · 27‑oct</span></span></li>
         <li><span>Comentarios del editor, detección de personajes, escenas, relaciones, retratos y serie<span class="d">F21–F26 · 22‑oct</span></span></li>
         <li><span><code>engine.py</code> dividido en núcleo de completado, carga de modelo, tipos y CUDA<span class="d">R6 · 21‑oct</span></span></li>
         <li><span><code>StoryForge.exe --self-test</code> revisa GUI, llama.cpp, NLTK, exportes y web tras cada build<span class="d">19‑oct</span></span></li>
@@ -243,10 +242,9 @@ footer { font-size: 0.82rem; color: var(--muted); border-top: 1px solid var(--li
     <div>
       <div class="sec-head"><h2>Problemas abiertos</h2></div>
       <ul class="issues">
-        <li class="issue"><span class="pill p-bad">Alto</span><div><b>El cambio pendiente rompe un test</b><p><code>project.py:807</code> trae un mensaje en línea; <code>test_backend_messages_come_from_strings_es</code> exige moverlo a <code>strings_es.py</code>.</p></div></li>
         <li class="issue"><span class="pill p-bad">Alto</span><div><b>Sin prueba contra un modelo real desde P1</b><p>Plantillas de chat, muestreo y flash_attn solo se ejercen con dobles de <code>Llama</code>.</p></div></li>
         <li class="issue"><span class="pill p-warn">Medio</span><div><b>La GUI nunca se abrió en una ventana real</b><p>Diseño, vista de diff, modo foco y tema claro solo se construyeron sin pantalla.</p></div></li>
-        <li class="issue"><span class="pill p-warn">Medio</span><div><b>Test de GUI intermitente</b><p><code>test_complete_missing_chapters</code> da error en la suite completa y pasa aislado.</p></div></li>
+        <li class="issue"><span class="pill p-warn">Medio</span><div><b>Test de GUI intermitente</b><p><code>test_complete_missing_chapters</code> dio error en una corrida completa y pasó en la siguiente; no hay causa identificada.</p></div></li>
         <li class="issue"><span class="pill p-warn">Medio</span><div><b>PROJECT_STATUS.md desactualizado</b><p>Dice “sin CLI ni servicio de red”, 492 tests y que no hay build en <code>StoryForge-App\</code>; los tres datos cambiaron.</p></div></li>
         <li class="issue"><span class="pill p-info">Bajo</span><div><b>Mixins sin encapsulación</b><p>Las pestañas comparten <code>self</code> y se llaman entre sí; el corte es por archivo, no por componente.</p></div></li>
         <li class="issue"><span class="pill p-info">Bajo</span><div><b>pytest fuera de .venv da 10 fallos falsos</b><p>El Python 3.14 global no tiene <code>python-docx</code> ni NLTK; siempre correr en <code>.venv</code>.</p></div></li>
@@ -257,7 +255,6 @@ footer { font-size: 0.82rem; color: var(--muted); border-top: 1px solid var(--li
   <section>
     <div class="sec-head"><h2>Próximos pasos recomendados</h2><span class="hint">en orden</span></div>
     <ol class="steps">
-      <li><div><b>Cerrar el cambio pendiente</b><p>Mover el mensaje de <code>project.py:807</code> a <code>strings_es.py</code>, volver a correr la suite y commitear el endurecimiento de la serie y del servidor web.</p></div></li>
       <li><div><b>Correr <code>test_real_model.py</code> con un GGUF pequeño</b><p>Con <code>STORYFORGE_TEST_MODEL</code> y la rueda CUDA. Es la única forma de saber si las plantillas y el muestreo funcionan fuera de los dobles.</p></div></li>
       <li><div><b>Reconstruir y abrir el .exe</b><p><code>build.bat</code> y una sesión real en la ventana: el build actual es del 19‑oct y no incluye F21‑F26. Aprovechar para revisar la GUI a ojo.</p></div></li>
       <li><div><b>Publicar v0.4.0 después del 1‑nov</b><p>Cuando se reinicie la cuota de artifacts, empujar el tag y vigilar el primer release automático.</p></div></li>
@@ -265,5 +262,5 @@ footer { font-size: 0.82rem; color: var(--muted); border-top: 1px solid var(--li
     </ol>
   </section>
 
-  <footer>Fuente: docs/PROJECT_STATUS.md, <code>.venv\Scripts\python -m pytest -q</code> (494 passed, 1 failed, 1 error, 4 skipped), <code>ruff check app tests</code>, coverage.xml, conteo de líneas de app/*.py y <code>git status</code> — snapshot local del 27‑oct‑2026.</footer>
+  <footer>Fuente: docs/PROJECT_STATUS.md, <code>.venv\Scripts\python -m pytest -q</code> (495 passed, 4 skipped), <code>ruff check app tests</code>, coverage.xml, conteo de líneas de app/*.py y <code>git log</code> hasta 0fc197d — snapshot local del 27‑oct‑2026.</footer>
 </main>
