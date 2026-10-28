@@ -397,7 +397,7 @@ Con un modelo .gguf local, tus historias nunca salen de tu PC. Sale texto solo s
 configuras: un **servidor de modelo compatible con OpenAI** recibe los prompts (plot,
 personajes, lorebook y capítulos) que le mandes; **Visualizar** manda el texto de una entrada
 del lorebook a un PixelFlow local; y el modo celular (`--servidor`) escucha en tu red local,
-protegido por una clave (`X-StoryForge-Token`) que solo viaja en el enlace o el QR. Una versión publicada puede activar la comprobación de actualizaciones: una vez por arranque descarga un pequeño archivo de versión del sitio de descargas y no envía más que el nombre y la versión de la app. No hay telemetría.
+protegido por una clave (`X-StoryForge-Token`) que solo viaja en el enlace o el QR. Una vez por arranque la app busca una versión nueva: descarga un pequeño archivo de versión (update.json) de los GitHub Releases del proyecto y no envía más que el nombre y la versión de la app. Para apagarlo, pon la variable de entorno STORYFORGE_UPDATE_FEED_URL en off. No hay telemetría.
 
 ## Instalacion (en tu PC con Windows)
 

@@ -9,6 +9,8 @@ import tempfile
 
 _SESSION_DIR = tempfile.TemporaryDirectory(prefix="storyforge-pytest-")
 os.environ.setdefault("STORYFORGE_USER_DATA_DIR", _SESSION_DIR.name)
+# Nunca preguntar a GitHub por una versión nueva durante las pruebas (update_check.py).
+os.environ["STORYFORGE_UPDATE_FEED_URL"] = "off"
 
 
 def _retry_tk_init_on_transient_tcl_read() -> None:

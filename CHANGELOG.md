@@ -18,7 +18,7 @@ anteriores está en la sección "Historial de cambios" del README.
   ideas y entrevistas a personajes, alternativas en una palabra.
 - Modelo en un servidor compatible con OpenAI, frases a evitar y limpieza de la salida del
   modelo, generador de historias y ajustes de la historia con presets.
-- Comprobación de versión nueva, apagada hasta que se configure un feed de versiones.
+- Comprobación de versión nueva una vez por arranque, contra los GitHub Releases del proyecto (update.json).
 - Auditoría de dependencias (`pip-audit`) en CI y Dependabot.
 - Licencia MIT, `THIRD_PARTY_NOTICES.md` (incluido en el programa y en el instalador),
   `SECURITY.md` y una sección de privacidad en el README.

@@ -187,6 +187,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release create "${{ github.ref_name }}" artifacts/*.zip artifacts/*-setup.exe --repo "${{ github.repository }}" --title "StoryForge ${{ github.ref_name }}" --generate-notes
 
+      # The update feed the app reads (update_check.py's UPDATE_FEED_URL is
+      # https://github.com/<repo>/releases/latest/download/update.json, which GitHub
+      # redirects to this asset of the newest release).
+      - name: Publish the update feed (update.json)
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $feed = [ordered]@{
+            version = "${{ github.ref_name }}" -replace '^v', ''
+            url = "https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+            notes = ""
+          }
+          [IO.File]::WriteAllText("update.json", ($feed | ConvertTo-Json -Compress))
+          gh release upload "${{ github.ref_name }}" update.json --clobber --repo "${{ github.repository }}"
+
   audit:
     # Known vulnerabilities in the pinned/required Python packages (OSV / PyPI advisory data).
     runs-on: windows-latest
