@@ -54,3 +54,7 @@ htmlcov/
 .vscode/
 
 graphify-out/
+
+# Per-PC settings when running from source (app/paths.py user_data_dir): holds the phone
+# server's access token (web_token), never commit it.
+/settings.json
