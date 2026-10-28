@@ -1,3 +1,45 @@
+# CLAUDE.md
+
+Guidance for Claude Code in this repository. User guide: [GUIA_DE_USUARIO.md](GUIA_DE_USUARIO.md);
+install, performance and limits: [README.md](README.md); architecture, entry points and fix history:
+[docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) and [docs/workflows/](docs/workflows/README.md).
+All of them are in Spanish.
+
+## What this is
+
+A CustomTkinter desktop app that writes long English fiction with a local GGUF model
+(`llama-cpp-python`) or an OpenAI-compatible server (`app/server_backend.py`). `storyforge.py` /
+`app/main.py` start it; `--servidor` serves the phone page and the story generator
+(`app/web_server.py`, `app/web/`); `--self-test` checks a build (`app/selftest.py`).
+
+## Commands
+
+```powershell
+python storyforge.py
+python -m pytest -q                                   # needs requirements-dev.txt
+ruff check app tests                                  # ruff.toml: E9 + pyflakes only
+.\scripts\run_coverage.ps1
+build.bat                                             # PyInstaller build, copied to StoryForge-App\
+```
+
+CI: `.github/workflows/build-exe.yml` (ruff, tests with coverage, CPU and CUDA 13 zips; a `v*` tag
+equal to `app/__init__.py`'s version publishes a release with installers).
+
+## Rules
+
+- **Every user-visible string lives in `app/strings_es.py`.** The UI is Spanish; generated story
+  text is English.
+- **The engine is split by concern**: `engine.py` re-exports `engine_types.py` and mixes in
+  `engine_model.py` (load/connect) and `completion.py` (tokens, context, retries). Tests patch names
+  on `engine`, so keep the re-exports.
+- Model work runs through `app/task_runner.py` (busy state, Stop, errors), never on the Tk thread.
+- Projects are saved atomically (`app/fileutil.py`) in the versioned format of `app/project.py`;
+  change the format only with a migration.
+- Tests use a temp data folder (`STORYFORGE_USER_DATA_DIR`, set in `tests/conftest.py`). Prompt
+  snapshots live in `tests/snapshots/` (`STORYFORGE_UPDATE_SNAPSHOTS=1` after an intended prompt
+  change). `tests/test_real_model.py` runs only with `STORYFORGE_TEST_MODEL` set.
+- `pytest.ini` limits collection to `tests/` because `StoryForge-App\_internal\` holds a build.
+
 ## graphify
 
 This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.

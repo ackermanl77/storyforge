@@ -526,20 +526,38 @@ storyforge/
     project.py       Modelo de datos (plot/personajes/setting/lorebook/capitulos), limites,
                      formato versionado (format_version 2) y guardado atomico
     prompts.py       Plantillas de prompt, guia de estilo, lorebook y recorte de contexto
+    prompt_components.py  Componentes de prompt reutilizables ({@nombre}, F20)
+    story_settings.py     Genero, tema, tono, punto de vista y narracion/dialogo, con presets
     chat_format.py   Plantillas de chat (GGUF Jinja, Llama 3, ChatML, Mistral, Alpaca, sin plantilla)
     sampling.py      Muestreo por tarea, presets y semilla
-    engine.py        Motor de generacion local (llama-cpp-python)
+    engine.py        Motor de generacion local (llama-cpp-python); lo completan
+                     engine_types.py (tipos, errores y constantes), engine_model.py (cargar el
+                     GGUF o conectar a un servidor) y completion.py (tokens, contexto, reintento)
+    server_backend.py  Modelo en un servidor compatible con OpenAI (LM Studio, Ollama, KoboldCpp...)
+    cuda_env.py      DLL de CUDA de las ruedas nvidia-* para llama-cpp-python con CUDA
     gguf.py          Lectura de la cabecera GGUF, modelos partidos, estimacion de VRAM
+    phrase_guard.py  Frases a evitar: cliches cortados mientras se generan
+    output_guard.py  Limpieza de lo que devuelve el modelo antes de agregarlo al capitulo
+    retrieval.py     Pasajes anteriores relevantes para novelas largas
+    scenes.py        Escenas dentro de un capitulo y tramos privados que nunca van al modelo
+    lore_tools.py    Herramientas del lorebook y de revision, sin modelo ni interfaz
+    story_matrix.py  Matriz de la historia: menciones de personajes/hilos por capitulo
+    manuscript.py    Importar un manuscrito (.docx/.md/.txt) como proyecto nuevo
+    visualize.py     Imagen de una entrada del lorebook con un PixelFlow local
     settings.py      Opciones por PC (por modelo, ultimo modelo, preferencias)
     paths.py         Donde viven modelos, nltk_data, autoguardado, registro y settings
     fileutil.py      Escritura atomica con reintentos
     repetition.py    Analisis y reduccion de repeticion de palabras
     export.py        Exportacion a .docx / .txt / Markdown / EPUB
+    error_text.py    Errores explicados en espanol para el usuario
+    selftest.py      --self-test: comprueba un build sin abrir la ventana
     gui.py           Ventana principal (CustomTkinter): abrir/guardar, autoguardado, errores
     ui_*.py          Menu y pestanas (ui_menu, ui_model_tab, ui_story_tabs, ui_lorebook_tab,
-                     ui_outline_tab, ui_chapters_tab, ui_chapter_editor), dialogos
-                     (ui_dialogs), barra de estado (ui_status), orden de Tab (ui_focus)
-                     y piezas comunes (ui_common)
+                     ui_outline_tab, ui_chapters_tab, ui_chapter_editor, ui_notes_tab),
+                     herramientas del editor (ui_story_tools), lluvia de ideas (ui_side_chat),
+                     ventanas de componentes (ui_components) y de la matriz (ui_matrix),
+                     dialogos (ui_dialogs), barra de estado (ui_status), orden de Tab
+                     (ui_focus) y piezas comunes (ui_common)
     strings_es.py    Todos los textos visibles de la interfaz
     task_runner.py   Tareas del modelo en segundo plano (ocupado, Detener, errores)
     web_server.py    StoryForge en el celular: servidor web local (--servidor), API JSON
