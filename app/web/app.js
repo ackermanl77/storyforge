@@ -153,10 +153,12 @@ async function loadProjects() {
   for (const p of projects) {
     const li = document.createElement("li");
     li.classList.toggle("current", p.archivo === current);
-    li.innerHTML = `<div><div class="title"></div><div class="meta"></div></div><span class="muted">Abrir ›</span>`;
+    // A real button inside the item (UI3): reachable with Tab and announced as an action.
+    li.innerHTML = `<button type="button" class="item"><span><span class="title"></span><span class="meta"></span></span><span class="muted">Abrir ›</span></button>`;
     li.querySelector(".title").textContent = p.nombre;
     li.querySelector(".meta").textContent = `${p.capitulos} capítulos · ${fmt(p.palabras)} palabras`;
-    li.addEventListener("click", () => run(async () => {
+    if (p.archivo === current) li.querySelector("button").setAttribute("aria-current", "true");
+    li.querySelector("button").addEventListener("click", () => run(async () => {
       if (busy()) throw new Error("Espera a que termine la tarea en curso.");
       setProject(await api("POST", "/api/proyecto/abrir", { archivo: p.archivo }));
       await loadProjects();
@@ -303,10 +305,10 @@ function renderChapterList(p) {
     if (ch.palabras && !ch.tiene_resumen) note = " · sin resumen";
     else if (ch.resumen_desactualizado) note = " · resumen desactualizado";
     if (ch.prompt_propio) note += " · prompt propio";
-    li.innerHTML = `<div><div class="title"></div><div class="meta"></div></div><span class="muted">›</span>`;
+    li.innerHTML = `<button type="button" class="item"><span><span class="title"></span><span class="meta"></span></span><span class="muted">›</span></button>`;
     li.querySelector(".title").textContent = `${ch.indice + 1}. ${ch.titulo || "(sin título)"}`;
     li.querySelector(".meta").textContent = `${fmt(ch.palabras)} / ${fmt(ch.objetivo)} palabras${note}`;
-    li.addEventListener("click", () => run(() => openChapter(ch.indice)));
+    li.querySelector("button").addEventListener("click", () => run(() => openChapter(ch.indice)));
     list.appendChild(li);
   }
   $("chapter-add").disabled = p.capitulos.length >= p.max_capitulos;

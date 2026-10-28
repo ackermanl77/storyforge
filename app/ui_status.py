@@ -58,6 +58,12 @@ def describe_context(stats) -> str:
                                       max_tokens=stats.max_tokens, n_ctx=stats.n_ctx, level=level))
 
 
+# UI2: Detener is gold only while there is something to stop; disabled, it was gold too and read as
+# active. (light, dark) pairs, as CustomTkinter takes them.
+STOP_ACTIVE_COLOR = "#8a6a2f"
+STOP_IDLE_COLOR = ("gray72", "gray30")
+
+
 class StatusBar(ctk.CTkFrame):
     def __init__(self, master, app):
         super().__init__(master, height=34)
@@ -71,12 +77,14 @@ class StatusBar(ctk.CTkFrame):
         self.progress = ctk.CTkProgressBar(self, width=160)
         self.progress.set(0)
         self.progress.grid(row=0, column=1, sticky="w", padx=6)
+        # UI2: only while something runs -- idle, a half- or fully-filled bar read as "busy".
+        self.progress.grid_remove()
         self.context_label = ctk.CTkLabel(self, text=S.CONTEXTO_VACIO, text_color=COLOR_MUTED)
         self.context_label.grid(row=0, column=2, padx=6)
         self.prompt_btn = ctk.CTkButton(self, text=S.VER_PROMPT, width=90, command=app.show_last_prompt)
         self.prompt_btn.grid(row=0, column=3, padx=4, pady=3)
         self.stop_btn = ctk.CTkButton(
-            self, text=S.DETENER, width=80, state="disabled", fg_color="#8a6a2f", hover_color="#6e5526",
+            self, text=S.DETENER, width=80, state="disabled", fg_color=STOP_IDLE_COLOR, hover_color="#6e5526",
             command=app.stop_current_task,
         )
         self.stop_btn.grid(row=0, column=4, padx=4, pady=3)
@@ -86,9 +94,10 @@ class StatusBar(ctk.CTkFrame):
     def start(self, label: str) -> None:
         self._started = time.monotonic()
         self.op_label.configure(text=f"{label}...", text_color=("#1a1a1a", "#e6e6e6"))
+        self.progress.grid()
         self.progress.configure(mode="indeterminate")
         self.progress.start()
-        self.stop_btn.configure(state="normal")
+        self.stop_btn.configure(state="normal", fg_color=STOP_ACTIVE_COLOR)
         self._schedule()
 
     def stop(self, outcome: str = "ok") -> None:
@@ -101,8 +110,9 @@ class StatusBar(ctk.CTkFrame):
         self.refresh()
         self.progress.stop()
         self.progress.configure(mode="determinate")
-        self.progress.set(1 if outcome == "ok" else 0)
-        self.stop_btn.configure(state="disabled")
+        self.progress.set(0)
+        self.progress.grid_remove()
+        self.stop_btn.configure(state="disabled", fg_color=STOP_IDLE_COLOR)
         elapsed = format_duration(time.monotonic() - self._started) if self._started else "--"
         text, color = {
             "ok": (S.LISTO_TIEMPO.format(elapsed=elapsed), COLOR_OK),

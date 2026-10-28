@@ -1518,3 +1518,107 @@ class TestOutlineWarnings(_GuiTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+from app import strings_es as S  # noqa: E402  (UI1 tests)
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestStartScreen(unittest.TestCase):
+    """UI1: without a model the app opens on Modelo (the first step); with one, on the last
+    project's Capítulos, or Trama for a new story. Load tuning is folded under 'Avanzado'."""
+
+    def setUp(self):
+        from app import settings
+
+        _clear_autosave()
+        self._saved = settings.load_settings()
+        self.tmp = tempfile.TemporaryDirectory()
+        self._patchers = [mock.patch("app.gui.messagebox.askyesno", return_value=True),
+                          mock.patch("app.gui.messagebox.showinfo"),
+                          mock.patch("app.gui.threading.Thread", _SynchronousThread)]
+        for p in self._patchers:
+            p.start()
+        self.apps = []
+
+    def tearDown(self):
+        from app import settings
+
+        for app in self.apps:
+            app.destroy()
+        for p in reversed(self._patchers):
+            p.stop()
+        settings.save_settings(self._saved)
+        self.tmp.cleanup()
+
+    def _app(self):
+        app = StoryForgeApp()
+        self.apps.append(app)
+        return app
+
+    def _configure_model(self):
+        from app import settings
+
+        model = os.path.join(self.tmp.name, "model.gguf")
+        open(model, "wb").close()
+        data = settings.load_settings()
+        data["last_model"] = model
+        data.pop("last_project", None)
+        settings.save_settings(data)
+
+    def test_without_a_model_it_opens_on_the_model_tab(self):
+        from app import settings
+
+        data = settings.load_settings()
+        data.pop("last_model", None)
+        data.pop("server", None)
+        settings.save_settings(data)
+        self.assertEqual(self._app().tabview.get(), S.TAB_MODELO)
+
+    def test_with_a_model_it_opens_trama_then_the_last_projects_chapters(self):
+        self._configure_model()
+        first = self._app()
+        self.assertEqual(first.tabview.get(), S.TAB_PLOT)
+        path = os.path.join(self.tmp.name, "novela.storyforge.json")
+        self.assertTrue(first._save_to(path))
+        second = self._app()
+        self.assertEqual(second.current_path, path)  # reopened by itself
+        self.assertEqual(second.tabview.get(), S.TAB_CAPITULOS)
+
+    def test_load_tuning_is_folded_under_avanzado(self):
+        app = self._app()
+        app.update_idletasks()
+        self.assertFalse(app.model_advanced.winfo_manager())
+        app._toggle_model_advanced()
+        self.assertEqual(app.model_advanced.winfo_manager(), "grid")
+        self.assertEqual(app.model_advanced_toggle.cget("text"), S.AVANZADO_OCULTAR)
+        # The settings inside still work while folded.
+        self.assertEqual(app.kv_cache_menu.get(), "f16")
+
+
+@unittest.skipUnless(GUI_AVAILABLE, _SKIP_REASON)
+class TestThemedChrome(_GuiTestCase):
+    """UI2: a themed menu bar (the native one is white on Windows), no progress bar while idle,
+    and a Detener that only looks active when there is something to stop."""
+
+    def test_the_menu_bar_is_a_themed_row_opening_the_same_menus(self):
+        self.assertEqual(self.app.cget("menu"), "")  # no native menu bar any more
+        labels = list(self.app.menu_buttons)
+        self.assertEqual(labels, [S.MENU_ARCHIVO, S.MENU_EDITAR, S.MENU_VER, S.MENU_AYUDA])
+        _button, file_menu = self.app.menu_buttons[S.MENU_ARCHIVO]
+        self.assertEqual(file_menu.entrycget(0, "label"), S.NUEVO_PROYECTO)
+        for sequence in ("<Alt-a>", "<Alt-e>", "<Alt-v>", "<Alt-u>", "<F10>"):
+            self.assertTrue(self.app.bind(sequence), sequence)
+
+    def test_progress_shows_only_while_running_and_detener_looks_idle_when_idle(self):
+        from app.ui_status import STOP_ACTIVE_COLOR, STOP_IDLE_COLOR
+
+        bar = self.app.status_bar
+        self.assertFalse(bar.progress.winfo_manager())
+        self.assertEqual(bar.stop_btn.cget("fg_color"), STOP_IDLE_COLOR)
+        bar.start("Escribiendo")
+        self.assertEqual(bar.progress.winfo_manager(), "grid")
+        self.assertEqual(bar.stop_btn.cget("fg_color"), STOP_ACTIVE_COLOR)
+        bar.stop("ok")
+        self.assertFalse(bar.progress.winfo_manager())
+        self.assertEqual(bar.stop_btn.cget("fg_color"), STOP_IDLE_COLOR)

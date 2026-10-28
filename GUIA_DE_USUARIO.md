@@ -80,6 +80,12 @@ Aquí cargas el modelo de IA (`.gguf`) que va a escribir tu historia. Sin un
 modelo cargado, ninguna función de generación funciona (el resto de la app
 — guardar, escribir tus notas, exportar — sí funciona sin modelo).
 
+La app se abre en esta pestaña solo mientras no hay un modelo configurado. Una
+vez que usaste uno (un archivo que sigue en el disco, o un servidor), se abre
+directamente en tu **último proyecto, en la pestaña "Capítulos"**, o en
+**"Plot"** para empezar una historia nueva. Si al abrir se recupera un
+autoguardado, se muestra ese en "Capítulos".
+
 - **Selector de archivo**: elige un modelo de la carpeta `models/`, con
   "Elegir archivo..." si está en otro lado, o "Actualizar lista" si acabas
   de copiar uno nuevo a `models/`.
@@ -96,6 +102,8 @@ modelo cargado, ninguna función de generación funciona (el resto de la app
     propone `-1` (todas las capas); sin GPU, `0`. **Estimar VRAM** calcula si
     el modelo cabe en la VRAM libre con ese contexto y completa el número de
     capas sugerido.
+  - **Avanzado** (plegado; un clic lo abre): flash attention, lote, caché KV
+    y formato de chat, que casi nunca hace falta tocar.
   - **Flash attention, lote (n_batch / n_ubatch) y caché KV**: con GPU,
     flash attention y un lote de 1024-2048 aceleran la lectura del prompt; la
     caché KV `q8_0` ocupa la mitad de memoria (requiere flash attention).
@@ -841,6 +849,21 @@ Cosas a tener en cuenta:
   siguen en la ventana de la PC.
 - Para apagarlo: botón **"Detener el servidor"** en la página del QR (o
   Ctrl+C en la consola).
+
+## Lectores de pantalla y teclado
+
+La ventana de escritorio de StoryForge está dibujada con CustomTkinter, que no
+expone sus controles a Windows: **un lector de pantalla (Narrador, NVDA, JAWS)
+no puede leerla**. Para usar StoryForge con lector de pantalla o solo con el
+teclado, usa la **versión de navegador** (ver *Usar StoryForge desde el
+celular*), que funciona igual en el navegador de la propia PC: abre
+`StoryForge.exe --servidor` y usa el enlace que muestra. Allí cada botón,
+campo y lista tiene nombre, la página tiene títulos para saltar entre
+secciones, y los proyectos y capítulos se abren con **Tab** y **Enter**.
+
+En la ventana de escritorio sí funcionan los atajos de teclado (ver más
+arriba), **F10** o **Alt + letra** para los menús (Alt+A Archivo, Alt+E
+Editar, Alt+V Ver, Alt+U Ayuda).
 
 ## Generador de historias
 

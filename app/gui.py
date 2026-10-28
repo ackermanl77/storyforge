@@ -46,6 +46,7 @@ from .project import (
 )
 from .settings import (
     get_ui_preferences,
+    remember_last_project,
     set_ui_preferences,
 )
 from .strings_es import (
@@ -199,9 +200,10 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         self._bind_shortcuts()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self._mark_clean()
-        self._offer_autosave_recovery()
+        recovered = self._offer_autosave_recovery()
         self._restore_last_model_selection()
         self._restore_embedding_model()
+        self._open_start_tab(recovered)
         self.after(AUTOSAVE_INTERVAL_MS, self._autosave_tick)
 
     def _restore_embedding_model(self) -> None:
@@ -413,26 +415,42 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         self.title(f"{APP_TITLE} {__version__} — {name}{file_part}{mark}")
 
     # ---------------- autoguardado ----------------
-    def _offer_autosave_recovery(self) -> None:
+    def _offer_autosave_recovery(self) -> bool:
+        """True si se recupero el autoguardado."""
         if not os.path.isfile(self.autosave_path):
-            return
+            return False
         try:
             recovered = Project.load(self.autosave_path)
         except Exception:
             # autoguardado corrupto/ilegible: lo ignoramos en vez de fallar al abrir la app
             logger.exception("No se pudo leer el autoguardado %s", self.autosave_path)
-            return
+            return False
         if not messagebox.askyesno(
             APP_TITLE,
             S.SE_ENCONTRO_UNA_COPIA_DE,
         ):
             self._discard_autosave()
-            return
+            return False
         self.project = recovered
         self.current_path = None  # se recupera el contenido, pero se debe elegir donde guardarlo
         self._load_into_ui()
         self._clean_json = ""  # lo recuperado no esta guardado en ningun archivo
         self._update_dirty_state()
+        return True
+
+    def _open_start_tab(self, recovered: bool) -> None:
+        """UI1: la primera pantalla. Sin modelo configurado, la pestana Modelo (el primer paso).
+        Con modelo: el ultimo proyecto (si no se recupero un autoguardado) en Capitulos, o Trama
+        para empezar una historia nueva."""
+        from .settings import get_last_project, model_configured
+
+        if not model_configured():
+            return
+        if not recovered:
+            last = get_last_project()
+            if last and os.path.isfile(last):
+                self.open_project_path(last)
+        self.tabview.set(S.TAB_CAPITULOS if (self.current_path or recovered) else S.TAB_PLOT)
 
     def _autosave_tick(self) -> None:
         self._report_autosave_errors()
@@ -661,6 +679,8 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         # La copia .bak se abre sin destino: "Guardar" pregunta donde, para
         # no pisar el archivo danado sin querer.
         self.current_path = None if from_backup else path
+        if not from_backup:
+            remember_last_project(path)
         self._load_into_ui()
         self._mark_clean()
         if from_backup:
@@ -719,6 +739,7 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
             messagebox.showerror(APP_TITLE, S.NO_SE_PUDO_GUARDAR.format(path=path, exc=describe_exception(exc)))
             return False
         self.current_path = path
+        remember_last_project(path)
         # La copia de autoguardado quedaria obsoleta.
         self._discard_autosave()
         self._mark_clean()

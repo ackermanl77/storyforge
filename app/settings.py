@@ -119,6 +119,23 @@ def get_last_model() -> Optional[str]:
     return value if isinstance(value, str) and value else None
 
 
+def model_configured() -> bool:
+    """Hay un modelo con el que escribir: el ultimo archivo usado sigue en disco, o se uso un
+    servidor (UI1: entonces la app abre donde se escribe, no en la pestana Modelo)."""
+    last = get_last_model()
+    return bool(last and os.path.isfile(last)) or isinstance(load_settings().get("server"), dict)
+
+
+# ---------------- ultimo proyecto (UI1) ----------------
+def remember_last_project(path: str) -> None:
+    _update(lambda data: data.__setitem__("last_project", os.path.abspath(path)))
+
+
+def get_last_project() -> Optional[str]:
+    value = load_settings().get("last_project")
+    return value if isinstance(value, str) and value else None
+
+
 # ---------------- modelo en un servidor (B14) ----------------
 def get_server_settings() -> dict:
     """URL, modelo y clave del ultimo servidor usado (la clave queda en settings.json, como texto)."""

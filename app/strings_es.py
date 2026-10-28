@@ -978,3 +978,6 @@ NO_SE_PUDO_VINCULAR_SERIE = "No se pudo vincular el lorebook de la serie: {exc}"
 NO_ES_UN_LOREBOOK_DE_SERIE = "El archivo no es un lorebook de serie de StoryForge."
 NO_SE_PUDO_REVERTIR_SERIE = "No se pudo revertir el guardado del proyecto y la serie: {details}"
 COMPARTIDA_EN_LA_SERIE = "Compartida en la serie"
+# UI1: los ajustes finos de carga, plegados en la pestaña Modelo.
+AVANZADO_MOSTRAR = "▸ Avanzado: rendimiento y formato de chat"
+AVANZADO_OCULTAR = "▾ Avanzado: rendimiento y formato de chat"

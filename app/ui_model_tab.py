@@ -126,9 +126,18 @@ class ModelTabMixin:
                                              text_color=COLOR_OK if self._gpu_available else COLOR_MUTED)
         self.gpu_status_label.grid(row=4, column=0, sticky="w", padx=10)
 
-        # Opciones avanzadas de rendimiento (P1).
-        adv = ctk.CTkFrame(tab, fg_color="transparent")
-        adv.grid(row=5, column=0, sticky="w", padx=10, pady=(6, 0))
+        # Opciones avanzadas de rendimiento (P1) y formato de chat: plegadas bajo "Avanzado" (UI1),
+        # porque casi nunca hacen falta y antes llenaban la primera pantalla.
+        self.model_advanced_toggle = ctk.CTkButton(
+            tab, text=S.AVANZADO_MOSTRAR, fg_color="transparent", anchor="w", width=0,
+            command=self._toggle_model_advanced,
+        )
+        self.model_advanced_toggle.grid(row=5, column=0, sticky="w", padx=6, pady=(6, 0))
+        self.model_advanced = ctk.CTkFrame(tab, fg_color="transparent")
+        self.model_advanced.grid(row=6, column=0, sticky="w", padx=10)
+        self.model_advanced.grid_remove()
+        adv = ctk.CTkFrame(self.model_advanced, fg_color="transparent")
+        adv.pack(anchor="w", pady=(6, 0))
         self.flash_attn_var = ctk.BooleanVar(value=self._gpu_available)
         self.flash_attn_check = ctk.CTkCheckBox(adv, text=S.FLASH_ATTENTION, variable=self.flash_attn_var)
         self.flash_attn_check.pack(side="left", padx=(0, 12))
@@ -144,8 +153,8 @@ class ModelTabMixin:
         self.kv_cache_menu.set("f16")
         self.kv_cache_menu.pack(side="left")
 
-        chat_row = ctk.CTkFrame(tab, fg_color="transparent")
-        chat_row.grid(row=6, column=0, sticky="w", padx=10, pady=(6, 0))
+        chat_row = ctk.CTkFrame(self.model_advanced, fg_color="transparent")
+        chat_row.pack(anchor="w", pady=(6, 0))
         ctk.CTkLabel(chat_row, text=S.FORMATO_DE_CHAT).pack(side="left", padx=(0, 4))
         self.chat_format_menu = ctk.CTkOptionMenu(
             chat_row, values=[CHAT_FORMAT_LABELS[k] for k in CHAT_FORMAT_CHOICES], width=230,
@@ -174,6 +183,15 @@ class ModelTabMixin:
         self._build_sampling_panel(tab, row=9)
         self._build_server_panel(tab, row=10)
         self._on_model_selected(self.model_combo.get())
+
+    def _toggle_model_advanced(self) -> None:
+        """Muestra u oculta los ajustes avanzados de carga (UI1)."""
+        self.model_advanced_shown = not getattr(self, "model_advanced_shown", False)
+        if self.model_advanced_shown:
+            self.model_advanced.grid()
+        else:
+            self.model_advanced.grid_remove()
+        self.model_advanced_toggle.configure(text=S.AVANZADO_OCULTAR if self.model_advanced_shown else S.AVANZADO_MOSTRAR)
 
     # ---- modelo en un servidor compatible con OpenAI (B14) ----
     def _build_server_panel(self, tab, row: int) -> None:
