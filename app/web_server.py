@@ -1,7 +1,8 @@
 """
-StoryForge en el celular: un servidor web en la red local (`storyforge.py
---servidor`) para escribir desde el navegador del celular mientras el modelo
-corre en la PC.
+StoryForge en el celular: un servidor web (`storyforge.py --servidor`) para
+escribir desde el navegador mientras el modelo corre en la PC. Por seguridad
+solo escucha en esta PC de forma predeterminada; `--lan` permite el acceso
+desde otros dispositivos de la red local.
 
 Usa el mismo motor (app/engine.py), el mismo formato de proyecto
 (app/project.py) y los mismos pasos que la interfaz de escritorio
@@ -15,11 +16,11 @@ para ver el texto que se va generando.
 - Los proyectos viven en una carpeta propia del servidor (por defecto
   user_data_dir()/proyectos; --carpeta la cambia y se recuerda). Cada cambio se
   guarda en el momento (guardado atomico con .bak, Project.save()).
-- Acceso: el servidor escucha en toda la red local, asi que la API exige una
-  clave (`web_token` en settings.json, generada la primera vez) que viaja en el
-  enlace/QR (`/?t=<clave>`) y despues en la cabecera X-StoryForge-Token. La
-  pagina de conexion (/conectar, con el QR) y /api/apagar solo responden a la
-  propia PC (127.0.0.1).
+- Acceso: la API exige una clave (`web_token` en settings.json, generada la
+  primera vez) que viaja en el enlace/QR (`/?t=<clave>`) y despues en la
+  cabecera X-StoryForge-Token. `--lan` enlaza el servidor a toda la red local.
+  La pagina de conexion (/conectar) muestra el QR solo con `--lan`; /api/apagar
+  y esa pagina solo responden a la propia PC (127.0.0.1).
 """
 from __future__ import annotations
 
@@ -74,6 +75,8 @@ from .task_runner import call_supported
 logger = logging.getLogger("storyforge.web")
 
 DEFAULT_PORT = 8765
+DEFAULT_HOST = "127.0.0.1"
+LAN_HOST = "0.0.0.0"
 WEB_DIR = Path(__file__).resolve().parent / "web"
 PROJECT_SUFFIX = ".storyforge.json"
 TOKEN_HEADER = "X-StoryForge-Token"
@@ -1098,8 +1101,13 @@ class _Handler(BaseHTTPRequestHandler):
             # La pagina de conexion de la PC: enlace + clave para el QR.
             if not self._is_local():
                 raise ApiError(HTTPStatus.FORBIDDEN, S.WEB_SOLO_DESDE_LA_PC)
-            self._json(HTTPStatus.OK, {"url": self.server.phone_url, "carpeta": self.server.service.projects_dir,
-                                       "token": self.server.token})
+            url = self.server.phone_url or self.server.local_app_url
+            self._json(HTTPStatus.OK, {
+                "url": url,
+                "lan_enabled": self.server.phone_url is not None,
+                "carpeta": self.server.service.projects_dir,
+                "token": self.server.token,
+            })
             return
         if path == "/api/apagar" and self.command == "POST":
             if not self._is_local():
@@ -1157,18 +1165,22 @@ class StoryForgeHTTPServer(ThreadingHTTPServer):
         self.token = token
         port = self.server_address[1]
         self.local_url = f"http://127.0.0.1:{port}/conectar"
-        self.phone_url = f"http://{lan_ip()}:{port}/?t={token}"
+        self.local_app_url = f"http://127.0.0.1:{port}/?t={token}"
+        self.phone_url = (
+            f"http://{lan_ip()}:{port}/?t={token}"
+            if self.server_address[0] == LAN_HOST else None
+        )
         self.generator_url = f"http://127.0.0.1:{port}/generador?t={token}"
 
 
-def create_server(engine, projects_dir: str, port: int = DEFAULT_PORT, host: str = "0.0.0.0",
+def create_server(engine, projects_dir: str, port: int = DEFAULT_PORT, host: str = DEFAULT_HOST,
                   token: Optional[str] = None) -> StoryForgeHTTPServer:
     service = StoryForgeService(engine, projects_dir)
     return StoryForgeHTTPServer((host, port), service, token or access_token())
 
 
 def serve(port: int = DEFAULT_PORT, projects_dir: Optional[str] = None, open_browser: bool = True,
-          models_dir: Optional[str] = None, generator_page: bool = False) -> int:
+          models_dir: Optional[str] = None, generator_page: bool = False, lan: bool = False) -> int:
     """Punto de entrada de `storyforge.py --servidor`."""
     from .engine import LocalStoryEngine
 
@@ -1178,12 +1190,13 @@ def serve(port: int = DEFAULT_PORT, projects_dir: Optional[str] = None, open_bro
         remember_projects_dir(projects_dir)
     folder = projects_dir or default_projects_dir()
     try:
-        server = create_server(LocalStoryEngine(), folder, port)
+        server = create_server(LocalStoryEngine(), folder, port, host=LAN_HOST if lan else DEFAULT_HOST)
     except OSError as exc:
         _show(S.WEB_PUERTO_OCUPADO.format(port=port, exc=describe_exception(exc)), error=True)
         return 1
-    message = S.WEB_SERVIDOR_LISTO.format(local_url=server.local_url, phone_url=server.phone_url,
-                                          projects_dir=server.service.projects_dir)
+    startup_message = S.WEB_SERVIDOR_LISTO if lan else S.WEB_SERVIDOR_LOCAL_LISTO
+    message = startup_message.format(local_url=server.local_url, phone_url=server.phone_url or "",
+                                     projects_dir=server.service.projects_dir)
     _show(message)
     if open_browser:
         import webbrowser

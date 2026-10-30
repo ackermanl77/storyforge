@@ -70,9 +70,11 @@ correspondiente mas abajo.
   escrito por ti entero (con marcadores como `{plot}` o `{anterior}`) en vez
   del prompt automático. Ver la guía de usuario.
 - **StoryForge en el celular**: `StoryForge.exe --servidor` (o el acceso
-  directo "StoryForge Local en el celular") sirve una página web en tu red
-  local para escribir desde el navegador del celular mientras el modelo corre
-  en la PC; se conecta escaneando un QR. Ver la guía de usuario.
+  directo "StoryForge Local en el celular") sirve una página web solo en esta
+  PC de forma predeterminada. Para permitir acceso desde el celular, inicia
+  con `StoryForge.exe --servidor --lan` (el acceso directo del celular activa
+  esta opción explícitamente); se conecta escaneando un QR. Usa solo una Wi-Fi
+  privada y de confianza: HTTP no cifra el tráfico. Ver la guía de usuario.
 
 ## Historial de cambios
 
@@ -396,8 +398,7 @@ computadora.
 Con un modelo .gguf local, tus historias nunca salen de tu PC. Sale texto solo si tú lo
 configuras: un **servidor de modelo compatible con OpenAI** recibe los prompts (plot,
 personajes, lorebook y capítulos) que le mandes; **Visualizar** manda el texto de una entrada
-del lorebook a un PixelFlow local; y el modo celular (`--servidor`) escucha en tu red local,
-protegido por una clave (`X-StoryForge-Token`) que solo viaja en el enlace o el QR. Una vez por arranque la app busca una versión nueva: descarga un pequeño archivo de versión (update.json) de los GitHub Releases del proyecto y no envía más que el nombre y la versión de la app. Para apagarlo, pon la variable de entorno STORYFORGE_UPDATE_FEED_URL en off. No hay telemetría.
+del lorebook a un PixelFlow local; y el modo navegador (`--servidor`) escucha solo en esta PC de forma predeterminada. El acceso desde la red local requiere `--lan`, está protegido por una clave (`X-StoryForge-Token`) que viaja en el enlace o el QR, y usa HTTP sin cifrar. Una vez por arranque la app busca una versión nueva: descarga un pequeño archivo de versión (update.json) de los GitHub Releases del proyecto y no envía más que el nombre y la versión de la app. Para apagarlo, pon la variable de entorno STORYFORGE_UPDATE_FEED_URL en off. No hay telemetría.
 
 ## Instalacion (en tu PC con Windows)
 

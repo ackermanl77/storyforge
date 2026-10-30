@@ -104,6 +104,7 @@ class MenuMixin:
         view_menu.add_command(label=S.VER_EL_ULTIMO_PROMPT_ENVIADO, command=self.show_last_prompt)
         view_menu.add_command(label=S.MATRIZ_MENU, command=self.open_story_matrix)
         help_menu = tk.Menu(self, tearoff=0)
+        help_menu.add_command(label=S.ATAJOS_DE_TECLADO, command=self.show_shortcuts, accelerator=S.F1)
         help_menu.add_command(label=S.ACERCA_DE_STORYFORGE, command=self.show_about)
         help_menu.add_command(label=S.ABRIR_CARPETA_DE_REGISTROS, command=self._open_log_folder)
         self._menu_bar([(S.MENU_ARCHIVO, "a", file_menu), (S.MENU_EDITAR, "e", edit_menu), (S.MENU_VER, "v", view_menu),
@@ -144,6 +145,7 @@ class MenuMixin:
         "<Control-f>": "find_in_chapter",
         "<Control-F>": "open_project_search",  # Ctrl+Shift+F
         "<F11>": "toggle_focus_mode",
+        "<F1>": "show_shortcuts",
         "<Escape>": "cancel_running_generation",
     }
 
@@ -158,6 +160,9 @@ class MenuMixin:
             # En la ventana principal (no bind_all): Esc dentro de un dialogo
             # no debe cancelar una generacion.
             self.bind(sequence, lambda _e, m=method: (m(), "break")[1])
+        # Ctrl+1 … Ctrl+8: las pestañas, en orden (UI6).
+        for number, name in enumerate(self.tab_names, start=1):
+            self.bind(f"<Control-Key-{number}>", lambda _e, n=name: (self.tabview.set(n), "break")[1])
         # El cuadro de texto de Tk trae Ctrl+O = "insertar salto de linea" y
         # Ctrl+F = "avanzar un caracter": sin quitarlos, el atajo tambien
         # editaria el texto.
@@ -165,6 +170,14 @@ class MenuMixin:
         self.bind_class("Text", "<Control-f>", "")
         # Cualquier tecla puede dejar cambios sin guardar (F10).
         self.bind_all("<KeyRelease>", lambda _e: self.schedule_dirty_check(), add="+")
+
+    def show_shortcuts(self) -> None:
+        """Ayuda > Atajos de teclado (F1)."""
+        from .ui_dialogs import TextViewerDialog
+
+        width = max(len(keys) for keys, _action in S.ATAJOS_LISTA)
+        text = "\n".join(f"{keys.ljust(width)}   {action}" for keys, action in S.ATAJOS_LISTA)
+        TextViewerDialog(self, S.ATAJOS_DE_TECLADO, text)
 
     def cancel_running_generation(self) -> None:
         """Esc: cancela la generacion de capitulo (o tarea) en curso."""

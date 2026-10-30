@@ -69,7 +69,7 @@ Source: "..\models\README.txt"; DestDir: "{app}\models"; Flags: ignoreversion
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"
-Name: "{autoprograms}\{#AppName} en el celular"; Filename: "{app}\{#AppExe}"; Parameters: "--servidor"; Comment: "Usa StoryForge desde el navegador del celular (misma red Wi-Fi)"
+Name: "{autoprograms}\{#AppName} en el celular"; Filename: "{app}\{#AppExe}"; Parameters: "--servidor --lan"; Comment: "Activa acceso explícito desde el celular en la misma red Wi-Fi (HTTP sin cifrar)"
 Name: "{autoprograms}\{#AppName} - Generador de historias"; Filename: "{app}\{#AppExe}"; Parameters: "--generador"; Comment: "Una historia completa de una vez, desde el navegador"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
 

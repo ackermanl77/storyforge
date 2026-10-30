@@ -360,12 +360,16 @@ class TestHttp(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"HTTP sin cifrar", body)
         self.assertIn(b"no expongas el puerto a Internet", body)
+        self.assertIn(b"solo acepta conexiones desde esta PC", body)
+        self.assertIn(b"--servidor --lan", body)
         status, _ = self.request(conn, "GET", "/../app/web_server.py", token="")
         self.assertEqual(status, 404)
         # The connect page's data (with the key) answers the PC itself only.
         status, body = self.request(conn, "GET", "/api/conexion", token="")
         self.assertEqual(status, 200)
-        self.assertIn("t=" + "k" * 24, json.loads(body)["url"])
+        connection = json.loads(body)
+        self.assertIn("t=" + "k" * 24, connection["url"])
+        self.assertFalse(connection["lan_enabled"])
         conn.close()
 
     def test_export_downloads_with_a_file_name(self):
@@ -378,6 +382,28 @@ class TestHttp(unittest.TestCase):
         self.assertIn('filename="Libro.txt"', response.getheader("Content-Disposition"))
         conn.close()
 
+    def test_server_binds_to_localhost_by_default(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = create_server(FakeEngine(), tmp, port=0, token="k" * 24)
+            try:
+                self.assertEqual(server.server_address[0], "127.0.0.1")
+                self.assertIsNone(server.phone_url)
+                self.assertIn("127.0.0.1", server.local_url)
+            finally:
+                server.server_close()
+                server.service.stop()
+
+    def test_server_binds_to_lan_only_when_requested(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            server = create_server(FakeEngine(), tmp, port=0, host=web_server.LAN_HOST, token="k" * 24)
+            try:
+                self.assertEqual(server.server_address[0], web_server.LAN_HOST)
+                self.assertIsNotNone(server.phone_url)
+                self.assertIn("t=" + "k" * 24, server.phone_url)
+            finally:
+                server.server_close()
+                server.service.stop()
+
 
 class TestMisc(unittest.TestCase):
     def test_command_line(self):
@@ -386,10 +412,41 @@ class TestMisc(unittest.TestCase):
         self.assertEqual(args.puerto, 9000)
         self.assertTrue(args.sin_navegador)
         self.assertFalse(_parse_args([]).servidor)
+        self.assertFalse(_parse_args(["--servidor"]).lan)
+        self.assertTrue(_parse_args(["--servidor", "--lan"]).lan)
+        with self.assertRaises(SystemExit):
+            _parse_args(["--lan"])
 
     def test_phone_server_startup_message_warns_about_plain_http(self):
         self.assertIn("HTTP no cifra el tráfico", web_server.S.WEB_SERVIDOR_LISTO)
         self.assertIn("No abras el puerto a Internet", web_server.S.WEB_SERVIDOR_LISTO)
+        self.assertIn("HTTP no cifra el tráfico", web_server.S.WEB_SERVIDOR_LOCAL_LISTO)
+        self.assertIn("--lan", web_server.S.WEB_SERVIDOR_LOCAL_LISTO)
+
+    def test_cli_passes_lan_opt_in_to_server_startup(self):
+        from app.main import main
+
+        old_excepthook = sys.excepthook
+        try:
+            with mock.patch("app.main._configure_logging"), mock.patch(
+                "app.web_server.serve", return_value=0
+            ) as serve:
+                self.assertEqual(main(["--servidor", "--lan", "--sin-navegador"]), 0)
+            self.assertTrue(serve.call_args.kwargs["lan"])
+        finally:
+            sys.excepthook = old_excepthook
+
+    def test_server_startup_chooses_loopback_or_lan_bind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for lan, expected_host in ((False, web_server.DEFAULT_HOST), (True, web_server.LAN_HOST)):
+                server = mock.Mock()
+                server.service.projects_dir = tmp
+                server.serve_forever.side_effect = KeyboardInterrupt
+                with mock.patch("app.engine.LocalStoryEngine"), mock.patch.object(
+                    web_server, "create_server", return_value=server
+                ) as create, mock.patch.object(web_server, "_show"):
+                    self.assertEqual(web_server.serve(projects_dir=tmp, open_browser=False, lan=lan), 0)
+                self.assertEqual(create.call_args.kwargs["host"], expected_host)
 
     def test_models_are_also_found_next_to_the_last_loaded_model_and_in_the_models_option(self):
         with tempfile.TemporaryDirectory() as tmp:

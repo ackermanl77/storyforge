@@ -51,12 +51,16 @@ def _parse_args(argv):
     parser = argparse.ArgumentParser(prog="StoryForge")
     parser.add_argument("--servidor", action="store_true", help=S.WEB_AYUDA_SERVIDOR)
     parser.add_argument("--generador", action="store_true", help=S.WEB_AYUDA_GENERADOR)
+    parser.add_argument("--lan", action="store_true", help=S.WEB_AYUDA_LAN)
     parser.add_argument("--puerto", type=int, default=DEFAULT_PORT, help=S.WEB_AYUDA_PUERTO.format(port=DEFAULT_PORT))
     parser.add_argument("--carpeta", default=None, help=S.WEB_AYUDA_CARPETA)
     parser.add_argument("--modelos", default=None, help=S.WEB_AYUDA_MODELOS)
     parser.add_argument("--sin-navegador", action="store_true", help=S.WEB_AYUDA_SIN_NAVEGADOR)
     # parse_known_args: un argumento ajeno (p.ej. un archivo soltado sobre el .exe) no impide abrir la app.
-    return parser.parse_known_args(argv)[0]
+    args = parser.parse_known_args(argv)[0]
+    if args.lan and not (args.servidor or args.generador):
+        parser.error("--lan requiere --servidor o --generador.")
+    return args
 
 
 def main(argv=None) -> int:
@@ -75,7 +79,7 @@ def main(argv=None) -> int:
         from .web_server import serve
 
         return serve(port=args.puerto, projects_dir=args.carpeta, open_browser=not args.sin_navegador,
-                     models_dir=args.modelos, generator_page=args.generador)
+                     models_dir=args.modelos, generator_page=args.generador, lan=args.lan)
     from .gui import run
     run()
     return 0

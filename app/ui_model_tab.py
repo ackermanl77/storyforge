@@ -87,17 +87,19 @@ class ModelTabMixin:
 
         row = ctk.CTkFrame(tab, fg_color="transparent")
         row.grid(row=1, column=0, sticky="ew", padx=10)
-        row.grid_columnconfigure(0, weight=1)
+        # La lista de modelos en su propia fila, a todo el ancho: junto a los tres botones
+        # quedaba reducida a "(s" en una ventana angosta (UI4).
+        row.grid_columnconfigure((0, 1, 2), weight=1)
         self.model_combo = ctk.CTkComboBox(
             row, values=self._list_models() or [NO_MODELS_LABEL], command=self._on_model_selected,
         )
-        self.model_combo.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        self.model_combo.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0, 6))
         self.refresh_models_btn = ctk.CTkButton(row, text=S.ACTUALIZAR_LISTA, command=self._refresh_models)
-        self.refresh_models_btn.grid(row=0, column=1, padx=4)
+        self.refresh_models_btn.grid(row=1, column=0, sticky="ew", padx=(0, 4))
         self.browse_model_btn = ctk.CTkButton(row, text=S.ELEGIR_ARCHIVO, command=self._browse_model)
-        self.browse_model_btn.grid(row=0, column=2, padx=4)
+        self.browse_model_btn.grid(row=1, column=1, sticky="ew", padx=4)
         self.load_model_btn = ctk.CTkButton(row, text=S.CARGAR_MODELO, command=self._load_model)
-        self.load_model_btn.grid(row=0, column=3, padx=4)
+        self.load_model_btn.grid(row=1, column=2, sticky="ew", padx=(4, 0))
 
         self.model_info_label = ctk.CTkLabel(tab, text="", text_color=COLOR_MUTED, wraplength=900, justify="left")
         self.model_info_label.grid(row=2, column=0, sticky="w", padx=10, pady=(6, 0))

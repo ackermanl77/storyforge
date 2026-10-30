@@ -40,6 +40,65 @@ UNDO_TEXTBOX_OPTIONS = dict(undo=True, autoseparators=True, maxundo=-1)
 # Borde del cuadro de un capitulo mientras el modelo escribe en el (solo lectura).
 GENERATING_BORDER_COLOR = "#c9a227"
 SELECTED_SIDEBAR_COLOR = ("#9cc3ec", "#3a5f8a")
+# Tamaño de la ventana la primera vez, y cuanto de la pantalla puede ocupar como mucho (UI5).
+DEFAULT_WINDOW_SIZE = (1100, 800)
+MAX_SCREEN_SHARE = 0.92
+
+
+def fit_window_geometry(saved: str, screen_w: int, screen_h: int) -> str:
+    """La geometria guardada ("AnchoxAlto+X+Y"), o la de por defecto, recortada para que quepa en
+    una pantalla de screen_w x screen_h (en las mismas unidades); sin posicion si la guardada queda
+    fuera de la pantalla (un monitor que ya no esta)."""
+    import re
+
+    match = re.fullmatch(r"(\d+)x(\d+)(?:([+-]-?\d+)([+-]-?\d+))?", (saved or "").strip())
+    width, height = (int(match.group(1)), int(match.group(2))) if match else DEFAULT_WINDOW_SIZE
+    width = max(600, min(width, int(screen_w * MAX_SCREEN_SHARE)))
+    height = max(500, min(height, int(screen_h * MAX_SCREEN_SHARE)))
+    if match and match.group(3) is not None:
+        x, y = int(match.group(3).replace("+-", "-")), int(match.group(4).replace("+-", "-"))
+        if 0 <= x <= screen_w - 100 and 0 <= y <= screen_h - 100:
+            x, y = min(x, max(0, screen_w - width)), min(y, max(0, screen_h - height))
+            return f"{width}x{height}+{x}+{y}"
+    return f"{width}x{height}"
+
+
+# Lo que la etiqueta deja libre a los lados dentro de su contenedor (padx y borde).
+WRAP_MARGIN = 28
+
+
+def fit_label_wrap(label, container=None) -> None:
+    """Ajusta el ancho de linea de una etiqueta con wraplength al de su contenedor.
+
+    Las etiquetas de ayuda se crean con un wraplength fijo (900 y parecidos): en una
+    ventana mas angosta el texto salia cortado por los dos lados (UI4). El valor fijo
+    queda como tope y la etiqueta se reajusta cada vez que el contenedor cambia de tamaño."""
+    cap = label.cget("wraplength")
+    if not cap or getattr(label, "_wrap_cap", None) is not None:
+        return
+    label._wrap_cap = cap
+    container = container or label.master
+
+    def refit(_event=None) -> None:
+        if not label.winfo_exists():
+            return
+        room = int(container.winfo_width() / label._get_widget_scaling()) - WRAP_MARGIN
+        if room > 80 and min(cap, room) != label.cget("wraplength"):
+            label.configure(wraplength=min(cap, room))
+
+    container.bind("<Configure>", refit, add="+")
+    refit()
+
+
+def keep_labels_inside(root) -> None:
+    """fit_label_wrap() para toda etiqueta que se muestre en la app, tambien las de los
+    dialogos y las que se crean despues (se engancha al <Map> de su tk.Label interno)."""
+    def on_map(event) -> None:
+        label = getattr(event.widget, "master", None)
+        if isinstance(label, ctk.CTkLabel):
+            fit_label_wrap(label)
+
+    root.bind_all("<Map>", on_map, add="+")
 
 
 def _set_text_readonly_content(box, text: str) -> None:

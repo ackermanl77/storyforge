@@ -35,6 +35,8 @@ UI_DEFAULTS = {
     "editor_font_size": 14,
     "editor_line_spacing": 4,
     "models_dir": "",       # carpeta de modelos adicional (p.ej. fuera de OneDrive)
+    "window_geometry": "",  # "AnchoxAlto+X+Y" de la ultima sesion (UI5); "" = el tamaño por defecto
+    "window_zoomed": False,
 }
 
 

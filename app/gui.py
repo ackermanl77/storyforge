@@ -63,6 +63,8 @@ from .ui_chapters_tab import ChaptersTabMixin
 from .ui_common import (
     APP_TITLE,
     MODELS_DIR,
+    fit_window_geometry,
+    keep_labels_inside,
 )
 from .ui_dialogs import (
     DiffPreviewDialog,
@@ -149,8 +151,10 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         super().__init__()
         self.prefs = get_ui_preferences()
         self._apply_global_preferences()
-        self.geometry("1100x800")
+        self._restore_window_geometry()
         self._set_window_icon()
+        # El texto de ayuda se ajusta al ancho de la ventana en vez de cortarse (UI4).
+        keep_labels_inside(self)
 
         self.project = Project()
         self.engine = LocalStoryEngine()
@@ -340,6 +344,9 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         self.tab_notes = self.tabview.add(S.TAB_NOTAS)
         self.tab_outline = self.tabview.add(S.TAB_ESQUEMA)
         self.tab_chapters = self.tabview.add(S.TAB_CAPITULOS)
+        # En orden, para Ctrl+1 … Ctrl+8 (UI6).
+        self.tab_names = [S.TAB_MODELO, S.TAB_PLOT, S.TAB_PERSONAJES, S.TAB_SETTING, S.TAB_LOREBOOK, S.TAB_NOTAS,
+                          S.TAB_ESQUEMA, S.TAB_CAPITULOS]
 
         self._build_model_tab()
         self._build_plot_tab()
@@ -715,7 +722,28 @@ class StoryForgeApp(MenuMixin, ModelTabMixin, StoryTabsMixin, LorebookTabMixin, 
         # Sin cambios, guardado, o descartado a proposito: no ofrecer
         # "recuperar" en el proximo arranque.
         self._discard_autosave()
+        self._save_window_geometry()
         self.destroy()
+
+    # Tamaño y posicion de la ventana entre sesiones (UI5), siempre dentro de la pantalla actual.
+    def _screen_size(self) -> tuple[int, int]:
+        """La pantalla en las unidades de geometry() de CustomTkinter (pixeles / escala de ventana)."""
+        scale = self._get_window_scaling() or 1.0
+        return int(self.winfo_screenwidth() / scale), int(self.winfo_screenheight() / scale)
+
+    def _restore_window_geometry(self) -> None:
+        self.geometry(fit_window_geometry(self.prefs.get("window_geometry", ""), *self._screen_size()))
+        if self.prefs.get("window_zoomed"):
+            self.after(0, lambda: self.state("zoomed"))
+
+    def _save_window_geometry(self) -> None:
+        try:
+            zoomed = self.state() == "zoomed"
+            if zoomed:
+                self.state("normal")  # la geometria de la ventana sin maximizar
+            set_ui_preferences({"window_geometry": self.geometry(), "window_zoomed": zoomed})
+        except Exception:  # pragma: no cover - recordar el tamaño nunca impide cerrar
+            logger.exception("no se pudo guardar el tamaño de la ventana")
 
     def save_project(self) -> bool:
         """Devuelve True si el proyecto quedo guardado (False si se cancelo o fallo)."""

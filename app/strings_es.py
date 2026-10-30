@@ -238,10 +238,25 @@ CTRL_SHIFT_F = "Ctrl+Shift+F"
 MENU_EDITAR = "Editar"
 MODO_ENFOQUE = "Modo enfoque"
 F11 = "F11"
+F1 = "F1"
 VER_EL_ULTIMO_PROMPT_ENVIADO = "Ver el último prompt enviado"
 MENU_VER = "Ver"
 ACERCA_DE_STORYFORGE = "Acerca de StoryForge"
 ABRIR_CARPETA_DE_REGISTROS = "Abrir carpeta de registros"
+ATAJOS_DE_TECLADO = "Atajos de teclado"
+# Ayuda > Atajos de teclado (UI6): (teclas, accion); se muestran tal cual.
+ATAJOS_LISTA = [
+    ("Ctrl+1 … Ctrl+8", "Ir a la pestaña 1 a 8 (Modelo … Capítulos)"),
+    ("Ctrl+N / Ctrl+O", "Proyecto nuevo / abrir"),
+    ("Ctrl+S / Ctrl+Mayús+S", "Guardar / guardar como"),
+    ("Ctrl+F", "Buscar y reemplazar en el capítulo"),
+    ("Ctrl+Mayús+F", "Buscar en todo el proyecto"),
+    ("Ctrl+Enter", "Generar el capítulo (en el cuadro del capítulo)"),
+    ("Esc", "Detener la generación en curso"),
+    ("Ctrl+Z / Ctrl+Y", "Deshacer / rehacer en un cuadro de texto"),
+    ("F11", "Modo enfoque"),
+    ("F1", "Esta lista"),
+]
 MENU_AYUDA = "Ayuda"
 
 # ---- app/ui_model_tab.py ----
@@ -728,15 +743,25 @@ WEB_SERVIDOR_LISTO = (
     "  En la PC:      {local_url}\n"
     "  En el celular: {phone_url}\n"
     "  (el celular tiene que estar en la misma red Wi-Fi que la PC)\n"
+    "  Acceso por LAN activado con --lan.\n"
     "  Seguridad: HTTP no cifra el tráfico; usa solo una Wi-Fi privada y de confianza. No abras el puerto a Internet.\n"
     "  Proyectos en:  {projects_dir}\n"
     "Ctrl+C para detener el servidor."
 )
-WEB_AYUDA_SERVIDOR = "Usa StoryForge desde el celular: inicia un servidor web en la red local en vez de la ventana."
+WEB_SERVIDOR_LOCAL_LISTO = (
+    "StoryForge está listo solo en esta PC.\n"
+    "  En la PC:      {local_url}\n"
+    "  Seguridad: HTTP no cifra el tráfico. Solo esta PC puede conectarse; no abras el puerto a Internet.\n"
+    "  Para permitir el acceso desde la red local, reinicia con --lan y usa una Wi-Fi privada y de confianza.\n"
+    "  Proyectos en:  {projects_dir}\n"
+    "Ctrl+C para detener el servidor."
+)
+WEB_AYUDA_SERVIDOR = "Abre StoryForge en el navegador de esta PC; el acceso por LAN requiere --lan."
 WEB_AYUDA_PUERTO = "Puerto del servidor (por defecto {port})."
 WEB_AYUDA_CARPETA = "Carpeta de proyectos del servidor (se recuerda para la próxima vez)."
 WEB_AYUDA_MODELOS = "Carpeta extra donde buscar modelos .gguf (se recuerda para la próxima vez)."
 WEB_AYUDA_SIN_NAVEGADOR = "No abrir la página de conexión en el navegador de la PC."
+WEB_AYUDA_LAN = "Permite que otros dispositivos de la red local se conecten (HTTP sin cifrar; no abrir a Internet)."
 
 # Errores de Python, del sistema y de llama.cpp explicados en español
 # (app/error_text.describe_exception: lo que se muestra en vez del texto en inglés).

@@ -811,9 +811,10 @@ Puedes escribir desde el navegador del celular mientras el modelo sigue
 corriendo en tu PC (no hace falta instalar nada en el celular).
 
 1. En la PC, abre **"StoryForge Local en el celular"** desde el menú Inicio
-   (o ejecuta `StoryForge.exe --servidor`; sin empaquetar:
-   `python storyforge.py --servidor`). En lugar de la ventana de siempre se
-   abre en el navegador de la PC una página con un **código QR**.
+   (ese acceso directo activa explícitamente el acceso por LAN), o ejecuta
+   `StoryForge.exe --servidor --lan`; sin empaquetar:
+   `python storyforge.py --servidor --lan`. En lugar de la ventana de siempre
+   se abre en el navegador de la PC una página con un **código QR**.
 2. Si Windows pregunta si StoryForge puede usar la red, permítelo en
    **redes privadas**.
 3. Con el celular conectado a la **misma red Wi-Fi**, escanea el QR (o
@@ -828,7 +829,7 @@ corriendo en tu PC (no hace falta instalar nada en el celular).
 
 Cosas a tener en cuenta:
 
-- El servidor usa **HTTP sin cifrar**: alguien que observe la red podría ver la clave del enlace, el texto y otros datos. Úsalo solo en una Wi-Fi privada y de confianza; no uses una red pública ni abras el puerto a Internet. Para acceder desde fuera de la LAN hace falta decidir un mecanismo seguro externo (por ejemplo, una VPN privada o HTTPS con un certificado confiable); StoryForge no configura TLS ni administra certificados.
+- `--servidor` sin `--lan` solo acepta conexiones desde esta PC; el acceso por LAN requiere el opt-in explícito `--lan`. El servidor usa **HTTP sin cifrar**: alguien que observe la red podría ver la clave del enlace, el texto y otros datos. Con `--lan`, úsalo solo en una Wi-Fi privada y de confianza; no uses una red pública ni abras el puerto a Internet. Para acceder desde fuera de la LAN hace falta decidir un mecanismo seguro externo (por ejemplo, una VPN privada o HTTPS con un certificado confiable); StoryForge no configura TLS ni administra certificados.
 - El enlace lleva una **clave de acceso**: quien lo tenga y esté en tu red
   puede usar StoryForge. No lo compartas. Sigue sirviendo después de
   reiniciar el servidor.
@@ -857,7 +858,9 @@ expone sus controles a Windows: **un lector de pantalla (Narrador, NVDA, JAWS)
 no puede leerla**. Para usar StoryForge con lector de pantalla o solo con el
 teclado, usa la **versión de navegador** (ver *Usar StoryForge desde el
 celular*), que funciona igual en el navegador de la propia PC: abre
-`StoryForge.exe --servidor` y usa el enlace que muestra. Allí cada botón,
+`StoryForge.exe --servidor` (sin `--lan`) y usa el enlace que muestra. El
+servidor queda limitado a esta PC; para abrirlo desde el celular agrega
+`--lan`. Allí cada botón,
 campo y lista tiene nombre, la página tiene títulos para saltar entre
 secciones, y los proyectos y capítulos se abren con **Tab** y **Enter**.
 

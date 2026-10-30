@@ -16,20 +16,21 @@
   </style>
 </head>
 <body>
-  <header class="top"><div class="brand">StoryForge en el celular</div></header>
+  <header class="top"><div class="brand">StoryForge</div></header>
   <main>
     <div class="card">
-      <h2>Escanea este código con el celular</h2>
+      <h2 id="connect-title">Acceso local</h2>
       <p class="muted small"><strong>Seguridad:</strong> la conexión usa HTTP sin cifrar; la clave del enlace y el texto pueden ser observados en la red. Usa solo una Wi-Fi privada y de confianza; no expongas el puerto a Internet.</p>
+      <p id="local-only" class="muted small hidden">Este servidor solo acepta conexiones desde esta PC. Para permitir el acceso desde el celular, reinícialo con <code>--servidor --lan</code>; esto expone el servidor a la red local.</p>
       <div id="qr"></div>
       <p id="qr-fallback" class="muted small hidden">No se pudo dibujar el código QR (hace falta internet en la PC para cargarlo). Escribe el enlace de abajo en el navegador del celular.</p>
-      <p class="muted small">O abre este enlace en el celular:</p>
+      <p id="link-intro" class="muted small hidden">O abre este enlace en el celular:</p>
       <p id="url"></p>
-      <button id="copy" class="btn small">Copiar enlace</button>
+      <button id="copy" class="btn small hidden">Copiar enlace</button>
     </div>
     <div class="card">
       <h2>Cómo usarlo</h2>
-      <ol>
+      <ol id="lan-instructions">
         <li>El celular tiene que estar conectado a la <strong>misma red Wi-Fi</strong> que esta PC.</li>
         <li>Si Windows pregunta si StoryForge puede usar la red, permítelo en <strong>redes privadas</strong>.</li>
         <li>En el celular, usa "Agregar a la pantalla de inicio" del navegador para abrirlo como una app.</li>
@@ -53,12 +54,27 @@
     "use strict";
     (async function () {
       const info = await (await fetch("/api/conexion")).json();
+      const localOnly = !info.lan_enabled;
+      const title = localOnly ? "StoryForge en esta PC" : "StoryForge en el celular";
+      document.title = title;
+      document.querySelector(".brand").textContent = title;
+      document.getElementById("connect-title").textContent = localOnly
+        ? "Acceso solo en esta PC"
+        : "Escanea este código con el celular";
+      if (localOnly) {
+        document.getElementById("qr").classList.add("hidden");
+        document.getElementById("local-only").classList.remove("hidden");
+        document.getElementById("lan-instructions").classList.add("hidden");
+      } else {
+        document.getElementById("link-intro").classList.remove("hidden");
+        document.getElementById("copy").classList.remove("hidden");
+      }
       document.getElementById("url").textContent = info.url;
       document.getElementById("generator").href = "/generador" + new URL(info.url).search;
       document.getElementById("folder").textContent = "Proyectos del servidor: " + info.carpeta;
-      if (window.QRCode) {
+      if (!localOnly && window.QRCode) {
         new QRCode(document.getElementById("qr"), { text: info.url, width: 240, height: 240, correctLevel: QRCode.CorrectLevel.M });
-      } else {
+      } else if (!localOnly) {
         document.getElementById("qr").classList.add("hidden");
         document.getElementById("qr-fallback").classList.remove("hidden");
       }
